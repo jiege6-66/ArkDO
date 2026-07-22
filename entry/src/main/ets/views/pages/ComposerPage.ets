@@ -748,8 +748,8 @@ export struct ComposerPage {
             .fontColor([$r('app.color.text_secondary')])
             .renderingStrategy(SymbolRenderingStrategy.SINGLE)
         }
-        .width(32)
-        .height(32)
+        .width(40)
+        .height(40)
         .backgroundColor($r('app.color.surface_muted'))
         .onClick(() => {
           this.closeSheet(which);
