@@ -29,7 +29,8 @@ import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/Comment
 import { ComposerPage, COMPOSER_ANIM_MS } from './ComposerPage';
 import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { TopicScrubber } from '../components/TopicScrubber';
-import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { floatingActionBottomMargin } from '../../common/ui/FloatingActionLayout';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SHADOW_SOFT } from '../../common/theme/Palette';
 
@@ -59,6 +60,7 @@ export struct TopicDetailPage {
   // 窗口常驻全屏布局:主内容列自行避让状态栏(padding 在带背景的列上,背景填满状态栏条);
   // 评论浮层/遮罩留在根 Stack 层不加避让,天然盖满整屏。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
+  @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
   @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
   // detail 整体加载/替换时经 @Watch 从 detail.bookmarked 同步;楼层 toggle 收藏后由回调直接改写实现即时联动。
@@ -500,7 +502,7 @@ export struct TopicDetailPage {
       })
       .width(52)
       .height(52)
-      .margin({ right: 16, bottom: 16 })
+      .margin({ right: 16, bottom: floatingActionBottomMargin(this.sysBottomInset) })
       // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
       .transition(TransitionEffect.asymmetric(
         TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),

@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { TopicCategory } from '../../models/Topic';
 import { SolvedPostItem, SolvedPostPage } from '../../models/UserProfile';
 import { RelativeTime } from '../../common/utils/RelativeTime';
@@ -8,8 +9,15 @@ import { UserProfileService } from '../../services/user/UserProfileService';
 import { TopicMetadataBadges } from '../components/TopicBadges';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
-import { PageHeader } from '../components/PageHeader';
 import { ListFooter } from '../components/ListFooter';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][SolvedPostsPage]';
 const PAGE_PADDING: number = 16;
@@ -42,6 +50,7 @@ export struct SolvedPostsPage {
   private service?: UserProfileService = undefined;
   private categoryIndex: CategoryIndex = new CategoryIndex();
   private loading: boolean = false;
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -52,63 +61,102 @@ export struct SolvedPostsPage {
   }
 
   build() {
-    Column() {
-      PageHeader({
-        title: this.getPageTitle(),
-        onBack: () => {
-          this.onBack();
-        }
-      })
-
+    HdsNavigation() {
       this.Content()
     }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+          enableRefreshOffsetChange: true
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: this.getPageTitle()
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private Content() {
     if (this.items.length === 0) {
-      LoadStateView({
-        isLoading: this.isInitialLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '加载失败',
-        showRetry: this.loadFailed,
-        emptyTitle: '还没有被采纳的答案',
-        onRetry: () => {
-          this.loadInitial();
-        }
-      })
+      Column() {
+        LoadStateView({
+          isLoading: this.isInitialLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '加载失败',
+          showRetry: this.loadFailed,
+          emptyTitle: '还没有被采纳的答案',
+          onRetry: () => {
+            this.loadInitial();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
-          ForEach(this.items, (item: SolvedPostItem, index: number) => {
-            ListItem() {
-              this.SolvedRow(item)
-            }
-          }, (item: SolvedPostItem, index: number) => `${item.topicId}_${item.postNumber}_${index}`)
+        List({ scroller: this.scroller }) {
+          ListItemGroup({ header: this.TitleBarListHeader }) {
+            ForEach(this.items, (item: SolvedPostItem, index: number) => {
+              ListItem() {
+                this.SolvedRow(item)
+              }
+            }, (item: SolvedPostItem, index: number) => `${item.topicId}_${item.postNumber}_${index}`)
 
-          ListItem() {
-            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            ListItem() {
+              ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            }
           }
+          .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
         }
         .width('100%')
-        .layoutWeight(1)
-        .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMore();
         })
       }
-      .layoutWeight(1)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .onRefreshing(() => {
         this.loadInitial();
       })
     }
+  }
+
+  @Builder
+  private TitleBarListHeader() {
+    Column() {
+      Blank()
+        .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+    }
+    .width('100%')
   }
 
   // 单行:绿勾 + 右侧(话题标题 / 分类 + 时间 / 绿线引用答案)。

@@ -70,11 +70,11 @@
     },
     {
       "name": "page_bg_gray",
-      "value": "#121417"
+      "value": "#000000"
     },
     {
       "name": "surface_card",
-      "value": "#1F2228"
+      "value": "#191919"
     },
     {
       "name": "text_faint",
@@ -138,7 +138,7 @@
     },
     {
       "name": "connect_card",
-      "value": "#1C1C1C"
+      "value": "#191919"
     },
     {
       "name": "connect_border",

@@ -1,11 +1,19 @@
 import { Log } from '../../services/logging/Log';
 import { common } from '@kit.AbilityKit';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { DohManager, DohResolveMode, DohServer } from '../../services/network/DohManager';
 import { DohSpeedTester, DohTestResult } from '../../services/network/DohSpeedTester';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
-import { PageHeader } from '../components/PageHeader';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][DohPage]';
 
@@ -142,6 +150,7 @@ export struct DohSettingsPage {
   @State private dohEnabled: boolean = true;
   @State private activeId: string = '';
   @State private mode: DohResolveMode = DohResolveMode.AUTO;
+  private scroller: Scroller = new Scroller();
 
   private addDialog: CustomDialogController = new CustomDialogController({
     builder: AddDohDialog({
@@ -161,96 +170,113 @@ export struct DohSettingsPage {
     this.reload();
   }
 
-  // 头栏尾部新增按钮。
-  @Builder
-  private HeaderAddButton() {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(24)
-        .fontColor([$r('app.color.text_primary')])
-        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-    }
-    .width(40)
-    .height(40)
-    .backgroundColor($r('app.color.surface_muted'))
-    .onClick(() => {
-      this.addDialog.open();
-    })
-  }
-
   build() {
-    Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg_gray'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      Column() {
-        this.TitleBar()
-
-        Scroll() {
-          Column() {
-            this.EnableCard()
-            this.ServerListCard()
-
-            Button('一键测速全部')
-              .width('100%')
-              .height(44)
-              .margin({ top: CARD_GAP })
-              .backgroundColor($r('app.color.surface_card'))
-              .fontColor($r('app.color.ld_accent'))
-              .fontSize(15)
-              .onClick(() => {
-                this.testAll();
-              })
-
-            this.ModeCard()
-
-            Text('DoH 用加密的 HTTPS 通道解析域名,绕过被污染的本地 DNS。仅对内置浏览器内核生效。')
-              .fontSize(12)
-              .fontColor($r('app.color.text_faint'))
-              .width('100%')
-              .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14 })
-
-            Row()
-              .width('100%')
-              .height(40)
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.DohScrollableContent()
+      this.DohTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // ==================== Builder ====================
 
   @Builder
-  private TitleBar() {
-    PageHeader({
-      title: 'DoH 配置',
-      paddingRight: 12,
-      onBack: () => {
-        this.onBack();
+  private DohScrollableContent() {
+    Scroll(this.scroller) {
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        this.EnableCard()
+        this.ServerListCard()
+
+        Button('一键测速全部')
+          .width('100%')
+          .height(44)
+          .margin({ top: CARD_GAP })
+          .backgroundColor($r('app.color.surface_card'))
+          .fontColor($r('app.color.ld_accent'))
+          .fontSize(15)
+          .onClick(() => {
+            this.testAll();
+          })
+
+        this.ModeCard()
+
+        Text('DoH 用加密的 HTTPS 通道解析域名,绕过被污染的本地 DNS。仅对内置浏览器内核生效。')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14 })
+
+        Row()
+          .width('100%')
+          .height(40)
+      }
+      .width('100%')
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private DohTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
       },
-      trailing: (): void => {
-        this.HeaderAddButton();
+      content: {
+        title: {
+          mainTitle: 'DoH 配置'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: {
+          value: [{
+            content: {
+              icon: $r('sys.symbol.plus'),
+              label: '添加 DoH',
+              isEnabled: true,
+              action: () => {
+                this.addDialog.open();
+              }
+            }
+          }]
+        }
       }
     })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder

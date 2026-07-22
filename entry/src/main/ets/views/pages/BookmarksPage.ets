@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { LoginGate } from '../../services/session/LoginGate';
 import { Bookmark, BookmarkPage } from '../../models/Bookmark';
 import { TopicCategory } from '../../models/Topic';
@@ -12,8 +13,15 @@ import { TopicMetadataBadges } from '../components/TopicBadges';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
-import { PageHeader } from '../components/PageHeader';
 import { ListFooter } from '../components/ListFooter';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][BookmarksPage]';
 const PAGE_PADDING: number = 16;
@@ -41,6 +49,7 @@ export struct BookmarksPage {
   private categoryIndex: CategoryIndex = new CategoryIndex();
   private moreUrl: string = '';
   private loading: boolean = false;
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -50,88 +59,109 @@ export struct BookmarksPage {
     this.loadInitial();
   }
 
-
-  // 头栏尾部书签计数。必须是无参 @Builder 直读 this.bookmarks——
-  // @Builder 的按值参数不随 @State 重绘,把 count 传进来会导致数字刷不上屏。
-  @Builder
-  private HeaderCount() {
-    if (this.bookmarks.length > 0) {
-      Text(`${this.bookmarks.length}`)
-        .fontSize(14)
-        .fontColor($r('app.color.text_faint'))
-        .font({ family: 'HarmonyOS Sans' })
-        .padding({ right: 8 })
-    }
-  }
-
   build() {
-    Column() {
-      // 顶栏
-      PageHeader({
-        title: '书签',
-        onBack: () => {
-          this.onBack();
-        },
-        trailing: (): void => {
-          this.HeaderCount();
-        }
-      })
-
+    HdsNavigation() {
       this.Content()
     }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+          enableRefreshOffsetChange: true
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: this.bookmarks.length > 0 ? `书签 · ${this.bookmarks.length}` : '书签'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private Content() {
     if (this.bookmarks.length === 0) {
-      LoadStateView({
-        isLoading: this.isInitialLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '书签加载失败',
-        showRetry: this.loadFailed,
-        emptyIcon: $r('sys.symbol.bookmark'),
-        emptyTitle: '还没有书签',
-        emptySubtitle: '在帖子里点书签图标，就能把它存到这里随时回看',
-        onRetry: () => {
-          this.loadInitial();
-        }
-      })
+      Column() {
+        LoadStateView({
+          isLoading: this.isInitialLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '书签加载失败',
+          showRetry: this.loadFailed,
+          emptyIcon: $r('sys.symbol.bookmark'),
+          emptyTitle: '还没有书签',
+          emptySubtitle: '在帖子里点书签图标，就能把它存到这里随时回看',
+          onRetry: () => {
+            this.loadInitial();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
-          ForEach(this.bookmarks, (item: Bookmark) => {
-            ListItem() {
-              this.BookmarkRow(item)
-            }
-            // key 带上 pinned:置顶状态变化时 key 变,ForEach 才会重建该行,
-            // 否则标题图钉与菜单文案会停留在旧状态(id 不变 ForEach 视作未变)。
-          }, (item: Bookmark) => `${item.id}_${item.pinned}`)
+        List({ scroller: this.scroller }) {
+          ListItemGroup({ header: this.TitleBarListHeader }) {
+            ForEach(this.bookmarks, (item: Bookmark) => {
+              ListItem() {
+                this.BookmarkRow(item)
+              }
+              // key 带上 pinned:置顶状态变化时 key 变,ForEach 才会重建该行,
+              // 否则标题图钉与菜单文案会停留在旧状态(id 不变 ForEach 视作未变)。
+            }, (item: Bookmark) => `${item.id}_${item.pinned}`)
 
-          ListItem() {
-            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            ListItem() {
+              ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            }
           }
+          .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
         }
         .width('100%')
-        .layoutWeight(1)
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
         // 分割线由 List 统一管理:一条 1vp 实线,不受单条背景色与滚动像素对齐影响
         // (旧的每条 0.5vp 底边框在滚动时会被像素对齐抹掉、且在置顶行底色上几乎不可见)。
-        .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMore();
         })
       }
-      .layoutWeight(1)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .onRefreshing(() => {
         this.loadInitial();
       })
     }
+  }
+
+  @Builder
+  private TitleBarListHeader() {
+    Column() {
+      Blank()
+        .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+    }
+    .width('100%')
   }
 
   // 单条书签:上半部分对齐首页帖子行(头像 + 标题 + 分类/标签徽标),

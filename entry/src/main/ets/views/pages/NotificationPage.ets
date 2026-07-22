@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { NotificationItem } from '../../models/Notification';
 import { NotificationApi } from '../../services/notification/NotificationApi';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -7,8 +8,15 @@ import { JsonNetworkClient, NetworkResult } from '../../services/network/Network
 import { NotificationListItem } from '../components/NotificationListItem';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
-import { PageHeader } from '../components/PageHeader';
 import { ListFooter } from '../components/ListFooter';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][NotificationPage]';
 const PAGE_SIZE: number = 30;
@@ -32,6 +40,7 @@ export struct NotificationPage {
   @State private message: string = '';
   private api?: NotificationApi = undefined;
   private loading: boolean = false;
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -40,100 +49,126 @@ export struct NotificationPage {
     this.loadInitial();
   }
 
-
-  // 头栏尾部「全部已读」。无参 @Builder 直读状态:@Builder 按值参数不随 @State 重绘,
-  // 传 hasUnread 的布尔值进来会导致读完之后按钮不消失。
-  @Builder
-  private HeaderMarkAllRead() {
-    if (this.hasUnread()) {
-      Text('全部已读')
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.brand'))
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-        .onClick(() => {
-          this.markAllRead();
-        })
-    }
-  }
-
   build() {
-    Column() {
-      // 顶栏
-      PageHeader({
-        title: '通知',
-        onBack: () => {
-          this.onBack();
-        },
-        trailing: (): void => {
-          this.HeaderMarkAllRead();
-        }
-      })
-      .border({
-        width: { bottom: 1 },
-        color: $r('app.color.border')
-      })
-
+    HdsNavigation() {
       this.Content()
     }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+          enableRefreshOffsetChange: true
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: '通知'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: this.hasUnread() ? {
+          value: [{
+            content: {
+              icon: $r('sys.symbol.checkmark'),
+              label: '全部已读',
+              isEnabled: true,
+              action: () => {
+                this.markAllRead();
+              }
+            }
+          }]
+        } : undefined
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private Content() {
     if (this.items.length === 0) {
-      LoadStateView({
-        isLoading: this.isInitialLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '通知加载失败,请重试',
-        showRetry: this.loadFailed,
-        emptyTitle: '暂无通知',
-        onRetry: () => {
-          this.loadInitial();
-        }
-      })
+      Column() {
+        LoadStateView({
+          isLoading: this.isInitialLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '通知加载失败,请重试',
+          showRetry: this.loadFailed,
+          emptyTitle: '暂无通知',
+          onRetry: () => {
+            this.loadInitial();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
-          ForEach(this.items, (item: NotificationItem) => {
+        List({ scroller: this.scroller }) {
+          ListItemGroup({ header: this.TitleBarListHeader }) {
+            ForEach(this.items, (item: NotificationItem) => {
+              ListItem() {
+                NotificationListItem({
+                  item: item,
+                  onItemClick: (clicked: NotificationItem) => {
+                    this.handleItemClick(clicked);
+                  }
+                })
+              }
+            }, (item: NotificationItem) => `${item.id}_${item.read}`)
+
             ListItem() {
-              NotificationListItem({
-                item: item,
-                onItemClick: (clicked: NotificationItem) => {
-                  this.handleItemClick(clicked);
-                }
+              ListFooter({
+                isLoading: this.isLoadingMore,
+                hasMore: this.hasMore,
+                endText: '已到底',
+                accentColor: $r('app.color.brand'),
+                textColor: $r('app.color.text_secondary')
               })
             }
-          }, (item: NotificationItem) => `${item.id}_${item.read}`)
-
-          ListItem() {
-            ListFooter({
-              isLoading: this.isLoadingMore,
-              hasMore: this.hasMore,
-              endText: '已到底',
-              accentColor: $r('app.color.brand'),
-              textColor: $r('app.color.text_secondary')
-            })
           }
+          .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 70, endMargin: 0 })
         }
         .width('100%')
-        .layoutWeight(1)
-        .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 70, endMargin: 0 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMore();
         })
       }
-      .layoutWeight(1)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .onRefreshing(() => {
         this.loadInitial();
       })
     }
+  }
+
+  @Builder
+  private TitleBarListHeader() {
+    Column() {
+      Blank()
+        .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+    }
+    .width('100%')
   }
 
   private hasUnread(): boolean {

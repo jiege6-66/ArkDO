@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { Topic, TopicCategory } from '../../models/Topic';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -6,8 +7,15 @@ import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicListItem } from '../components/TopicListItem';
 import { LoadStateView } from '../components/LoadStateView';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
-import { PageHeader } from '../components/PageHeader';
 import { ListFooter } from '../components/ListFooter';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 
@@ -15,7 +23,6 @@ const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 // 只回当前登录用户读过的主题、按最近阅读排序。响应是标准 topic_list,整行复用首页 TopicListItem。
 @Component
 export struct ReadTopicsPage {
-  // 窗口常驻全屏布局:根列自行避让状态栏(padding 在带背景的根列上,背景填满状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
@@ -37,6 +44,7 @@ export struct ReadTopicsPage {
   // 已取到的最后一页页码,翻页时自增重拼路径(服务端只给 more_topics_url 的有无)。
   private currentPage: number = 0;
   private loading: boolean = false;
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -47,39 +55,70 @@ export struct ReadTopicsPage {
   }
 
   build() {
-    Column() {
-      PageHeader({
-        title: '已读',
-        onBack: () => {
-          this.onBack();
-        }
-      })
-
+    HdsNavigation() {
       this.Content()
     }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+          enableRefreshOffsetChange: true
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: '已读'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private Content() {
     if (this.topics.length === 0) {
-      LoadStateView({
-        isLoading: this.isInitialLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '加载失败',
-        showRetry: this.loadFailed,
-        emptyTitle: '还没有读过的帖子',
-        onRetry: () => {
-          this.loadInitial();
-        }
-      })
+      Column() {
+        LoadStateView({
+          isLoading: this.isInitialLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '加载失败',
+          showRetry: this.loadFailed,
+          emptyTitle: '还没有读过的帖子',
+          onRetry: () => {
+            this.loadInitial();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
+        List({ scroller: this.scroller }) {
+          ListItem() {
+            Column() {
+              Blank()
+                .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+            }
+            .width('100%')
+          }
+
           ForEach(this.topics, (topic: Topic) => {
             TopicListItem({
               topic: topic,
@@ -101,18 +140,23 @@ export struct ReadTopicsPage {
           }
         }
         .width('100%')
-        .layoutWeight(1)
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
         // 左右留白对齐首页帖子列表:TopicListItem 只带上下 padding,横向留白由 List 给。
         // 分隔线不用 List.divider:TopicListItem 自带底部 1px 边框,再加会画成两条。
         .padding({ left: 12, right: 12 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMore();
         })
       }
-      .layoutWeight(1)
+      .width('100%')
+      .height('100%')
+      .clip(false)
       // Refresh 会把子 List 裁剪到自身边界:子 List 的 expandSafeArea 穿不透,需在此同样声明。
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .pullToRefresh(true)
       .refreshOffset(64)
       .onRefreshing(() => {

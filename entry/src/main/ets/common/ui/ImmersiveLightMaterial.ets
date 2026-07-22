@@ -9,6 +9,7 @@ export const HDS_MATERIAL_TYPE_IMMERSIVE: number = 101;
 export const HDS_MATERIAL_LEVEL_GENTLE: number = 1;
 export const HDS_MATERIAL_LEVEL_SMOOTH: number = 2;
 export const HDS_MATERIAL_LEVEL_ADAPTIVE: number = 10;
+export const HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR: number = 2;
 
 export enum ImmersiveLightArea {
   TITLE_BAR = 'titleBar',
@@ -40,6 +41,10 @@ export function customSystemMaterialEffect(supportsImmersive: boolean = true): I
   };
 }
 
+export function preferredTitleBarScrollEffectType(): number {
+  return HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR;
+}
+
 export function canUseBitmapFallback(): boolean {
   return false;
 }
@@ -48,4 +53,16 @@ export function canUseOfficialHds(area: ImmersiveLightArea): boolean {
   return area === ImmersiveLightArea.TITLE_BAR
     || area === ImmersiveLightArea.BOTTOM_TABS
     || area === ImmersiveLightArea.FLOATING_ACTION;
+}
+
+export function requiresHdsScrollableBinding(area: ImmersiveLightArea): boolean {
+  return area === ImmersiveLightArea.TITLE_BAR;
+}
+
+export function requiresHdsComponentSafeArea(area: ImmersiveLightArea): boolean {
+  return area === ImmersiveLightArea.TITLE_BAR;
+}
+
+export function requiresHdsLayoutSafeAreaAvoidance(area: ImmersiveLightArea): boolean {
+  return area === ImmersiveLightArea.TITLE_BAR;
 }

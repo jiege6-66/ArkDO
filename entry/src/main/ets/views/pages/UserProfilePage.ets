@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicCategory } from '../../models/Topic';
@@ -34,6 +35,14 @@ import { showToast as promptToast } from '../../common/utils/Toast';
 import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, formatCount, formatJoinDate, formatTimeRead, trustLabelOf } from '../../common/utils/ProfileFormat';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { LIKE_RED } from '../../common/theme/Palette';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
@@ -121,55 +130,102 @@ export struct UserProfilePage {
   }
 
   build() {
-    Stack() {
-      // 背景层:灰底延伸进顶部状态栏与底部导航条;内容层不扩展,照常避让。
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg_gray'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      Column() {
-        this.TitleBar()
-
-        Scroll(this.scroller) {
-          Column() {
-            // 顺序:身份 → 徽章 → 互动圈 → 内容(热门话题/回复/最近)。内容区列表最长,放最后。
-            this.IdentityCard()
-            this.BadgesCard()
-            this.CircleCard()
-            this.ContentCard()
-            Row()
-              .width('100%')
-              .height(40)
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .onDidScroll(() => {
-          this.updateTitleVisibility();
-        })
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.UserProfileScrollableContent()
+      this.UserProfileTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .bindSheet($$this.showEndorseSheet, this.EndorseSheet(), {
       height: SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: true,
       title: { title: '认可用户' }
     })
+  }
+
+  @Builder
+  private UserProfileScrollableContent() {
+    Scroll(this.scroller) {
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        // 顺序:身份 → 徽章 → 互动圈 → 内容(热门话题/回复/最近)。内容区列表最长,放最后。
+        this.IdentityCard()
+        this.BadgesCard()
+        this.CircleCard()
+        this.ContentCard()
+        Row()
+          .width('100%')
+          .height(40)
+      }
+      .width('100%')
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .onDidScroll(() => {
+      this.updateTitleVisibility();
+    })
+  }
+
+  @Builder
+  private UserProfileTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: this.isTitleShown ? this.getDisplayName() : '个人资料'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: {
+          value: [{
+            content: {
+              icon: $r('sys.symbol.arrow_right_up_and_square'),
+              label: '在网页中打开',
+              isEnabled: true,
+              action: () => {
+                this.openUserWebPage();
+              }
+            }
+          }]
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   // ==================== 操作按钮 ====================
@@ -352,90 +408,6 @@ export struct UserProfilePage {
     .width('100%')
     .padding({ left: 20, right: 20, top: 8, bottom: 24 })
     .alignItems(HorizontalAlign.Start)
-  }
-
-  // ==================== 标题栏 ====================
-
-  @Builder
-  private TitleBar() {
-    Row() {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
-        this.onBack();
-      })
-
-      // 双层标题(同帖子详情):两层始终挂载、叠层,靠 opacity+translate 随 isTitleShown 交叉切换。
-      // A 层「个人资料」淡出上滑,B 层「昵称 + 状态表情」从下方(y:+8)滑上来淡入 → 从下往上浮现。
-      Stack({ alignContent: Alignment.Start }) {
-        // A 层:未滚动时的静态标题。
-        Text('个人资料')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .opacity(this.isTitleShown ? 0 : 1)
-          .translate({ y: this.isTitleShown ? -8 : 0 })
-          .hitTestBehavior(this.isTitleShown ? HitTestMode.None : HitTestMode.Default)
-          .animation({ duration: 250, curve: Curve.EaseInOut })
-
-        // B 层:滚动后的昵称 + 状态表情(棒棒糖),与身份卡一致。
-        Row() {
-          Text(this.getDisplayName())
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .flexShrink(1)
-          if (this.getStatusEmojiUrl().length > 0) {
-            Image(this.getStatusEmojiUrl())
-              .width(17)
-              .height(17)
-              .objectFit(ImageFit.Contain)
-              .draggable(false)
-              .margin({ left: 5 })
-          }
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .opacity(this.isTitleShown ? 1 : 0)
-        .translate({ y: this.isTitleShown ? 0 : 8 })
-        .hitTestBehavior(this.isTitleShown ? HitTestMode.Default : HitTestMode.None)
-        .animation({ duration: 250, curve: Curve.EaseInOut })
-      }
-      .layoutWeight(1)
-      .margin({ left: 8 })
-      .alignContent(Alignment.Start)
-
-      // 逃生口:原生页没覆盖的东西(作品集、关注列表等)去网页版看。
-      // 图标用 arrow_right_up_and_square 而非 ellipsis——后者在 sysResource.js 里不存在(只有
-      // ellipsis_bubble/ellipsis_circle 等变体),且「在外部打开」的语义本就比三个点准确。
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.arrow_right_up_and_square'))
-          .fontSize(20)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor(Color.Transparent)
-      .onClick(() => {
-        this.openUserWebPage();
-      })
-    }
-    .width('100%')
-    .height(56)
-    .padding({ left: 12, right: 8 })
   }
 
   // ==================== 卡片 1:身份 + 操作 + 统计 ====================

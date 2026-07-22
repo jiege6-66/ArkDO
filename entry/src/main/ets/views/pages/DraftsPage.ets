@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { Draft, DraftAction, DraftPage, DraftTagRef } from '../../models/Draft';
 import { TopicCategory } from '../../models/Topic';
@@ -13,8 +14,15 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY } from '../../common/constants/StorageKeys';
-import { PageHeader } from '../components/PageHeader';
 import { ListFooter } from '../components/ListFooter';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -70,6 +78,7 @@ export struct DraftsPage {
   // 延迟重拉的计时器句柄(refreshAfterDraftChange 用,重复触发只留最后一次)。
   private refreshTimer: number = -1;
   private categoryIndex: CategoryIndex = new CategoryIndex();
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -84,18 +93,6 @@ export struct DraftsPage {
     if (this.refreshTimer !== -1) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = -1;
-    }
-  }
-
-
-  // 头栏尾部草稿计数。无参 @Builder 直读 this.drafts:@Builder 按值参数不随 @State 重绘。
-  @Builder
-  private HeaderCount() {
-    if (this.drafts.length > 0) {
-      Text(`${this.drafts.length}`)
-        .fontSize(14)
-        .fontColor($r('app.color.text_faint'))
-        .padding({ right: 8 })
     }
   }
 
@@ -135,69 +132,104 @@ export struct DraftsPage {
 
   @Builder
   private ListRoot() {
-    Column() {
-      // 顶栏
-      PageHeader({
-        title: '我的草稿',
-        onBack: () => {
-          this.onBack();
-        },
-        trailing: (): void => {
-          this.HeaderCount();
-        }
-      })
-
+    HdsNavigation() {
       this.Content()
     }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+          enableRefreshOffsetChange: true
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: this.drafts.length > 0 ? `我的草稿 · ${this.drafts.length}` : '我的草稿'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private Content() {
     if (this.drafts.length === 0) {
-      LoadStateView({
-        isLoading: this.isInitialLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '草稿加载失败',
-        showRetry: this.loadFailed,
-        emptyIcon: $r('sys.symbol.square_and_pencil'),
-        emptyTitle: '还没有草稿',
-        emptySubtitle: '编辑帖子时会自动存草稿，没写完也不怕丢',
-        onRetry: () => {
-          this.loadInitial();
-        }
-      })
+      Column() {
+        LoadStateView({
+          isLoading: this.isInitialLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '草稿加载失败',
+          showRetry: this.loadFailed,
+          emptyIcon: $r('sys.symbol.square_and_pencil'),
+          emptyTitle: '还没有草稿',
+          emptySubtitle: '编辑帖子时会自动存草稿，没写完也不怕丢',
+          onRetry: () => {
+            this.loadInitial();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
       Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-        List() {
-          ForEach(this.drafts, (item: Draft) => {
-            ListItem() {
-              this.DraftRow(item)
-            }
-          }, (item: Draft) => `${item.draftKey}_${item.sequence}`)
+        List({ scroller: this.scroller }) {
+          ListItemGroup({ header: this.TitleBarListHeader }) {
+            ForEach(this.drafts, (item: Draft) => {
+              ListItem() {
+                this.DraftRow(item)
+              }
+            }, (item: Draft) => `${item.draftKey}_${item.sequence}`)
 
-          ListItem() {
-            ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            ListItem() {
+              ListFooter({ isLoading: this.isLoadingMore, hasMore: this.hasMore })
+            }
           }
+          .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
         }
         .width('100%')
-        .layoutWeight(1)
-        .divider({ strokeWidth: 1, color: $r('app.color.border'), startMargin: 0, endMargin: 0 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMore();
         })
       }
-      .layoutWeight(1)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .onRefreshing(() => {
         this.loadInitial();
       })
     }
+  }
+
+  @Builder
+  private TitleBarListHeader() {
+    Column() {
+      Blank()
+        .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+    }
+    .width('100%')
   }
 
   @Builder

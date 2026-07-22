@@ -1,13 +1,21 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { SiteIconStore } from '../../services/site/SiteIconStore';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SITES_TICK } from '../../common/constants/StorageKeys';
-import { PageHeader } from '../components/PageHeader';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { SCRIM } from '../../common/theme/Palette';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][SitesPage]';
 
@@ -184,6 +192,7 @@ export struct SitesPage {
   @State private draggingIndex: number = -1;
   @State private dragOffsetY: number = 0;
   @State private hoverIndex: number = -1;
+  private scroller: Scroller = new Scroller();
   // 编辑/添加弹窗每次打开都新建:CustomDialogController 的 builder 参数在构造时按值求值,
   // 复用同一个 controller 会永远拿到第一次捕获的站点。
   private editDialog: CustomDialogController | undefined = undefined;
@@ -215,81 +224,97 @@ export struct SitesPage {
     .margin({ top: CARD_GAP })
   }
 
-  // 头栏尾部新增按钮。
-  @Builder
-  private HeaderAddButton() {
-    Button({ type: ButtonType.Circle, stateEffect: true }) {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(22)
-        .fontColor([$r('app.color.text_primary')])
-        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-    }
-    .width(40)
-    .height(40)
-    .backgroundColor($r('app.color.surface_muted'))
-    .onClick(() => {
-      this.openAddDialog();
-    })
-  }
-
   build() {
-    Stack() {
-      // 背景层:灰底延伸进顶部状态栏与底部导航条区域;内容层不扩展,照常避让。
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg_gray'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      Column() {
-        this.TitleBar()
-
-        Scroll() {
-          Column() {
-            if (this.sites.length === 0) {
-              this.EmptyCard()
-            } else {
-              this.SiteListCard()
-            }
-
-            Row()
-              .width('100%')
-              .height(40)
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.SitesScrollableContent()
+      this.SitesTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // ==================== Builder ====================
 
   @Builder
-  private TitleBar() {
-    PageHeader({
-      title: '我的站点',
-      paddingRight: 12,
-      onBack: () => {
-        this.onBack();
+  private SitesScrollableContent() {
+    Scroll(this.scroller) {
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        if (this.sites.length === 0) {
+          this.EmptyCard()
+        } else {
+          this.SiteListCard()
+        }
+
+        Row()
+          .width('100%')
+          .height(40)
+      }
+      .width('100%')
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private SitesTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
       },
-      trailing: (): void => {
-        this.HeaderAddButton();
+      content: {
+        title: {
+          mainTitle: '我的站点'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: {
+          value: [{
+            content: {
+              icon: $r('sys.symbol.plus'),
+              label: '添加站点',
+              isEnabled: true,
+              action: () => {
+                this.openAddDialog();
+              }
+            }
+          }]
+        }
       }
     })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   // 空态:这个功能的说明书。讲清「是什么 / 凭什么比浏览器强 / 现在该干嘛」三件事。

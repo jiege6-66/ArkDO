@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicCategory } from '../../models/Topic';
@@ -26,6 +27,14 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { badgeHeadLabel, badgeRowFillers, badgeRowsOf, daysSince, formatCount, formatTimeRead, trustLabelWithTitleOf } from '../../common/utils/ProfileFormat';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -79,6 +88,7 @@ export struct ProfilePage {
   @State private recentActivity: UserActivityItem[] = [];
   @State private categories: TopicCategory[] = [];
   @State private isLoggingOut: boolean = false;
+  private scroller: Scroller = new Scroller();
   // 已加载资料的用户名:切换账号后重新加载,同账号重进不重复拉取。
   private loadedProfileUsername: string = '';
   private categoryIndex: CategoryIndex = new CategoryIndex();
@@ -97,80 +107,90 @@ export struct ProfilePage {
   }
 
   build() {
-    Stack() {
-      // 背景层:灰底延伸进顶部状态栏与底部导航条区域;内容层不扩展,照常避让。
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg_gray'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      Column() {
-        Row() {
-          Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.chevron_left'))
-              .fontSize(28)
-              .fontColor([$r('app.color.text_primary')])
-              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-          }
-          .width(40)
-          .height(40)
-          .backgroundColor($r('app.color.surface_muted'))
-          .onClick(() => {
-            this.onBack();
-          })
-
-          Text('我的')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-            .layoutWeight(1)
-            .margin({ left: 8 })
-
-          // 设置入口:外观/账号安全/关于/诊断日志统一收进独立设置页。
-          Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.gearshape'))
-              .fontSize(22)
-              .fontColor([$r('app.color.text_primary')])
-              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-          }
-          .width(40)
-          .height(40)
-          .backgroundColor(Color.Transparent)
-          .onClick(() => {
-            this.onOpenSettings();
-          })
-        }
-        .width('100%')
-        .height(56)
-        .padding({ left: 12, right: 8 })
-
-        Scroll() {
-          Column() {
-            if (this.isLoggedIn) {
-              this.LoggedInContent()
-            } else {
-              this.AnonymousContent()
-            }
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.ProfileScrollableContent()
+      this.ProfileTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private ProfileScrollableContent() {
+    Scroll(this.scroller) {
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        if (this.isLoggedIn) {
+          this.LoggedInContent()
+        } else {
+          this.AnonymousContent()
+        }
+      }
+      .width('100%')
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private ProfileTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: '我的'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: {
+          value: [{
+            content: {
+              icon: $r('sys.symbol.gearshape'),
+              label: '设置',
+              isEnabled: true,
+              action: () => {
+                this.onOpenSettings();
+              }
+            }
+          }]
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   // ==================== 登录态 ====================

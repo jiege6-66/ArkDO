@@ -4,12 +4,17 @@ import {
   canUseBitmapFallback,
   canUseOfficialHds,
   customSystemMaterialEffect,
+  HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR,
   HDS_MATERIAL_LEVEL_ADAPTIVE,
   HDS_MATERIAL_LEVEL_GENTLE,
   HDS_MATERIAL_LEVEL_SMOOTH,
   HDS_MATERIAL_TYPE_ADAPTIVE,
   ImmersiveLightArea,
-  ImmersiveLightMode
+  ImmersiveLightMode,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance,
+  requiresHdsScrollableBinding
 } from '../main/ets/common/ui/ImmersiveLightMaterial';
 
 export default function immersiveLightMaterialTest() {
@@ -26,6 +31,21 @@ export default function immersiveLightMaterialTest() {
       expect(ImmersiveLightMode.ADAPTIVE).assertEqual('adaptive');
     });
 
+    it('requiresScrollableBindingForTitleBar', 0, () => {
+      expect(requiresHdsScrollableBinding(ImmersiveLightArea.TITLE_BAR)).assertTrue();
+      expect(requiresHdsScrollableBinding(ImmersiveLightArea.FLOATING_ACTION)).assertFalse();
+    });
+
+    it('requiresComponentSafeAreaForTitleBar', 0, () => {
+      expect(requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR)).assertTrue();
+      expect(requiresHdsComponentSafeArea(ImmersiveLightArea.FLOATING_ACTION)).assertFalse();
+    });
+
+    it('requiresLayoutSafeAreaAvoidanceForTitleBar', 0, () => {
+      expect(requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR)).assertTrue();
+      expect(requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.FLOATING_ACTION)).assertFalse();
+    });
+
     it('usesSystemAdaptiveMaterialByDefault', 0, () => {
       const effect = adaptiveSystemMaterialEffect();
 
@@ -36,6 +56,10 @@ export default function immersiveLightMaterialTest() {
     it('selectsCustomMaterialLevelFromSupportFlag', 0, () => {
       expect(customSystemMaterialEffect(true).materialLevel).assertEqual(HDS_MATERIAL_LEVEL_GENTLE);
       expect(customSystemMaterialEffect(false).materialLevel).assertEqual(HDS_MATERIAL_LEVEL_SMOOTH);
+    });
+
+    it('usesGradientBlurForLightListTitleBars', 0, () => {
+      expect(preferredTitleBarScrollEffectType()).assertEqual(HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR);
     });
   });
 }

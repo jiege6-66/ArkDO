@@ -1,5 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { CONNECT_EXTRACT_SCRIPT, ConnectLevelParser } from '../../services/connect/ConnectLevelParser';
@@ -13,6 +14,14 @@ import {
 } from '../../models/ConnectLevel';
 import { PageHeader } from '../components/PageHeader';
 import { CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][LevelProgress]';
 
@@ -52,6 +61,7 @@ export struct LevelProgressPage {
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   @Prop isLoggedIn: boolean = false;
   @Prop useHostTitleBar: boolean = false;
+  scroller: Scroller = new Scroller();
   onBack: () => void = () => {};
   // 兜底:解析失败时可在内置浏览器直接打开 connect.linux.do。
   onOpenWeb: (url: string, title?: string) => void = () => {};
@@ -115,40 +125,11 @@ export struct LevelProgressPage {
           .opacity(0.01)
       }
 
-      Column() {
-        if (!this.useHostTitleBar) {
-          this.TitleBar()
-        }
-
-        Scroll() {
-          Column() {
-            if (this.phase === LoadPhase.READY && this.data) {
-              this.LevelCard(this.data)
-              this.PoweredByFooter()
-            } else if (this.phase === LoadPhase.LOADING) {
-              this.LoadingState()
-            } else if (this.phase === LoadPhase.ANON) {
-              this.MessageState('请先登录', '登录 Linux.do 后即可查看等级升级进度', false)
-            } else {
-              this.MessageState('暂时无法获取', '可能是网络问题或需要在浏览器完成验证', true)
-            }
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      if (this.useHostTitleBar) {
+        this.HostNavigation()
+      } else {
+        this.LegacyPageContent()
       }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.useHostTitleBar ? 0 : this.sysTopInset })
-      .backgroundColor($r('app.color.page_bg_gray'))
-      .expandSafeArea([SafeAreaType.SYSTEM], this.useHostTitleBar ? [SafeAreaEdge.BOTTOM] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }
     .width('100%')
     .height('100%')
@@ -156,6 +137,70 @@ export struct LevelProgressPage {
   }
 
   // ==================== 顶栏 ====================
+
+  @Builder
+  private HostNavigation() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.HostScrollableContent()
+      this.HostTitleBarOverlay()
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private HostTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: '等级进度'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  @Builder
+  private LegacyPageContent() {
+    Column() {
+      this.TitleBar()
+      this.LegacyScrollableContent()
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ top: this.sysTopInset })
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
 
   @Builder
   private TitleBar() {
@@ -166,6 +211,56 @@ export struct LevelProgressPage {
         this.onBack();
       }
     })
+  }
+
+  @Builder
+  private HostScrollableContent() {
+    Scroll(this.scroller) {
+      this.LevelProgressContent(true)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private LegacyScrollableContent() {
+    Scroll(this.scroller) {
+      this.LevelProgressContent(false)
+    }
+    .layoutWeight(1)
+    .width('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private LevelProgressContent(useTitleBarSpacer: boolean) {
+    Column() {
+      if (useTitleBarSpacer) {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+      }
+
+      if (this.phase === LoadPhase.READY && this.data) {
+        this.LevelCard(this.data)
+        this.PoweredByFooter()
+      } else if (this.phase === LoadPhase.LOADING) {
+        this.LoadingState()
+      } else if (this.phase === LoadPhase.ANON) {
+        this.MessageState('请先登录', '登录 Linux.do 后即可查看等级升级进度', false)
+      } else {
+        this.MessageState('暂时无法获取', '可能是网络问题或需要在浏览器完成验证', true)
+      }
+    }
+    .width('100%')
+    .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+    .alignItems(HorizontalAlign.Start)
   }
 
   // ==================== 主卡片 ====================

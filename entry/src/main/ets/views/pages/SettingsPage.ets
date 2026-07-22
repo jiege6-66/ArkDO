@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { DownloadService } from '../../services/content/DownloadService';
 import { FileLogger } from '../../services/logging/FileLogger';
@@ -14,9 +15,16 @@ import { needsRelayConsent, PushRelayConfig, readCustomBaseUrl, resolvePushRelay
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SETTINGS_DOH_TICK } from '../../common/constants/StorageKeys';
-import { PageHeader } from '../components/PageHeader';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { SCRIM } from '../../common/theme/Palette';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
 
@@ -97,6 +105,7 @@ export struct SettingsPage {
   @State private draggingIndex: number = -1;
   @State private dragOffsetY: number = 0;
   @State private hoverIndex: number = -1;
+  private scroller: Scroller = new Scroller();
   // 关于 ArkDO 弹框:含可点的"开发者 @JoeyYin"链接,纯文本 AlertDialog 做不到,故用 CustomDialog。
   // onOpenDeveloper 闭包内惰性读 this.onOpenWeb——字段初始化此刻父注入的 prop 尚为空壳,须调用时再取。
   // 使用本项目运营的中继前的一次性告知。同意后记住,不再重复打扰。
@@ -240,80 +249,117 @@ export struct SettingsPage {
   }
 
   build() {
-    Stack() {
-      // 背景层:灰底延伸进顶部状态栏与底部导航条区域;内容层不扩展,照常避让。
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg_gray'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      Column() {
-        PageHeader({
-          title: '设置',
-          onBack: () => {
-            this.onBack();
-          }
-        })
-
-        Scroll() {
-          Column() {
-            // 卡片:外观 / DoH / 刷新通行证
-            Column() {
-              this.AppearanceCell()
-              this.HairlineInset()
-              this.DohCell()
-              this.HairlineInset()
-              // 主动过盾:打开交互式 CF 验证页(https://linux.do/challenge)手动过 Cloudflare。
-              this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
-                this.onActiveChallenge();
-              })
-              this.HairlineInset()
-              this.ChallengeShortcutCell()
-              this.HairlineInset()
-              this.PushNotificationCell()
-              // 测试推送紧跟开关:刚开完就想验一下是否真能收到,这是最顺的动线。
-              // 中继地址属于"配置好就不再动"的项,排在后面。
-              if (this.pushEnabled) {
-                this.HairlineInset()
-                this.TestPushNotificationCell()
-              }
-              this.HairlineInset()
-              this.PushRelayCell()
-            }
-            .cardStyle()
-
-            this.FeedGroup()
-
-            this.AboutGroup()
-
-            this.LogGroup()
-
-            Row()
-              .width('100%')
-              .height(40)
-          }
-          .width('100%')
-          .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
-          .alignItems(HorizontalAlign.Start)
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
-        .align(Alignment.Top)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.SettingsScrollableContent()
+      this.SettingsTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg_gray'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // ==================== Builder ====================
+
+  @Builder
+  private SettingsScrollableContent() {
+    Scroll(this.scroller) {
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+        this.SettingsContent()
+      }
+      .width('100%')
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.Spring)
+    .align(Alignment.Top)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  private SettingsTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: '设置'
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  @Builder
+  private SettingsContent() {
+    Column() {
+      // 卡片:外观 / DoH / 刷新通行证
+      Column() {
+        this.AppearanceCell()
+        this.HairlineInset()
+        this.DohCell()
+        this.HairlineInset()
+        // 主动过盾:打开交互式 CF 验证页(https://linux.do/challenge)手动过 Cloudflare。
+        this.SettingCell($r('sys.symbol.checkmark_shield'), '刷新 Cloudflare 通行证', '', () => {
+          this.onActiveChallenge();
+        })
+        this.HairlineInset()
+        this.ChallengeShortcutCell()
+        this.HairlineInset()
+        this.PushNotificationCell()
+        // 测试推送紧跟开关:刚开完就想验一下是否真能收到,这是最顺的动线。
+        // 中继地址属于"配置好就不再动"的项,排在后面。
+        if (this.pushEnabled) {
+          this.HairlineInset()
+          this.TestPushNotificationCell()
+        }
+        this.HairlineInset()
+        this.PushRelayCell()
+      }
+      .cardStyle()
+
+      this.FeedGroup()
+
+      this.AboutGroup()
+
+      this.LogGroup()
+
+      Row()
+        .width('100%')
+        .height(40)
+    }
+    .width('100%')
+  }
 
   @Builder
   private AppearanceCell() {

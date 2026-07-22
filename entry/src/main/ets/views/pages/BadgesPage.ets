@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
 import { UserBadgeGroup, UserBadgeItem } from '../../models/UserProfile';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
@@ -7,7 +8,14 @@ import { BadgeTile, badgeTypeColor } from '../components/BadgeTile';
 import { LoadStateView } from '../components/LoadStateView';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
-import { PageHeader } from '../components/PageHeader';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][BadgesPage]';
 const PAGE_PADDING: number = 16;
@@ -34,6 +42,7 @@ export struct BadgesPage {
   @State private showDetail: boolean = false;
   private service?: UserProfileService = undefined;
   private loading: boolean = false;
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     if (this.bridge) {
@@ -43,32 +52,14 @@ export struct BadgesPage {
   }
 
   build() {
-    Stack() {
-      // 背景层:铺进顶部状态栏与底部导航条,避免暗黑模式下顶栏露出系统黑底。
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      // 内容层:照常避让状态栏,不扩展。
-      Column() {
-        PageHeader({
-          title: this.getPageTitle(),
-          onBack: () => {
-            this.onBack();
-          }
-        })
-
-        this.Content()
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: this.sysTopInset })
+    Stack({ alignContent: Alignment.TopStart }) {
+      this.Content()
+      this.BadgesTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .alignContent(Alignment.TopStart)
+    .backgroundColor($r('app.color.page_bg'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .bindSheet(this.showDetail, this.DetailSheet(), {
       height: SheetSize.FIT_CONTENT,
       dragBar: false,
@@ -82,19 +73,30 @@ export struct BadgesPage {
   @Builder
   private Content() {
     if (this.groups.length === 0) {
-      LoadStateView({
-        isLoading: this.isLoading,
-        loadingText: '加载中…',
-        message: this.message.length > 0 ? this.message : '加载失败',
-        showRetry: this.loadFailed,
-        emptyTitle: '暂无徽章',
-        onRetry: () => {
-          this.loadBadges();
-        }
-      })
+      Column() {
+        Blank()
+          .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        LoadStateView({
+          isLoading: this.isLoading,
+          loadingText: '加载中…',
+          message: this.message.length > 0 ? this.message : '加载失败',
+          showRetry: this.loadFailed,
+          emptyTitle: '暂无徽章',
+          onRetry: () => {
+            this.loadBadges();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     } else {
-      Scroll() {
+      Scroll(this.scroller) {
         Column() {
+          Blank()
+            .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
           ForEach(this.groups, (group: UserBadgeGroup) => {
             this.BadgeGroup(group)
           }, (group: UserBadgeGroup) => group.typeId.toString())
@@ -107,13 +109,52 @@ export struct BadgesPage {
         .padding({ left: PAGE_PADDING, right: PAGE_PADDING })
         .alignItems(HorizontalAlign.Start)
       }
-      .layoutWeight(1)
       .width('100%')
+      .height('100%')
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
       .align(Alignment.Top)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }
+  }
+
+  @Builder
+  private BadgesTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        scrollEffectOpts: {
+          enableScrollEffect: true,
+          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        title: {
+          mainTitle: this.getPageTitle()
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
+          action: () => {
+            this.onBack();
+          }
+        }
+      }
+    })
+    .bindToScrollable([this.scroller])
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
