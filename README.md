@@ -125,6 +125,11 @@ LINUX DO ──Web Push（加密）──▶ 自建中继 ──解密──▶ 
 
 > 核心文件：`services/push/`、`server/relay.py`
 
+### HarmonyOS 6.1 沉浸光感
+
+ArkDO 在 HarmonyOS 6.1.0 及以上使用系统/HDS 可编译的沉浸光感能力增强导航、固定操作、输入浮层和登录面板。
+内容阅读区域保持克制，不使用图片叠层模拟光感。
+
 ## 项目结构
 
 ```
