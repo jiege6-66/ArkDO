@@ -8,7 +8,7 @@
 
 用 ArkTS 从零编写，不是网页套壳。
 
-[![Platform](https://img.shields.io/badge/platform-HarmonyOS%206.0%2B-black)](https://developer.huawei.com/consumer/cn/)
+[![Platform](https://img.shields.io/badge/platform-HarmonyOS%206.1.0%2B-black)](https://developer.huawei.com/consumer/cn/)
 [![Language](https://img.shields.io/badge/language-ArkTS-blue)](https://developer.huawei.com/consumer/cn/arkts/)
 [![Community](https://img.shields.io/badge/LINUX%20DO-社区-ffb003)](https://linux.do)
 
@@ -154,8 +154,8 @@ server/              推送中继（Python，部署在自己的服务器上）
 ## 构建
 
 **环境要求**
-- DevEco Studio（HarmonyOS SDK API 20+）
-- 设备：HarmonyOS 6.0.0 及以上，手机 / 平板
+- DevEco Studio（HarmonyOS SDK API 23+）
+- 设备：HarmonyOS 6.1.0 及以上，手机 / 平板
 
 **步骤**
 1. 克隆仓库后用 DevEco Studio 打开
