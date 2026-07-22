@@ -51,6 +51,7 @@ export struct LevelProgressPage {
   // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   @Prop isLoggedIn: boolean = false;
+  @Prop useHostTitleBar: boolean = false;
   onBack: () => void = () => {};
   // 兜底:解析失败时可在内置浏览器直接打开 connect.linux.do。
   onOpenWeb: (url: string, title?: string) => void = () => {};
@@ -115,7 +116,9 @@ export struct LevelProgressPage {
       }
 
       Column() {
-        this.TitleBar()
+        if (!this.useHostTitleBar) {
+          this.TitleBar()
+        }
 
         Scroll() {
           Column() {
@@ -143,9 +146,9 @@ export struct LevelProgressPage {
       }
       .width('100%')
       .height('100%')
-      .padding({ top: this.sysTopInset })
+      .padding({ top: this.useHostTitleBar ? 0 : this.sysTopInset })
       .backgroundColor($r('app.color.page_bg_gray'))
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      .expandSafeArea([SafeAreaType.SYSTEM], this.useHostTitleBar ? [SafeAreaEdge.BOTTOM] : [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }
     .width('100%')
     .height('100%')

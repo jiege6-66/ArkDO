@@ -26,6 +26,13 @@ export struct TopicDetailHeader {
   @Prop showChallengeShortcut: boolean = false;
   onChallengeShortcutClick: () => void = () => {};
 
+  @Styles
+  immersiveHeaderButtonStyle() {
+    .width(40)
+    .height(40)
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
   build() {
     Row({ space: 8 }) {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
@@ -34,9 +41,7 @@ export struct TopicDetailHeader {
           .fontColor([$r('app.color.text_primary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
+      .immersiveHeaderButtonStyle()
       .onClick(() => {
         this.onBack();
       })
@@ -116,9 +121,7 @@ export struct TopicDetailHeader {
             .fontColor([$r('app.color.warning')])
             .renderingStrategy(SymbolRenderingStrategy.SINGLE)
         }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.surface_muted'))
+        .immersiveHeaderButtonStyle()
         .onClick(() => {
           this.onChallengeShortcutClick();
         })

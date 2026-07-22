@@ -1,4 +1,6 @@
 // 二级页统一返回头栏:圆形返回键 + 标题 + 可选尾部动作区。
+// HDS 标题栏沉浸光感试点放在 RootTabPage 的 LEVEL_PROGRESS 宿主 HdsNavDestination 上:
+// 页面内部若继续使用 PageHeader,不要再嵌套 HdsNavigation。
 //
 // 抽取前这一段(40×40 圆形按钮 + 28 号 chevron_left + 20 号粗体标题 + height 56 +
 // padding{left:12,right:8})在 14 个二级页里逐字复制,改一处样式要同步 14 个文件。
@@ -18,6 +20,13 @@ export struct PageHeader {
   private noTrailing() {
   }
 
+  @Styles
+  immersiveHeaderButtonStyle() {
+    .width(40)
+    .height(40)
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
   build() {
     Row({ space: 8 }) {
       Button({ type: ButtonType.Circle, stateEffect: true }) {
@@ -26,9 +35,7 @@ export struct PageHeader {
           .fontColor([$r('app.color.text_primary')])
           .renderingStrategy(SymbolRenderingStrategy.SINGLE)
       }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
+      .immersiveHeaderButtonStyle()
       .onClick(() => {
         this.onBack();
       })

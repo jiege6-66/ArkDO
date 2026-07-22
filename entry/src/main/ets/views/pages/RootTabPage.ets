@@ -6,9 +6,11 @@ import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/L
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
 import { common } from '@kit.AbilityKit';
+import { HdsNavDestination, SystemMaterialParams } from '@kit.UIDesignKit';
 import window from '@ohos.window';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { ImmersiveWindow } from '../../common/utils/ImmersiveWindow';
+import { adaptiveSystemMaterialEffect } from '../../common/ui/ImmersiveLightMaterial';
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
@@ -610,9 +612,10 @@ export struct RootTabPage {
       // 手势闸关闭时恒 0,点头像那条路(系统默认转场)不受影响。
       .translate({ x: this.profileSwipeActive ? `${(1 - this.profileSwipeProgress) * 100}%` : 0 })
     } else if (name === AppRouteName.LEVEL_PROGRESS) {
-      NavDestination() {
+      HdsNavDestination() {
         LevelProgressPage({
           isLoggedIn: (param as LevelProgressRouteParam).isLoggedIn,
+          useHostTitleBar: true,
           onBack: () => {
             this.popNavigation();
           },
@@ -621,7 +624,23 @@ export struct RootTabPage {
           }
         })
       }
-      .hideTitleBar(true)
+      .titleBar({
+        style: {
+          systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+        },
+        content: {
+          title: {
+            mainTitle: '等级进度'
+          },
+          backIcon: {
+            icon: $r('sys.symbol.chevron_left'),
+            label: '返回',
+            action: () => {
+              this.popNavigation();
+            }
+          }
+        }
+      })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
