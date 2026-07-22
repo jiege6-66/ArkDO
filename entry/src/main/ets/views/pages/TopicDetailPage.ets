@@ -1,3 +1,6 @@
+import { ActionBarButton, ActionBarStyle, HdsActionBar } from '@kit.UIDesignKit';
+import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
+import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { PendingPost, Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
@@ -25,11 +28,10 @@ import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
 import { ComposerPage, COMPOSER_ANIM_MS } from './ComposerPage';
 import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
-import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { TopicScrubber } from '../components/TopicScrubber';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
-import { SCRIM, SHADOW_SOFT } from '../../common/theme/Palette';
+import { SHADOW_SOFT } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -492,26 +494,18 @@ export struct TopicDetailPage {
     // 右下角悬浮回复按钮:仅在帖子已加载且浮层未展开时显示。
     // 窗口常驻全屏布局后不再有临时切换,按钮锚点全程稳定,无需再绑全屏标志防"闪回"。
     if (this.detail && !this.showComposer) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        FaIconView({
-          icon: this.replyFabIcon(),
-          color: '#FFFFFF',
-          iconSize: 22
-        })
-      }
+      HdsActionBar({
+        primaryButton: this.replyFabButton(),
+        actionBarStyle: this.replyFabStyle()
+      })
       .width(52)
       .height(52)
-      .backgroundColor(REPLY_BLUE)
-      .shadow({ radius: 8, color: SCRIM, offsetX: 0, offsetY: 2 })
       .margin({ right: 16, bottom: 16 })
       // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
       .transition(TransitionEffect.asymmetric(
         TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
         TransitionEffect.IDENTITY
       ))
-      .onClick(() => {
-        this.openComposerForTopic();
-      })
     }
 
     // 向上补楼 / 跳楼定位的加载指示:悬浮小胶囊,不参与 List 布局(头插时列表零跳动的前提)。
@@ -1066,9 +1060,36 @@ export struct TopicDetailPage {
     this.showComposerToast('已删除', 1500);
   }
 
-  private replyFabIcon(): FaIconDefinition {
-    const def: FaIconDefinition | undefined = getFaIcon('reply');
-    return def ? def : { id: 'reply', rawfilePath: 'fa_icons/reply.svg' };
+  private replyFabButton(): ActionBarButton {
+    return new ActionBarButton({
+      width: LengthMetrics.vp(52),
+      backgroundColor: ColorMetrics.resourceColor(REPLY_BLUE),
+      iconSize: LengthMetrics.vp(22),
+      iconFillColor: ColorMetrics.resourceColor('#FFFFFF'),
+      baseIconSymbolGlyphModifier: this.replyFabSymbolModifier(),
+      accessibilityText: '回复当前话题',
+      onClick: () => {
+        this.openComposerForTopic();
+      }
+    });
+  }
+
+  private replyFabStyle(): ActionBarStyle {
+    return new ActionBarStyle({
+      height: LengthMetrics.vp(52),
+      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
+      innerSpace: LengthMetrics.vp(0),
+      startSpace: LengthMetrics.vp(0),
+      endSpace: LengthMetrics.vp(0),
+      isHorizontal: true
+    });
+  }
+
+  private replyFabSymbolModifier(): SymbolGlyphModifier {
+    const modifier: SymbolGlyphModifier = new SymbolGlyphModifier($r('sys.symbol.message_fill'));
+    modifier.fontSize(22);
+    modifier.fontColor(['#FFFFFF']);
+    return modifier;
   }
 
   // 依据视口首/末项下标维护 scrubber 状态:可滚动性、钉底闩、当前楼号。
