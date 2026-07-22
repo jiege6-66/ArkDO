@@ -9,6 +9,25 @@ import {
 } from '../main/ets/common/utils/ProfileFormat';
 import { UserProfileDetail } from '../main/ets/models/UserProfile';
 
+interface ProfileFixtureOptions {
+  trustLevel?: number;
+  title?: string;
+}
+
+function profileFixture(options: ProfileFixtureOptions): UserProfileDetail {
+  const detail: UserProfileDetail = {
+    id: 1,
+    username: 'tester'
+  };
+  if (options.trustLevel !== undefined) {
+    detail.trustLevel = options.trustLevel;
+  }
+  if (options.title !== undefined) {
+    detail.title = options.title;
+  }
+  return detail;
+}
+
 export default function profileFormatTest() {
   describe('profileFormatTest', () => {
 
@@ -61,30 +80,30 @@ export default function profileFormatTest() {
     //
     // trustLabelOf:只给等级名。用于页面别处已单独展示头衔的场合(他人主页)。
     it('ignoresSiteTitleAndAlwaysShowsTrustLevelName', 0, () => {
-      expect(trustLabelOf({ trustLevel: 3, title: '指导顾问' })).assertEqual('TL3 活跃用户');
-      expect(trustLabelOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
-      expect(trustLabelOf({ trustLevel: 0 })).assertEqual('TL0 新用户');
+      expect(trustLabelOf(profileFixture({ trustLevel: 3, title: '指导顾问' }))).assertEqual('TL3 活跃用户');
+      expect(trustLabelOf(profileFixture({ trustLevel: 3 }))).assertEqual('TL3 活跃用户');
+      expect(trustLabelOf(profileFixture({ trustLevel: 0 }))).assertEqual('TL0 新用户');
     });
 
     // trustLabelWithTitleOf:头衔优先。用于这里是头衔唯一露出的场合(「我的」页)。
     it('prefersSiteTitleWhenLabelIsTheOnlyPlaceTitleAppears', 0, () => {
-      expect(trustLabelWithTitleOf({ trustLevel: 3, title: '指导顾问' })).assertEqual('TL3 指导顾问');
-      expect(trustLabelWithTitleOf({ trustLevel: 3, title: '' })).assertEqual('TL3 活跃用户');
-      expect(trustLabelWithTitleOf({ trustLevel: 3 })).assertEqual('TL3 活跃用户');
+      expect(trustLabelWithTitleOf(profileFixture({ trustLevel: 3, title: '指导顾问' }))).assertEqual('TL3 指导顾问');
+      expect(trustLabelWithTitleOf(profileFixture({ trustLevel: 3, title: '' }))).assertEqual('TL3 活跃用户');
+      expect(trustLabelWithTitleOf(profileFixture({ trustLevel: 3 }))).assertEqual('TL3 活跃用户');
     });
 
     // 站点新增等级导致 trustLevel 超出内置名表时,只显示 TL 号,不能崩也不能显示 undefined。
     it('showsBareTrustLevelWhenLevelOutOfNameTableRange', 0, () => {
-      expect(trustLabelOf({ trustLevel: 9 })).assertEqual('TL9');
-      expect(trustLabelOf({ trustLevel: -1 })).assertEqual('TL-1');
+      expect(trustLabelOf(profileFixture({ trustLevel: 9 }))).assertEqual('TL9');
+      expect(trustLabelOf(profileFixture({ trustLevel: -1 }))).assertEqual('TL-1');
       // 带头衔的变体在超范围时仍应给出头衔,而不是退化成裸 TL 号。
-      expect(trustLabelWithTitleOf({ trustLevel: 9, title: '指导顾问' })).assertEqual('TL9 指导顾问');
-      expect(trustLabelWithTitleOf({ trustLevel: 9 })).assertEqual('TL9');
+      expect(trustLabelWithTitleOf(profileFixture({ trustLevel: 9, title: '指导顾问' }))).assertEqual('TL9 指导顾问');
+      expect(trustLabelWithTitleOf(profileFixture({ trustLevel: 9 }))).assertEqual('TL9');
     });
 
     it('returnsEmptyLabelWhenDetailOrTrustLevelMissing', 0, () => {
       expect(trustLabelOf(undefined)).assertEqual('');
-      expect(trustLabelOf({})).assertEqual('');
+      expect(trustLabelOf(profileFixture({}))).assertEqual('');
     });
   });
 }

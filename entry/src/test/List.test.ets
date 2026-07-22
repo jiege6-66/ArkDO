@@ -22,6 +22,7 @@ import pushNotificationNavigationTest from './PushNotificationNavigation.test';
 import notificationMarkReadTest from './NotificationMarkRead.test';
 import htmlLexerTest from './HtmlLexer.test';
 import profileFormatTest from './ProfileFormat.test';
+import immersiveLightMaterialTest from './ImmersiveLightMaterial.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -47,4 +48,5 @@ export default function testsuite() {
   notificationMarkReadTest();
   htmlLexerTest();
   profileFormatTest();
+  immersiveLightMaterialTest();
 }
