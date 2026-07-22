@@ -352,6 +352,9 @@ export struct RootTabPage {
       showClose: this.activeSheet !== RootSheet.CHALLENGE,
       maskColor: SCRIM,
       backgroundColor: $r('app.color.surface_card'),
+      // bindSheet API 23 尚无 HDS systemMaterialEffect 字段;登录页使用 ArkUI 官方 blur,
+      // Cloudflare 验证页保持无 blur,避免材质覆盖影响交互验证。
+      blurStyle: this.rootSheetBlurStyle(),
       preferType: SheetType.BOTTOM,
       enableOutsideInteractive: false,
       onDisappear: () => {
@@ -949,6 +952,10 @@ export struct RootTabPage {
         }
       })
     }
+  }
+
+  private rootSheetBlurStyle(): BlurStyle {
+    return this.activeSheet === RootSheet.LOGIN ? BlurStyle.Regular : BlurStyle.NONE;
   }
 
   @Builder
