@@ -79,7 +79,7 @@ export struct ReadTopicsPage {
       },
       content: {
         title: {
-          mainTitle: '已读'
+          mainTitle: '浏览历史'
         },
         backIcon: {
           icon: $r('sys.symbol.chevron_left'),
