@@ -83,6 +83,8 @@ export struct TopicPostItem {
   // 表情回应切换:请求先行,页面发 PUT 并返回成败;成功后本组件才改 this.post
   // (@ObjectLink 自身变更→精准重渲染),请求期间按钮转圈防重复点击。
   onToggleReaction: (post: TopicPost, reaction: string) => Promise<boolean> = () => Promise.resolve(false);
+  // 点击整块表情汇总区域:由页面打开反应用户底部弹层并管理分页请求。
+  onOpenReactionUsers: (post: TopicPost) => void = () => {};
   // 点该楼回复按钮:把整条 post 上抛给页面,由页面按 postNumber+作者昵称打开定向回复输入框。
   onReply: (post: TopicPost) => void = () => {};
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
@@ -401,6 +403,10 @@ export struct TopicPostItem {
                 .margin({ left: 8 })
             }
             .alignItems(VerticalAlign.Center)
+            .padding({ left: 4, right: 8, top: 4, bottom: 4 })
+            .onClick(() => {
+              this.onOpenReactionUsers(this.post);
+            })
           }
 
           // 被回复数量 + chevron:点击展开/收起本楼的被回复列表。

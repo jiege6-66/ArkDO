@@ -1,5 +1,5 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
-import { AcceptedAnswer, PendingPost, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { AcceptedAnswer, PendingPost, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, ReactionUser, ReactionUsersPage, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
@@ -149,6 +149,21 @@ interface DiscourseCurrentReaction {
   id?: string;
   type?: string;
   can_undo?: boolean;
+}
+
+// discourse-reactions 的反应用户分页接口。该接口不含各表情总数，总数仍以帖子详情的 reactions 为准。
+interface DiscourseReactionUser {
+  id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
+  animated_avatar?: string;
+  reaction?: string;
+}
+
+interface DiscourseReactionUsersPage {
+  users?: DiscourseReactionUser[];
+  total_rows?: number;
 }
 
 // discourse-boosts:发 boost 的用户。
@@ -577,6 +592,38 @@ export class TopicService {
       };
     } catch (error) {
       return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, 'Linux.do 被回复列表响应不是有效 JSON。');
+    }
+  }
+
+  // 按页读取某楼的反应用户。响应只负责用户明细，顶部分类数量由 topic.json 的 reactions 直接提供。
+  async getReactionUsers(postId: number, page: number): Promise<NetworkResult<ReactionUsersPage>> {
+    const safePage: number = Math.max(0, Math.floor(page));
+    const path: string =
+      `/discourse-reactions/posts/${postId}/reactions-users-list.json?page=${safePage}&limit=30`;
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<ReactionUsersPage>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, 'Linux.do 表情用户列表响应为空。');
+    }
+
+    try {
+      const payload: DiscourseReactionUsersPage = JSON.parse(response.data) as DiscourseReactionUsersPage;
+      if (!Array.isArray(payload.users) || typeof payload.total_rows !== 'number' || payload.total_rows < 0) {
+        return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, 'Linux.do 表情用户列表响应缺少必要字段。');
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: {
+          users: this.mapReactionUsers(payload.users),
+          totalRows: payload.total_rows
+        }
+      };
+    } catch (error) {
+      return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, 'Linux.do 表情用户列表响应不是有效 JSON。');
     }
   }
 
@@ -1433,6 +1480,28 @@ export class TopicService {
       });
     }
     return reactions;
+  }
+
+  private mapReactionUsers(source: DiscourseReactionUser[]): ReactionUser[] {
+    const users: ReactionUser[] = [];
+    for (let index: number = 0; index < source.length; index++) {
+      const item: DiscourseReactionUser = source[index];
+      if (typeof item.id !== 'number' || typeof item.username !== 'string' || item.username.length === 0 ||
+        typeof item.reaction !== 'string' || item.reaction.length === 0) {
+        continue;
+      }
+      users.push({
+        id: item.id,
+        username: item.username,
+        displayName: typeof item.name === 'string' && item.name.length > 0 ? item.name : undefined,
+        avatarTemplate: typeof item.avatar_template === 'string' && item.avatar_template.length > 0
+          ? item.avatar_template : undefined,
+        animatedAvatar: typeof item.animated_avatar === 'string' && item.animated_avatar.length > 0
+          ? item.animated_avatar : undefined,
+        reaction: item.reaction
+      });
+    }
+    return users;
   }
 
   private mapBoosts(source?: DiscourseBoost[]): PostBoost[] {

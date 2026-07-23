@@ -316,5 +316,41 @@ export default function topicServiceTest() {
       expect(bridge.postedPath).assertEqual('/topics/timings');
       expect(bridge.postedBody).assertEqual('timings%5B1%5D=1001&timings%5B2%5D=3000&topic_time=4001&topic_id=2117030');
     });
+
+    it('loadsReactionUsersPageFromDiscoursePayload', 0, async () => {
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: '{"users":[{"id":1,"username":"alice","name":"Alice","avatar_template":"/user_avatar/linux.do/alice/{size}/1.png","reaction":"heart"},{"id":2,"username":"bob","reaction":"+1"}],"total_rows":62}'
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result = await service.getReactionUsers(19741741, 2);
+
+      expect(bridge.requestedPath).assertEqual(
+        '/discourse-reactions/posts/19741741/reactions-users-list.json?page=2&limit=30'
+      );
+      expect(result.success).assertTrue();
+      expect(result.data?.totalRows).assertEqual(62);
+      expect(result.data?.users.length).assertEqual(2);
+      expect(result.data?.users[0].displayName).assertEqual('Alice');
+      expect(result.data?.users[1].reaction).assertEqual('+1');
+    });
+
+    it('rejectsInvalidReactionUsersPayload', 0, async () => {
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: '{"users":{}}'
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result = await service.getReactionUsers(19741741, 0);
+
+      expect(result.success).assertFalse();
+      expect(result.error?.code).assertEqual(NetworkErrorCode.UNEXPECTED_RESPONSE);
+    });
   });
 }

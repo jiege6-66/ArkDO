@@ -7,6 +7,17 @@ export interface PostReaction {
   count: number;
 }
 
+// discourse-reactions:对某楼做出表情回应的用户。用户列表接口按页返回，reaction 为该用户选择的短名。
+export interface ReactionUser extends User {
+  reaction: string;
+}
+
+// `/reactions-users-list.json` 的分页结果。totalRows 是该楼所有反应用户的总人数。
+export interface ReactionUsersPage {
+  users: ReactionUser[];
+  totalRows: number;
+}
+
 // discourse-boosts 插件:一条楼层下别人发的 boost(头像 + 一句短内容)。
 // 保留 cooked HTML(而非纯文本):boost 可能是纯 emoji 或文字+emoji 混排,
 // 渲染时按行内节点解析,避免纯 emoji 被当作空文本丢失。

@@ -3,7 +3,7 @@ import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
-import { PendingPost, Poll, PollVoteResult, PostBoost, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
+import { PendingPost, Poll, PollVoteResult, PostBoost, ReactionUser, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { User } from '../../models/User';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
@@ -18,6 +18,7 @@ import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortc
 import { BookmarkToggleResult, PostActions } from '../../services/topic/PostActions';
 import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
+import { ReactionUsersPager } from '../../services/topic/ReactionUsersPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { LoadStateView } from '../components/LoadStateView';
 import { TopicDetailHeader } from '../components/TopicDetailHeader';
@@ -29,6 +30,7 @@ import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/Comment
 import { ComposerPage, COMPOSER_ANIM_MS } from './ComposerPage';
 import { COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { TopicScrubber } from '../components/TopicScrubber';
+import { ReactionUsersSheet } from '../components/ReactionUsersSheet';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { floatingActionBottomMargin } from '../../common/ui/FloatingActionLayout';
 import { showToast as promptToast } from '../../common/utils/Toast';
@@ -65,6 +67,19 @@ export struct TopicDetailPage {
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
   // detail 整体加载/替换时经 @Watch 从 detail.bookmarked 同步;楼层 toggle 收藏后由回调直接改写实现即时联动。
   @State private topicBookmarked: boolean = false;
+  // 反应用户弹层状态由页面持有，避免 LazyForEach 的楼层项回收后丢失分页进度。
+  @State private showReactionUsersSheet: boolean = false;
+  @State private reactionUsersPost: TopicPost | undefined = undefined;
+  @State private reactionUsers: ReactionUser[] = [];
+  @State private reactionUsersTotal: number = 0;
+  @State private selectedReactionUserFilter: string = '';
+  @State private reactionUsersLoading: boolean = false;
+  @State private reactionUsersHasMore: boolean = false;
+  @State private reactionUsersInitialError: string = '';
+  @State private reactionUsersLoadMoreError: string = '';
+  private reactionUsersPager: ReactionUsersPager = new ReactionUsersPager();
+  private reactionUsersNextPage: number = 0;
+  private reactionUsersEpoch: number = 0;
   // 楼层真源:LazyForEach 数据源,增删经精准通知(maintainVisibleContentPosition 依赖)。
   // postCount 镜像总数驱动条件 UI(@State 观测不到 dataSource 内部变化),变更后须手动同步。
   private dataSource: PostDataSource = new PostDataSource();
@@ -297,6 +312,9 @@ export struct TopicDetailPage {
           onToggleReaction: (targetPost: TopicPost, reaction: string): Promise<boolean> => {
             return this.postActions.toggleReaction(targetPost, reaction);
           },
+          onOpenReactionUsers: (targetPost: TopicPost) => {
+            this.openReactionUsers(targetPost);
+          },
           onReply: (targetPost: TopicPost) => {
             this.openComposerForPost(targetPost);
           },
@@ -430,6 +448,37 @@ export struct TopicDetailPage {
     })
   }
 
+  @Builder
+  private ReactionUsersSheetBuilder() {
+    ReactionUsersSheet({
+      reactions: this.reactionUsersPost?.reactions ?? [],
+      totalRows: this.reactionUsersTotal,
+      users: this.reactionUsers,
+      selectedReaction: this.selectedReactionUserFilter,
+      isInitialLoading: this.reactionUsersLoading && this.reactionUsers.length === 0,
+      isLoadingMore: this.reactionUsersLoading && this.reactionUsers.length > 0,
+      hasMore: this.reactionUsersHasMore,
+      initialError: this.reactionUsersInitialError,
+      loadMoreError: this.reactionUsersLoadMoreError,
+      onSelectReaction: (reaction: string) => {
+        this.selectedReactionUserFilter = reaction;
+      },
+      onLoadMore: () => {
+        this.loadMoreReactionUsers();
+      },
+      onRetryInitial: () => {
+        this.loadReactionUsersPage(true);
+      },
+      onRetryLoadMore: () => {
+        this.loadMoreReactionUsers();
+      },
+      onOpenUser: (user: ReactionUser) => {
+        this.showReactionUsersSheet = false;
+        this.onOpenUser(user);
+      }
+    })
+  }
+
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
     Column() {
@@ -479,6 +528,17 @@ export struct TopicDetailPage {
     .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .bindSheet(this.showReactionUsersSheet, this.ReactionUsersSheetBuilder, {
+      // 初始半屏，长列表可上拉扩展到全屏高度。
+      height: SheetSize.MEDIUM,
+      detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+      dragBar: true,
+      showClose: false,
+      maskColor: '#66000000',
+      onDisappear: () => {
+        this.showReactionUsersSheet = false;
+      }
+    })
 
     // 右缘楼层 scrubber:话题够长(最高楼 > 1)且浮层未展开时挂载,拖动直接跳楼。
     // 覆盖层自身透明、只在右缘 Slider 处拦截触摸,不影响正文滚动。
@@ -997,6 +1057,73 @@ export struct TopicDetailPage {
     const reason: string = result.error ? result.error.message : '加载回复失败，请稍后重试。';
     this.showComposerToast(reason, 2000);
     return null;
+  }
+
+  // 打开时立刻以帖子详情中的汇总数渲染分类栏，明细由分页接口异步补齐。
+  private openReactionUsers(post: TopicPost): void {
+    const total: number = Math.max(0, post.reactionUsersCount ?? 0);
+    if (total === 0) {
+      return;
+    }
+    this.reactionUsersEpoch++;
+    this.reactionUsersPost = post;
+    this.reactionUsersPager.reset();
+    this.reactionUsers = [];
+    this.reactionUsersTotal = total;
+    this.reactionUsersNextPage = 0;
+    this.reactionUsersHasMore = true;
+    this.reactionUsersInitialError = '';
+    this.reactionUsersLoadMoreError = '';
+    this.reactionUsersLoading = false;
+    this.selectedReactionUserFilter = '';
+    this.showReactionUsersSheet = true;
+    this.loadReactionUsersPage(true);
+  }
+
+  private loadMoreReactionUsers(): void {
+    if (!this.reactionUsersHasMore) {
+      return;
+    }
+    this.loadReactionUsersPage(false);
+  }
+
+  private async loadReactionUsersPage(reset: boolean): Promise<void> {
+    const post: TopicPost | undefined = this.reactionUsersPost;
+    if (!post || this.reactionUsersLoading || (!reset && !this.reactionUsersHasMore)) {
+      return;
+    }
+    const epoch: number = this.reactionUsersEpoch;
+    const page: number = reset ? 0 : this.reactionUsersNextPage;
+    this.reactionUsersLoading = true;
+    if (reset) {
+      this.reactionUsersInitialError = '';
+    } else {
+      this.reactionUsersLoadMoreError = '';
+    }
+
+    const result = await new TopicService(this.bridge).getReactionUsers(post.id, page);
+    if (epoch !== this.reactionUsersEpoch) {
+      return;
+    }
+    this.reactionUsersLoading = false;
+    if (result.success && result.data) {
+      if (reset) {
+        this.reactionUsersPager.reset();
+      }
+      this.reactionUsersPager.append(result.data);
+      this.reactionUsers = this.reactionUsersPager.allUsers();
+      this.reactionUsersNextPage = page + 1;
+      // 空页时强制停止，避免服务端 total_rows 与分页数据短暂不一致时无限触底请求。
+      this.reactionUsersHasMore = result.data.users.length > 0 && this.reactionUsersPager.hasMore();
+      return;
+    }
+
+    const message: string = result.error?.message ? result.error.message : '加载表情回应失败，请稍后重试。';
+    if (reset) {
+      this.reactionUsersInitialError = message;
+    } else {
+      this.reactionUsersLoadMoreError = message;
+    }
   }
 
   // "俺也一样"(shared issue)toggle:发网络并把服务端返回的权威新态回写到 this.detail(持久化计数/已点态),
