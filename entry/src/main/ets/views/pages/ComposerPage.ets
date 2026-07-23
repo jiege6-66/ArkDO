@@ -1,7 +1,13 @@
 import webview from '@ohos.web.webview';
 import { curves, KeyboardAvoidMode } from '@kit.ArkUI';
+import {
+  HdsNavigation,
+  HdsNavigationTitleMode,
+  SystemMaterialParams
+} from '@kit.UIDesignKit';
 import window from '@ohos.window';
 import { inputMethod } from '@kit.IMEKit';
+import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { JsonNetworkClient } from '../../services/network/NetworkTypes';
@@ -19,7 +25,13 @@ import { DraftTagRef } from '../../models/Draft';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
 import { showToast as promptToast, TOAST_SHORT_MS } from '../../common/utils/Toast';
-import { BRAND_BLUE, SCRIM, SCRIM_STRONG, SHADOW_CARD } from '../../common/theme/Palette';
+import { SCRIM, SCRIM_STRONG, SHADOW_CARD } from '../../common/theme/Palette';
+import {
+  adaptiveSystemMaterialEffect,
+  ImmersiveLightArea,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
 // 一次最多选图张数(对齐 Discourse composer 手感)。
@@ -574,7 +586,10 @@ export struct ComposerPage {
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
       Column() {
-        this.Header()
+        // HDS 标题栏以覆盖层绘制，不参与正文 Column 布局；保留原来的 56vp 占位，
+        // 让标题/分类/正文首帧位置与改造前完全一致，也避免被原生按钮盖住。
+        Blank()
+          .height(56)
         // 发帖模式:标题 + 分类。预览态藏起来——预览是看正文成品的,标题栏杵在那儿只是干扰。
         if (this.composeTopic && this.mode === ComposerMode.Edit) {
           this.TopicMetaBar()
@@ -602,6 +617,8 @@ export struct ComposerPage {
       .geometryTransition(COMPOSER_GEOMETRY_ID, { follow: true })
       .clip(true)
       .transition(TransitionEffect.OPACITY.animation({ duration: COMPOSER_ANIM_MS, curve: Curve.EaseOut }))
+
+      this.ComposerTitleBarOverlay()
 
       // 隐藏的 markdown-it 渲染 Web:1×1、透明、不响应点击。只做 raw→HTML 编译。
       Web({ src: $rawfile('markdown/render.html'), controller: this.mdWebController })
@@ -784,20 +801,12 @@ export struct ComposerPage {
   }
 
   @Builder
-  private Header() {
+  private ComposerTitleBarContent() {
     Row() {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(20)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
-        this.onBack();
-      })
+      // stackBuilder 覆盖完整标题栏，左右透明占位分别给 HDS 原生关闭键和发送菜单留出区域。
+      Blank()
+        .width(40)
+        .height(40)
 
       // 中部:编辑/预览分段切换。
       Row() {
@@ -807,31 +816,72 @@ export struct ComposerPage {
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
 
-      // 发送按钮:与左侧关闭按钮同款圆形系统按钮(SymbolGlyph 纸飞机),但保留蓝底白图标突出主操作。
-      // 达标可点,提交中转圈。
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        if (this.isSubmitting) {
-          LoadingProgress().width(20).height(20).color('#FFFFFF')
-        } else {
-          // paperplane_fill 朝正北(上):纸飞机头朝上。
-          SymbolGlyph($r('sys.symbol.paperplane_fill'))
-            .fontSize(19)
-            .fontColor(['#FFFFFF'])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-      }
+      Blank()
       .width(40)
       .height(40)
-      .backgroundColor(BRAND_BLUE)
-      .opacity(this.canSubmit() ? 1 : 0.5)
-      .onClick(() => {
-        this.submit();
-      })
     }
     .width('100%')
     .height(56)
     .padding({ left: 12, right: 12 })
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  private ComposerTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      style: {
+        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
+      },
+      content: {
+        // 这里使用 backIcon 的原生按钮容器，但图标沿用编辑器语义的“关闭”，不改成返回箭头。
+        backIcon: {
+          icon: $r('sys.symbol.xmark'),
+          label: '关闭',
+          action: () => {
+            this.onBack();
+          }
+        },
+        menu: {
+          value: [{
+            content: {
+              icon: this.sendMenuSymbolModifier(),
+              label: '发送',
+              // 内容不完整时仍允许点击，由 submit() 给出缺标题/分类/标签/字数的具体提示；
+              // 只有请求已经发出时才真正禁用，防止重复提交。
+              isEnabled: !this.isSubmitting,
+              action: () => {
+                this.submit();
+              }
+            }
+          }]
+        },
+        stackBuilder: () => {
+          this.ComposerTitleBarContent();
+        }
+      }
+    })
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  // HDS menu 支持 SymbolGlyphModifier，因此可保留原发送按钮的“可发送=品牌色、不可发送=弱化色”反馈。
+  // 菜单项在校验未通过时仍可点击，实际阻断与提示统一由 submit()/canSubmit() 负责。
+  private sendMenuSymbolModifier(): SymbolGlyphModifier {
+    const modifier: SymbolGlyphModifier = new SymbolGlyphModifier($r('sys.symbol.paperplane_fill'));
+    modifier.fontSize(19);
+    modifier.fontColor([this.canSubmit() ? $r('app.color.brand') : $r('app.color.text_faint')]);
+    return modifier;
   }
 
   // 发帖专属:标题输入 + 分类选择,通栏发丝线与正文分组(对齐项目的鸿蒙清爽风,不套卡片)。
