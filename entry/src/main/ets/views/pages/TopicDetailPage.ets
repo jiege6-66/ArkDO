@@ -126,8 +126,9 @@ export struct TopicDetailPage {
   // 首帧定位的 List 下标(目标楼 + summary 占位偏移)。List 创建时读取一次,无需 @State。
   private initialListIndex: number = 0;
   // 带目标楼进入时由 List 首次布局直接预留 HDS 标题栏高度，避免 initialIndex 后再二次滚动。
-  // 普通首屏为 0，顶部空间仍由摘要项内部占位提供。
-  private initialListStartOffset: number = 0;
+  // 滚回列表顶部后会归零，并由摘要内部 Blank 等量接管顶部空间；需为 @State 才能同步刷新
+  // List.contentStartOffset 与 HDS 模糊阈值。普通首屏从一开始就是 0。
+  @State private initialListStartOffset: number = 0;
   // "上次访问"红线:进入时快照的已读水位(只取一次,页内重开窗口/本次阅读推高水位都不重取,
   // 否则线会消失);锚楼 = 快照后第一条已加载未读楼的 post.id,楼层创建前确定,不再变化。
   private lastVisitedSnapshot: number = 0;
@@ -451,6 +452,9 @@ export struct TopicDetailPage {
     .onScrollIndex((start: number, end: number) => {
       this.currentStartListIndex = start;
       this.currentEndListIndex = end;
+      if (start === 0) {
+        this.normalizeTargetListStartOffsetAtTop();
+      }
       // List 的 index 0 是 TopicSummary,楼层从 index 1 起 → 换算成 posts 下标再交给已读控制器。
       this.readController.onVisibleRange(start - 1, end - 1);
       // 摘要 ListItem 固定为 index 0:仍在视口内(start===0)显示"帖子详情",滑出后显示帖子标题与分类标签。
@@ -572,7 +576,13 @@ export struct TopicDetailPage {
         style: {
           scrollEffectOpts: {
             enableScrollEffect: true,
-            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+            // 通知/未读入口用 contentStartOffset 把目标楼首帧放在标题栏下方；List 此时的初始
+            // 滚动偏移是负的标题栏高度。若继续使用 HDS 默认 0..8vp 阈值，必须把目标楼一直
+            // 滚到物理屏幕外才会开始模糊。阈值同步左移同一偏移后，内容刚进入标题栏覆盖区
+            // 就开始过渡；普通入口 initialListStartOffset=0，仍保持 HDS 默认触发区间。
+            blurEffectiveStartOffset: LengthMetrics.vp(-this.initialListStartOffset),
+            blurEffectiveEndOffset: LengthMetrics.vp(8 - this.initialListStartOffset)
           },
           scrollEffectStyle: {
             backgroundStyle: {
@@ -1143,6 +1153,17 @@ export struct TopicDetailPage {
     this.scroller.scrollToIndex(listIndex, smooth, ScrollAlign.START, {
       extraOffset: LengthMetrics.vp(-remainingOffset)
     });
+  }
+
+  // contentStartOffset 只用于“带目标楼首帧定位”，不应成为这一个 List 永久的滚动坐标系。
+  // 用户回到顶部时将它归零；摘要项 Blank 的高度公式是 contentSpacer - startOffset，
+  // 因此同一帧会等量增高，总顶部空间保持不变，不会产生视觉跳动。归零后 HDS 的 0..8vp
+  // 模糊区间与普通从一楼进入时完全一致，避免再次要求内容滚到物理屏幕外才触发模糊。
+  private normalizeTargetListStartOffsetAtTop(): void {
+    if (this.initialListStartOffset <= 0) {
+      return;
+    }
+    this.initialListStartOffset = 0;
   }
 
   // 加载某楼的「被回复」列表(供 TopicPostItem 展开时调用)。成功返回楼层数组;失败弹 toast 并返回 null。
