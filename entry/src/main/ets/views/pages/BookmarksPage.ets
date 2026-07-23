@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { LoginGate } from '../../services/session/LoginGate';
 import { Bookmark, BookmarkPage } from '../../models/Bookmark';
 import { TopicCategory } from '../../models/Topic';
@@ -16,14 +16,11 @@ import { showToast as promptToast } from '../../common/utils/Toast';
 import { ListFooter } from '../components/ListFooter';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][BookmarksPage]';
 const PAGE_PADDING: number = 16;
@@ -68,20 +65,7 @@ export struct BookmarksPage {
     .titleBar({
       avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
       enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-      style: {
-        scrollEffectOpts: {
-          enableScrollEffect: true,
-          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-          enableRefreshOffsetChange: true
-        },
-        scrollEffectStyle: {
-          backgroundStyle: {
-            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-          }
-        },
-        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-      },
+      style: buildImmersiveTitleBarStyle({ enableRefreshOffsetChange: true }),
       content: {
         title: {
           mainTitle: this.bookmarks.length > 0 ? `书签 · ${this.bookmarks.length}` : '书签'

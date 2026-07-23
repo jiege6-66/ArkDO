@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { TopicCategory } from '../../models/Topic';
 import { UserActivityItem, UserActivityPage } from '../../models/UserProfile';
 import { RelativeTime } from '../../common/utils/RelativeTime';
@@ -13,14 +13,11 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { ListFooter } from '../components/ListFooter';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][ActivityListPage]';
 const PAGE_PADDING: number = 16;
@@ -69,20 +66,7 @@ export struct ActivityListPage {
     .titleBar({
       avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
       enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-      style: {
-        scrollEffectOpts: {
-          enableScrollEffect: true,
-          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-          enableRefreshOffsetChange: true
-        },
-        scrollEffectStyle: {
-          backgroundStyle: {
-            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-          }
-        },
-        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-      },
+      style: buildImmersiveTitleBarStyle({ enableRefreshOffsetChange: true }),
       content: {
         title: {
           mainTitle: this.pageTitle

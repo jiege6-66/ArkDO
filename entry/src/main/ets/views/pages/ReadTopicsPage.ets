@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { Topic, TopicCategory } from '../../models/Topic';
 import { JsonNetworkClient, NetworkResult } from '../../services/network/NetworkTypes';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -10,14 +10,11 @@ import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { ListFooter } from '../components/ListFooter';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][ReadTopicsPage]';
 
@@ -63,20 +60,7 @@ export struct ReadTopicsPage {
     .titleBar({
       avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
       enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-      style: {
-        scrollEffectOpts: {
-          enableScrollEffect: true,
-          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-          enableRefreshOffsetChange: true
-        },
-        scrollEffectStyle: {
-          backgroundStyle: {
-            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-          }
-        },
-        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-      },
+      style: buildImmersiveTitleBarStyle({ enableRefreshOffsetChange: true }),
       content: {
         title: {
           mainTitle: '浏览历史'

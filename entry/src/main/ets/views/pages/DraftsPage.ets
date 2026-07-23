@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { Draft, DraftAction, DraftPage, DraftTagRef } from '../../models/Draft';
 import { TopicCategory } from '../../models/Topic';
@@ -17,14 +17,11 @@ import { DRAFTS_COMPOSER_BACK_TICK_KEY, DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFR
 import { ListFooter } from '../components/ListFooter';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -140,20 +137,7 @@ export struct DraftsPage {
     .titleBar({
       avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
       enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-      style: {
-        scrollEffectOpts: {
-          enableScrollEffect: true,
-          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-          enableRefreshOffsetChange: true
-        },
-        scrollEffectStyle: {
-          backgroundStyle: {
-            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-          }
-        },
-        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-      },
+      style: buildImmersiveTitleBarStyle({ enableRefreshOffsetChange: true }),
       content: {
         title: {
           mainTitle: this.drafts.length > 0 ? `我的草稿 · ${this.drafts.length}` : '我的草稿'

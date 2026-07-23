@@ -1,6 +1,11 @@
 import { ActionBarButton, ActionBarStyle, HdsActionBar } from '@kit.UIDesignKit';
 import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
+import {
+  buildImmersiveFloatingActionButtonModifier,
+  buildImmersiveFloatingActionStyle,
+  IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
+} from '../../common/ui/ImmersiveActionBarStyle';
 
 @Component
 export struct HomeFab {
@@ -12,7 +17,8 @@ export struct HomeFab {
   build() {
     HdsActionBar({
       primaryButton: this.fabButton(),
-      actionBarStyle: this.fabStyle()
+      actionBarStyle: this.fabStyle(),
+      blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
     })
     .width(52)
     .height(52)
@@ -21,10 +27,15 @@ export struct HomeFab {
   private fabButton(): ActionBarButton {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
-      backgroundColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_bg') : $r('app.color.fab_compose_bg')),
+      // 背景色必须落在按钮层：若只加到 ActionBar 外层，会被 HDS 模糊材质再次合成，
+      // 主题底色与同节点 backdropBlur(30) 配合：正文可以透光，但先被模糊，
+      // 不会像单纯透明背景一样仍能辨认；外层 ActionBar 保留官方交互与阴影能力。
+      backgroundColor: ColorMetrics.resourceColor($r('app.color.hds_floating_action_bg')),
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(),
       iconSize: LengthMetrics.vp(22),
-      iconFillColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_fg') : $r('app.color.fab_compose_fg')),
-      baseIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.square_and_pencil'), $r('app.color.fab_compose_fg')),
+      // 发帖/回复仍使用品牌蓝图标表达主操作，回顶态则沿用中性色降低视觉权重。
+      iconFillColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_fg') : $r('app.color.fab_compose_bg')),
+      baseIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.square_and_pencil'), $r('app.color.fab_compose_bg')),
       altIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.arrow_up_to_line'), $r('app.color.fab_top_fg')),
       accessibilityText: this.showBackToTop ? '回到顶部' : '发帖',
       onClick: () => {
@@ -38,15 +49,9 @@ export struct HomeFab {
   }
 
   private fabStyle(): ActionBarStyle {
-    return new ActionBarStyle({
-      height: LengthMetrics.vp(52),
-      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
-      innerSpace: LengthMetrics.vp(0),
-      startSpace: LengthMetrics.vp(0),
-      endSpace: LengthMetrics.vp(0),
-      isHorizontal: true,
-      isPrimaryIconChanged: this.showBackToTop
-    });
+    const style: ActionBarStyle = buildImmersiveFloatingActionStyle();
+    style.isPrimaryIconChanged = this.showBackToTop;
+    return style;
   }
 
   private symbolModifier(icon: Resource, color: ResourceColor): SymbolGlyphModifier {

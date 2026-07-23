@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { HdsNavigation, HdsNavigationTitleMode, ScrollEffectType, SystemMaterialParams } from '@kit.UIDesignKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { TopicCategory } from '../../models/Topic';
@@ -37,14 +37,11 @@ import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/t
 import { LIKE_RED } from '../../common/theme/Palette';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][UserProfile]';
 
@@ -189,19 +186,7 @@ export struct UserProfilePage {
     .titleBar({
       avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
       enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-      style: {
-        scrollEffectOpts: {
-          enableScrollEffect: true,
-          scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
-        },
-        scrollEffectStyle: {
-          backgroundStyle: {
-            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-          }
-        },
-        systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-      },
+      style: buildImmersiveTitleBarStyle(),
       content: {
         title: {
           mainTitle: this.isTitleShown ? this.getDisplayName() : '个人资料'

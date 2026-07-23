@@ -1,10 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import {
-  BlurStrategy,
   HdsNavigation,
-  HdsNavigationTitleMode,
-  ScrollEffectType,
-  SystemMaterialParams
+  HdsNavigationTitleMode
 } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
@@ -41,14 +38,12 @@ import { HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY } from '../../co
 import { SCRIM } from '../../common/theme/Palette';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  customSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
   HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -346,28 +341,7 @@ export struct HomePage {
       .titleBar({
         avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
         enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-        style: {
-          scrollEffectOpts: {
-            enableScrollEffect: true,
-            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-            enableRefreshOffsetChange: true
-          },
-          originalStyle: {
-            backgroundStyle: {
-              backgroundColor: Color.Transparent,
-              blurRadius: 0
-            }
-          },
-          scrollEffectStyle: {
-            backgroundStyle: {
-              backgroundColor: $r('app.color.home_title_bar_scrolled_bg'),
-              maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-              blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-            }
-          },
-          blurStrategy: BlurStrategy.ENABLE,
-          systemMaterialEffect: customSystemMaterialEffect(true) as SystemMaterialParams
-        },
+        style: buildImmersiveTitleBarStyle({ enableRefreshOffsetChange: true }),
         content: {
           stackBuilder: () => {
             this.HomeTitleBarContent();

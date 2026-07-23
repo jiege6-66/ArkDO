@@ -9,8 +9,16 @@
       "value": "#FFFFFF"
     },
     {
-      "name": "home_title_bar_scrolled_bg",
+      "name": "hds_title_bar_scrolled_bg",
       "value": "#BFFFFFFF"
+    },
+    {
+      "name": "hds_floating_action_bg",
+      "value": "#B3F2F3F5"
+    },
+    {
+      "name": "hds_floating_action_highlight",
+      "value": "#66FFFFFF"
     },
     {
       "name": "text_primary",

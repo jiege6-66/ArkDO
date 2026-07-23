@@ -3,9 +3,7 @@ import {
   ActionBarStyle,
   HdsActionBar,
   HdsNavigation,
-  HdsNavigationTitleMode,
-  ScrollEffectType,
-  SystemMaterialParams
+  HdsNavigationTitleMode
 } from '@kit.UIDesignKit';
 import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
@@ -48,14 +46,16 @@ import {
   immersiveTitleBarContentTopSpacer
 } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
-  adaptiveSystemMaterialEffect,
-  HDS_TITLE_BAR_BLUR_RADIUS,
-  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
-  preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
+import {
+  buildImmersiveFloatingActionButtonModifier,
+  buildImmersiveFloatingActionStyle,
+  IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
+} from '../../common/ui/ImmersiveActionBarStyle';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -573,25 +573,13 @@ export struct TopicDetailPage {
       .titleBar({
         avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
         enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
-        style: {
-          scrollEffectOpts: {
-            enableScrollEffect: true,
-            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
-            // 通知/未读入口用 contentStartOffset 把目标楼首帧放在标题栏下方；List 此时的初始
-            // 滚动偏移是负的标题栏高度。若继续使用 HDS 默认 0..8vp 阈值，必须把目标楼一直
-            // 滚到物理屏幕外才会开始模糊。阈值同步左移同一偏移后，内容刚进入标题栏覆盖区
-            // 就开始过渡；普通入口 initialListStartOffset=0，仍保持 HDS 默认触发区间。
-            blurEffectiveStartOffset: LengthMetrics.vp(-this.initialListStartOffset),
-            blurEffectiveEndOffset: LengthMetrics.vp(8 - this.initialListStartOffset)
-          },
-          scrollEffectStyle: {
-            backgroundStyle: {
-              maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
-              blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
-            }
-          },
-          systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
-        },
+        // 通知/未读入口用 contentStartOffset 把目标楼首帧放在标题栏下方；List 此时的初始
+        // 滚动偏移是负的标题栏高度。阈值同步左移同一偏移后，内容刚进入标题栏覆盖区就开始
+        // 过渡；滚回顶部归零后恢复公共样式的 0..8vp 区间。
+        style: buildImmersiveTitleBarStyle({
+          blurEffectiveStartOffset: LengthMetrics.vp(-this.initialListStartOffset),
+          blurEffectiveEndOffset: LengthMetrics.vp(8 - this.initialListStartOffset)
+        }),
         content: {
           backIcon: {
             icon: $r('sys.symbol.chevron_left'),
@@ -654,7 +642,8 @@ export struct TopicDetailPage {
     if (this.detail && !this.showComposer) {
       HdsActionBar({
         primaryButton: this.replyFabButton(),
-        actionBarStyle: this.replyFabStyle()
+        actionBarStyle: this.replyFabStyle(),
+        blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
       })
       .width(52)
       .height(52)
@@ -1310,9 +1299,13 @@ export struct TopicDetailPage {
   private replyFabButton(): ActionBarButton {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
-      backgroundColor: ColorMetrics.resourceColor(REPLY_BLUE),
+      // 主题底色与同节点 backdropBlur(30) 配合：正文可以透光，但会先被模糊；
+      // 外层 HdsActionBar 保留官方交互与阴影能力。
+      backgroundColor: ColorMetrics.resourceColor($r('app.color.hds_floating_action_bg')),
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(),
       iconSize: LengthMetrics.vp(22),
-      iconFillColor: ColorMetrics.resourceColor('#FFFFFF'),
+      // 品牌蓝仅用于图标，仍能明确表达“回复”这个主操作。
+      iconFillColor: ColorMetrics.resourceColor(REPLY_BLUE),
       baseIconSymbolGlyphModifier: this.replyFabSymbolModifier(),
       accessibilityText: '回复当前话题',
       onClick: () => {
@@ -1322,20 +1315,13 @@ export struct TopicDetailPage {
   }
 
   private replyFabStyle(): ActionBarStyle {
-    return new ActionBarStyle({
-      height: LengthMetrics.vp(52),
-      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
-      innerSpace: LengthMetrics.vp(0),
-      startSpace: LengthMetrics.vp(0),
-      endSpace: LengthMetrics.vp(0),
-      isHorizontal: true
-    });
+    return buildImmersiveFloatingActionStyle();
   }
 
   private replyFabSymbolModifier(): SymbolGlyphModifier {
     const modifier: SymbolGlyphModifier = new SymbolGlyphModifier($r('sys.symbol.message_fill'));
     modifier.fontSize(22);
-    modifier.fontColor(['#FFFFFF']);
+    modifier.fontColor([REPLY_BLUE]);
     return modifier;
   }
 
