@@ -9,6 +9,7 @@ import {
   HDS_MATERIAL_LEVEL_GENTLE,
   HDS_MATERIAL_LEVEL_SMOOTH,
   HDS_MATERIAL_TYPE_ADAPTIVE,
+  HDS_MATERIAL_TYPE_IMMERSIVE,
   ImmersiveLightArea,
   ImmersiveLightMode,
   preferredTitleBarScrollEffectType,
@@ -54,7 +55,9 @@ export default function immersiveLightMaterialTest() {
     });
 
     it('selectsCustomMaterialLevelFromSupportFlag', 0, () => {
+      expect(customSystemMaterialEffect(true).materialType).assertEqual(HDS_MATERIAL_TYPE_IMMERSIVE);
       expect(customSystemMaterialEffect(true).materialLevel).assertEqual(HDS_MATERIAL_LEVEL_GENTLE);
+      expect(customSystemMaterialEffect(false).materialType).assertEqual(HDS_MATERIAL_TYPE_ADAPTIVE);
       expect(customSystemMaterialEffect(false).materialLevel).assertEqual(HDS_MATERIAL_LEVEL_SMOOTH);
     });
 

@@ -1,7 +1,8 @@
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { TopicMetadataBadges } from './TopicBadges';
 
-// 详情页头部:返回键 + 双层标题。两种标题内容始终挂载、叠层显示,
+// 详情页 HDS 标题栏的自定义中间内容。返回键与右侧菜单由 HdsNavigation 原生区域绘制；
+// 本组件只负责双层标题及其左右占位。两种标题内容始终挂载、叠层显示,
 // 靠 opacity+translate 随 summaryVisible 做淡入+竖向上滑切换:
 // 摘要(标题/分类/标签)仍在视口内时显示静态标题「帖子详情」,滑出后切换为帖子标题与分类标签行。
 @Component
@@ -17,34 +18,18 @@ export struct TopicDetailHeader {
   @Prop solved: boolean = false;
   // 已收藏:图层 B 帖子标题最前内联灰色书签标记,排在已解决勾选框之前。
   @Prop bookmarked: boolean = false;
-  onBack: () => void = () => {};
   // 点顶栏帖子标题回一楼。只在图层 B(帖子标题)显示时可点——摘要仍在视口内时一楼就在眼前,
   // 且那时显示的是「帖子详情」静态标题,点它没有意义(图层 B 的 hitTestBehavior 已天然做到这点)。
   onTitleClick: () => void = () => {};
-  // 过盾快捷入口:仅在「用户开了设置开关」且「本次阅读确实被盾拦下」时显示,由父页判定后传入。
-  // 不做常驻——多数时候没盾可过,常驻只会占地方。
+  // 右侧原生过盾菜单出现时，为自定义标题预留同宽空间，避免标题伸到菜单按钮下面。
   @Prop showChallengeShortcut: boolean = false;
-  onChallengeShortcutClick: () => void = () => {};
-
-  @Styles
-  immersiveHeaderButtonStyle() {
-    .width(40)
-    .height(40)
-    .backgroundColor($r('app.color.surface_muted'))
-  }
 
   build() {
     Row({ space: 8 }) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .immersiveHeaderButtonStyle()
-      .onClick(() => {
-        this.onBack();
-      })
+      // stackBuilder 覆盖整条标题栏，需为 HDS 原生返回按钮留出不可点击的布局空间。
+      Blank()
+        .width(40)
+        .height(40)
 
       Stack({ alignContent: Alignment.Start }) {
         // 图层 A:摘要在视口内时显示的静态标题「帖子详情」。
@@ -112,29 +97,16 @@ export struct TopicDetailHeader {
       .layoutWeight(1)
       .alignContent(Alignment.Start)
 
-      // 过盾快捷入口。不随标题双层切换隐藏——「被盾拦着」是当前会话的状态,
-      // 与用户滑到了哪儿无关,跟着标题层走反而会让人以为问题自己好了。
+      // 右侧按钮由 HdsNavigation.menu 绘制，这里仅做对称占位，不参与点击。
       if (this.showChallengeShortcut) {
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.lock_shield'))
-            .fontSize(20)
-            .fontColor([$r('app.color.warning')])
-            .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-        }
-        .immersiveHeaderButtonStyle()
-        .onClick(() => {
-          this.onChallengeShortcutClick();
-        })
+        Blank()
+          .width(40)
+          .height(40)
       }
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
     .height(56)
     .padding({ left: 16, right: 16 })
-    .backgroundColor($r('app.color.page_bg'))
-    .border({
-      width: { bottom: 1 },
-      color: $r('app.color.border')
-    })
   }
 }

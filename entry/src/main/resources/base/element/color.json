@@ -9,6 +9,10 @@
       "value": "#FFFFFF"
     },
     {
+      "name": "home_title_bar_scrolled_bg",
+      "value": "#BFFFFFFF"
+    },
+    {
       "name": "text_primary",
       "value": "#111827"
     },

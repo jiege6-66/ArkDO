@@ -9,6 +9,8 @@ import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/t
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
   adaptiveSystemMaterialEffect,
+  HDS_TITLE_BAR_BLUR_RADIUS,
+  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
   preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
@@ -242,6 +244,12 @@ export struct DohSettingsPage {
         scrollEffectOpts: {
           enableScrollEffect: true,
           scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        scrollEffectStyle: {
+          backgroundStyle: {
+            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
+          }
         },
         systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
       },

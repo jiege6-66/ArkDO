@@ -1,4 +1,12 @@
-import { ActionBarButton, ActionBarStyle, HdsActionBar } from '@kit.UIDesignKit';
+import {
+  ActionBarButton,
+  ActionBarStyle,
+  HdsActionBar,
+  HdsNavigation,
+  HdsNavigationTitleMode,
+  ScrollEffectType,
+  SystemMaterialParams
+} from '@kit.UIDesignKit';
 import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
@@ -35,11 +43,23 @@ import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/Imme
 import { floatingActionBottomMargin } from '../../common/ui/FloatingActionLayout';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { SHADOW_SOFT } from '../../common/theme/Palette';
+import {
+  immersiveTitleBarBottomOffset,
+  immersiveTitleBarContentTopSpacer
+} from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  adaptiveSystemMaterialEffect,
+  HDS_TITLE_BAR_BLUR_RADIUS,
+  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
-// 楼层预创建数(视口外上下各 N 条)。注意:maintainVisibleContentPosition 只补偿"布局范围外"的
-// 头插,插入点落进预创建范围内则不补偿——向上预取阈值必须显著大于本值。
+// 楼层预创建数(视口外上下各 N 条)，平衡快滑白块与内存占用。
 const POSTS_CACHED_COUNT: number = 4;
 // 向上预取阈值(posts 下标):离已加载区间顶部还剩这么多楼就开始"拉数据"——只入 pendingEarlier 缓存,
 // 不碰数据源。拉取纯后台、不动画面,故提前量给足,让数据在视口进入插入安全窗之前就备好。
@@ -98,14 +118,16 @@ export struct TopicDetailPage {
   // 窗口式加载(从任意楼号进入)的向上分页:已加载区间之前是否还有更早楼层/是否正在补。
   @State private hasEarlier: boolean = false;
   @State private isLoadingEarlier: boolean = false;
-  // 已拉到手但尚未插入的更早楼层。插入时机与网络返回时刻解耦:响应期间用户仍在上滑,若拿到就插,
-  // 插入点常已漂进 List 布局范围,只能靠手动重锚救场——而重锚是无动画瞬跳,会掐断惯性滑动。
-  // 改由 tryFlushEarlierPosts 在滚动回调里择机同步插入(见其注释)。
+  // 已拉到手但尚未插入的更早楼层。统一经 tryFlushEarlierPosts 精准头插，交给 List 的
+  // maintainVisibleContentPosition 保持当前内容位置，避免额外滚动命令与 HDS 覆盖层坐标冲突。
   private pendingEarlier: TopicPost[] = [];
   // 窗口纪元:换窗/重载须作废在途预取与缓存——旧窗口的楼层插进新窗口是楼号错乱。
   private earlierEpoch: number = 0;
   // 首帧定位的 List 下标(目标楼 + summary 占位偏移)。List 创建时读取一次,无需 @State。
   private initialListIndex: number = 0;
+  // 带目标楼进入时由 List 首次布局直接预留 HDS 标题栏高度，避免 initialIndex 后再二次滚动。
+  // 普通首屏为 0，顶部空间仍由摘要项内部占位提供。
+  private initialListStartOffset: number = 0;
   // "上次访问"红线:进入时快照的已读水位(只取一次,页内重开窗口/本次阅读推高水位都不重取,
   // 否则线会消失);锚楼 = 快照后第一条已加载未读楼的 post.id,楼层创建前确定,不再变化。
   private lastVisitedSnapshot: number = 0;
@@ -114,8 +136,8 @@ export struct TopicDetailPage {
   // 靠 @Watch 就地起播(已加载路径的楼内跳转)。短暂生效后清零,避免楼层销毁重建时重播。
   @State private flashTargetPostId: number = 0;
   private flashClearTimerId: number = -1;
-  // 当前视口首/末项的 List 下标(onScrollIndex 持续更新):头插落在布局范围内时据此手动重锚;
-  // 跳楼时据此判断目标楼是否已在屏内(在屏内则不滚动)。
+  // 当前视口首/末项的 List 下标(onScrollIndex 持续更新):用于预取判断、已读统计，
+  // 以及跳楼时判断目标楼是否已在屏内(在屏内则不滚动)。
   private currentStartListIndex: number = 0;
   private currentEndListIndex: number = 0;
   // 跳未加载楼的重开窗口请求进行中(防重入 + 顶部悬浮胶囊提示)。请求期间旧列表原样保留,不白屏。
@@ -276,15 +298,22 @@ export struct TopicDetailPage {
   private PostListSection() {
     List({ scroller: this.scroller, initialIndex: this.initialListIndex }) {
       ListItem() {
-        TopicSummaryCard({
-          title: this.getTitle(),
-          category: CategoryIndex.find(this.categories, this.detail?.categoryId),
-          parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
-          tags: this.getTags(),
-          metaText: this.getTopicMetaText(),
-          solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
-          bookmarked: this.topicBookmarked
-        })
+        Column() {
+          Blank()
+            .height(Math.max(0,
+              immersiveTitleBarContentTopSpacer(this.sysTopInset) - this.initialListStartOffset))
+
+          TopicSummaryCard({
+            title: this.getTitle(),
+            category: CategoryIndex.find(this.categories, this.detail?.categoryId),
+            parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
+            tags: this.getTags(),
+            metaText: this.getTopicMetaText(),
+            solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
+            bookmarked: this.topicBookmarked
+          })
+        }
+        .width('100%')
       }
 
       LazyForEach(this.dataSource, (post: TopicPost) => {
@@ -408,7 +437,8 @@ export struct TopicDetailPage {
       }
     }
     .width('100%')
-    .layoutWeight(1)
+    .height('100%')
+    .contentStartOffset(this.initialListStartOffset)
     // 关掉系统默认滚动条:右缘已有楼层 scrubber,两者并存会视觉打架。
     .scrollBar(BarState.Off)
     // 左右留白下放到各 item 内部(楼层高亮背景要通栏),List 不再统一内缩。
@@ -417,7 +447,7 @@ export struct TopicDetailPage {
     .maintainVisibleContentPosition(true)
     // 楼层含富文本/图片偏重,预创建数平衡快滑白块与内存(与向上预取阈值联动,见常量注释)。
     .cachedCount(POSTS_CACHED_COUNT)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .onScrollIndex((start: number, end: number) => {
       this.currentStartListIndex = start;
       this.currentEndListIndex = end;
@@ -427,15 +457,15 @@ export struct TopicDetailPage {
       this.summaryVisible = start === 0;
       // 右缘 scrubber:维护可滚动性、钉底闩、当前楼号(见 updateScrubberFromScroll)。
       this.updateScrubberFromScroll(start, end);
-      // 先试插已备好的更早楼层:这里是同步的,start 即真值,插入点必在布局范围外 → 框架静默补偿,
-      // 滑动不断帧。再按阈值预取下一页(纯拉数据,不动画面)。顺序不能反,否则 pending 未清会挡住预取。
+      // 先插入已备好的更早楼层，再按阈值预取下一页。头插只发精准 ADD 通知，由 List 自己保持
+      // 可见内容；HDS 标题栏是覆盖层，不能拿 start 当“标题栏下方首项”再手动滚动。
       this.tryFlushEarlierPosts(start);
       if (this.hasEarlier && start - 1 <= EARLIER_PREFETCH_INDEX) {
         this.prefetchEarlierPosts();
       }
     })
     .onReachStart(() => {
-      // 兜底:飞速甩到顶、安全窗没命中时。此处 start 为 0,tryFlush 会走手动重锚分支。
+      // 兜底:飞速甩到顶时立即并入已预取楼层，并继续拉取上一页。
       this.tryFlushEarlierPosts(this.currentStartListIndex);
       this.prefetchEarlierPosts();
     })
@@ -448,6 +478,52 @@ export struct TopicDetailPage {
         this.currentPostNumber = this.getHighestPostNumber();
       }
     })
+  }
+
+  @Builder
+  private DetailTitleBarContent() {
+    TopicDetailHeader({
+      summaryVisible: this.summaryVisible,
+      title: this.getTitle(),
+      showBadges: this.hasBadges(),
+      category: CategoryIndex.find(this.categories, this.detail?.categoryId),
+      parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
+      tags: this.getTags(),
+      solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
+      bookmarked: this.topicBookmarked,
+      onTitleClick: () => {
+        this.jumpToFirstPost();
+      },
+      // 与 HdsNavigation.menu 使用同一条件，仅用于给右侧原生按钮预留标题空间。
+      showChallengeShortcut: this.shouldShowChallengeShortcut()
+    })
+  }
+
+  @Builder
+  private DetailMainContent() {
+    if (this.detail) {
+      // 相同的两个分支:翻转 listEpochEven 强制销毁重建 List(原地换窗用),平时恒走其一。
+      if (this.listEpochEven) {
+        this.PostListSection()
+      } else {
+        this.PostListSection()
+      }
+    } else {
+      Column() {
+        LoadStateView({
+          isLoading: this.isLoading,
+          message: this.message,
+          requiresChallenge: this.requiresChallenge,
+          showRetry: !this.isLoading && this.isArkWebReady,
+          onRetry: () => {
+            this.loadTopicDetail();
+          }
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    }
   }
 
   @Builder
@@ -483,64 +559,72 @@ export struct TopicDetailPage {
 
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-    Column() {
-      TopicDetailHeader({
-        summaryVisible: this.summaryVisible,
-        title: this.getTitle(),
-        showBadges: this.hasBadges(),
-        category: CategoryIndex.find(this.categories, this.detail?.categoryId),
-        parentCategory: CategoryIndex.findParent(this.categories, this.detail?.categoryId),
-        tags: this.getTags(),
-        solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
-        bookmarked: this.topicBookmarked,
-        onBack: () => {
-          this.onBack();
+      this.DetailMainContent()
+
+      HdsNavigation() {
+        Column()
+          .width('100%')
+          .height('100%')
+      }
+      .titleBar({
+        avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+        enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+        style: {
+          scrollEffectOpts: {
+            enableScrollEffect: true,
+            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+          },
+          scrollEffectStyle: {
+            backgroundStyle: {
+              maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+              blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
+            }
+          },
+          systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
         },
-        onTitleClick: () => {
-          this.jumpToFirstPost();
-        },
-        // 两个条件同时满足才亮:用户开了设置开关 && 本次阅读确实被盾拦下。
-        showChallengeShortcut: ChallengeShortcutPrefs.isEnabled() && this.challengeBlocked,
-        onChallengeShortcutClick: () => {
-          this.onOpenChallenge();
+        content: {
+          backIcon: {
+            icon: $r('sys.symbol.chevron_left'),
+            label: '返回',
+            action: () => {
+              this.onBack();
+            }
+          },
+          menu: {
+            value: this.shouldShowChallengeShortcut() ? [{
+              content: {
+                icon: $r('sys.symbol.lock_shield'),
+                label: '手动验证',
+                isEnabled: true,
+                action: () => {
+                  this.onOpenChallenge();
+                }
+              }
+            }] : []
+          },
+          stackBuilder: () => {
+            this.DetailTitleBarContent();
+          }
         }
       })
-
-      if (this.detail) {
-        // 相同的两个分支:翻转 listEpochEven 强制销毁重建 List(原地换窗用),平时恒走其一。
-        if (this.listEpochEven) {
-          this.PostListSection()
-        } else {
-          this.PostListSection()
+      .bindToScrollable([this.scroller])
+      .titleMode(HdsNavigationTitleMode.MINI)
+      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Color.Transparent)
+      .hitTestBehavior(HitTestMode.Transparent)
+      .bindSheet(this.showReactionUsersSheet, this.ReactionUsersSheetBuilder, {
+        // 初始半屏，长列表可上拉扩展到全屏高度。
+        height: SheetSize.MEDIUM,
+        detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+        dragBar: true,
+        showClose: false,
+        maskColor: '#66000000',
+        onDisappear: () => {
+          this.showReactionUsersSheet = false;
         }
-      } else {
-        LoadStateView({
-          isLoading: this.isLoading,
-          message: this.message,
-          requiresChallenge: this.requiresChallenge,
-          showRetry: !this.isLoading && this.isArkWebReady,
-          onRetry: () => {
-            this.loadTopicDetail();
-          }
-        })
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ top: this.sysTopInset })
-    .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .bindSheet(this.showReactionUsersSheet, this.ReactionUsersSheetBuilder, {
-      // 初始半屏，长列表可上拉扩展到全屏高度。
-      height: SheetSize.MEDIUM,
-      detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-      dragBar: true,
-      showClose: false,
-      maskColor: '#66000000',
-      onDisappear: () => {
-        this.showReactionUsersSheet = false;
-      }
-    })
+      })
 
     // 右缘楼层 scrubber:话题够长(最高楼 > 1)且浮层未展开时挂载,拖动直接跳楼。
     // 覆盖层自身透明、只在右缘 Slider 处拦截触摸,不影响正文滚动。
@@ -925,7 +1009,7 @@ export struct TopicDetailPage {
         return;
       }
       // 完全在屏外:对齐到视口顶部(导航栏下)定位。
-      this.scroller.scrollToIndex(targetListIndex, true);
+      this.scrollToListIndexBelowTitleBar(targetListIndex, true);
       return;
     }
     await this.rewindowToPost(postNumber);
@@ -1028,6 +1112,7 @@ export struct TopicDetailPage {
     const targetIndex: number = Math.max(0, nextSource.findIndexAtOrAfterPostNumber(postNumber));
     // 回顶:落到 0(摘要卡,标题/分类一并露出)且不高亮;跳楼层:落到该楼并高亮提示「就是这条」。
     this.initialListIndex = asTop ? 0 : targetIndex + 1;
+    this.initialListStartOffset = asTop ? 0 : immersiveTitleBarBottomOffset(this.sysTopInset);
     if (!asTop) {
       this.armTargetFlash(nextSource.getData(targetIndex).id);
     }
@@ -1048,6 +1133,16 @@ export struct TopicDetailPage {
       this.flashTargetPostId = 0;
       this.flashClearTimerId = -1;
     }, 3000);
+  }
+
+  // HDS 标题栏是覆盖层，List 的 START 是物理屏幕顶部。负 extraOffset 让目标项少向前滚
+  // 一个标题栏高度，最终正好停在标题栏下方；用户随后手势滚动仍可正常进入标题栏区域。
+  private scrollToListIndexBelowTitleBar(listIndex: number, smooth: boolean): void {
+    const remainingOffset: number = Math.max(0,
+      immersiveTitleBarBottomOffset(this.sysTopInset) - this.initialListStartOffset);
+    this.scroller.scrollToIndex(listIndex, smooth, ScrollAlign.START, {
+      extraOffset: LengthMetrics.vp(-remainingOffset)
+    });
   }
 
   // 加载某楼的「被回复」列表(供 TopicPostItem 展开时调用)。成功返回楼层数组;失败弹 toast 并返回 null。
@@ -1298,11 +1393,14 @@ export struct TopicDetailPage {
       this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
       this.hasMorePosts = PostStreamPager.countLater(stream, this.dataSource.getAll()) > 0;
       this.loadMoreMessage = this.hasMorePosts ? '上拉加载更多' : '没有更多了';
+      this.initialListIndex = 0;
+      this.initialListStartOffset = 0;
       // 带目标楼进入:List 尚未创建(detail 刚就位),首帧直接定位到目标楼(+1 为 summary 占位)。
       const target: number | undefined = this.param.targetPostNumber;
       if (target !== undefined && target > 1 && this.postCount > 0) {
         const targetIndex: number = Math.max(0, this.dataSource.findIndexAtOrAfterPostNumber(target));
         this.initialListIndex = targetIndex + 1;
+        this.initialListStartOffset = immersiveTitleBarBottomOffset(this.sysTopInset);
         if (this.param.highlightTarget === true) {
           this.armTargetFlash(this.dataSource.getData(targetIndex).id);
         }
@@ -1327,10 +1425,11 @@ export struct TopicDetailPage {
       // 定位与红线对齐:红线锚楼取自详情接口的真实水位(result.data.lastReadPostNumber → lastVisitedSnapshot),
       // 而入口楼号 param.targetPostNumber 来自列表页水位(可能陈旧/估算,见 HomePage.openTopic),两者不一致
       // 会造成"定位到 50 楼、红线却画在 43 楼"。锚楼一旦确定,改用真实水位把首帧落点重算成第一条真实未读楼
-      // (锚楼的下一楼),与红线严格对齐;未读楼顶格,红线自然落在其顶边(导航栏下方),无需额外偏移。
+      // (锚楼的下一楼),与红线严格对齐。
       if (isUnreadBadgeEntry && this.lastVisitedAnchorPostId > 0) {
         const firstUnreadIndex: number = Math.max(0, this.dataSource.findIndexAtOrAfterPostNumber(this.lastVisitedSnapshot + 1));
         this.initialListIndex = firstUnreadIndex + 1;
+        this.initialListStartOffset = immersiveTitleBarBottomOffset(this.sysTopInset);
       }
       Log.i(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();
@@ -1438,15 +1537,14 @@ export struct TopicDetailPage {
     this.showComposerToast(result.error?.message ? result.error.message : '加载更早楼层失败', 1500);
   }
 
-  // 第二步:把预取好的更早楼层头插进数据源。插入点在 List 已布局范围外(视口上方剩余楼层 > cachedCount)
-  // 时 maintainVisibleContentPosition 静默补偿,惯性滑动不受影响——这是常规路径,靠 onScrollIndex
-  // 每帧调用来抓住这个安全窗。落进范围内则框架不补偿,视口会瞬移到新插入的楼,只能手动无动画重锚,
-  // 代价是掐断滑动,故仅在暴力甩到顶等错过安全窗的情况下兜底。
+  // 第二步:把预取好的更早楼层头插进数据源。响应到达时立即插入，保证用户第一次回看前
+  // 上一批楼层已经存在。prependPosts 会发精准 ADD@0，List 据此自动保持当前可见内容。
+  // 这里禁止再调用 scrollToIndex：HDS 标题栏覆盖在 List 上方，onScrollIndex 的 start 是
+  // 物理屏幕顶部可见项，可能正是藏在标题栏下面的上一楼；手动对齐会把它错误地拉到标题栏底部。
   private tryFlushEarlierPosts(start: number): void {
     if (this.pendingEarlier.length === 0) {
       return;
     }
-    const needReAnchor: boolean = start - 1 <= POSTS_CACHED_COUNT;
     const batch: TopicPost[] = this.pendingEarlier;
     this.pendingEarlier = [];
     const added: number = this.dataSource.prependPosts(batch);
@@ -1454,12 +1552,7 @@ export struct TopicDetailPage {
     const stream: number[] = this.detail && this.detail.stream ? this.detail.stream : [];
     this.hasEarlier = PostStreamPager.countEarlier(stream, this.dataSource.getAll()) > 0;
     this.updateLastVisitedAnchor();
-    if (added > 0 && needReAnchor) {
-      this.scroller.scrollToIndex(start + added, false);
-      Log.i(`${LOG_TAG} flushEarlier re-anchor start=${start} added=${added} -> ${start + added} total=${this.postCount} hasEarlier=${this.hasEarlier}`);
-      return;
-    }
-    Log.i(`${LOG_TAG} flushEarlier silent start=${start} added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier}`);
+    Log.i(`${LOG_TAG} flushEarlier maintained start=${start} added=${added} total=${this.postCount} hasEarlier=${this.hasEarlier}`);
   }
 
   private startReadingTrackerIfNeeded(): void {
@@ -1495,6 +1588,11 @@ export struct TopicDetailPage {
       return title;
     }
     return this.param.title;
+  }
+
+  // 过盾入口只在用户主动开启快捷入口且本次阅读确实命中验证时交给 HDS menu 渲染。
+  private shouldShowChallengeShortcut(): boolean {
+    return ChallengeShortcutPrefs.isEnabled() && this.challengeBlocked;
   }
 
   // detail 整体加载/替换时,把主题级书签态同步到独立驱动的 topicBookmarked(标题书签图标的真源)。

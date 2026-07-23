@@ -11,6 +11,8 @@ import { SCRIM } from '../../common/theme/Palette';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
   adaptiveSystemMaterialEffect,
+  HDS_TITLE_BAR_BLUR_RADIUS,
+  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
   ImmersiveLightArea,
   preferredTitleBarScrollEffectType,
   requiresHdsComponentSafeArea,
@@ -280,6 +282,12 @@ export struct SitesPage {
         scrollEffectOpts: {
           enableScrollEffect: true,
           scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType
+        },
+        scrollEffectStyle: {
+          backgroundStyle: {
+            maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+            blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
+          }
         },
         systemMaterialEffect: adaptiveSystemMaterialEffect() as SystemMaterialParams
       },

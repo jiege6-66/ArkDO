@@ -9,6 +9,10 @@
       "value": "#17191D"
     },
     {
+      "name": "home_title_bar_scrolled_bg",
+      "value": "#BF17191D"
+    },
+    {
       "name": "text_primary",
       "value": "#E7E9EE"
     },

@@ -10,6 +10,8 @@ export const HDS_MATERIAL_LEVEL_GENTLE: number = 1;
 export const HDS_MATERIAL_LEVEL_SMOOTH: number = 2;
 export const HDS_MATERIAL_LEVEL_ADAPTIVE: number = 10;
 export const HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR: number = 2;
+export const HDS_TITLE_BAR_BLUR_RADIUS: number = 24;
+export const HDS_TITLE_BAR_MASK_EXTRA_HEIGHT: number = 16;
 
 export enum ImmersiveLightArea {
   TITLE_BAR = 'titleBar',
@@ -34,7 +36,9 @@ export function adaptiveSystemMaterialEffect(): ImmersiveLightSystemMaterialEffe
 
 export function customSystemMaterialEffect(supportsImmersive: boolean = true): ImmersiveLightSystemMaterialEffect {
   return {
-    materialType: HDS_MATERIAL_TYPE_ADAPTIVE,
+    materialType: supportsImmersive
+      ? HDS_MATERIAL_TYPE_IMMERSIVE
+      : HDS_MATERIAL_TYPE_ADAPTIVE,
     materialLevel: supportsImmersive
       ? HDS_MATERIAL_LEVEL_GENTLE
       : HDS_MATERIAL_LEVEL_SMOOTH

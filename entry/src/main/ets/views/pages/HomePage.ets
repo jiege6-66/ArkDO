@@ -1,4 +1,11 @@
 import { Log } from '../../services/logging/Log';
+import {
+  BlurStrategy,
+  HdsNavigation,
+  HdsNavigationTitleMode,
+  ScrollEffectType,
+  SystemMaterialParams
+} from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 import { Topic, TopicCategory } from '../../models/Topic';
@@ -32,6 +39,16 @@ import { showToast as promptToast } from '../../common/utils/Toast';
 import { submitNewTopic } from '../../services/topic/CreateTopicFlow';
 import { HOME_COMPOSER_BACK_TICK_KEY, HOME_COMPOSER_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SCRIM } from '../../common/theme/Palette';
+import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  customSystemMaterialEffect,
+  HDS_TITLE_BAR_BLUR_RADIUS,
+  HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+  ImmersiveLightArea,
+  preferredTitleBarScrollEffectType,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -323,209 +340,47 @@ export struct HomePage {
     // 自绘抽屉:Stack 底层为主体,上层为遮罩 + 侧边抽屉(靠 translate 滑入/滑出)。
     // 不用 SideBarContainer——其 overlay 遮罩不拦截点击、内滚也不灵。
     Stack({ alignContent: Alignment.TopStart }) {
-      // 主体:顶栏 + 帖子列表
-      Column() {
-        Row() {
-          // 环境未就绪("准备环境中...")时抽屉尚无意义,隐藏汉堡入口(标题左移填满,就绪后再出现)。
-          if (this.isArkWebReady) {
-            this.MenuButton()
-          }
-
-          this.FeedTitle()
-
-        // 搜索入口:环境就绪后常驻(搜索匿名可用,不随登录态隐藏)。
-        if (this.isArkWebReady) {
-          this.SearchButton()
-        }
-
-        // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
-        if (this.hasCheckedSession && this.isLoggedIn) {
-          NotificationBell({
-            unreadCount: this.unreadNotifications,
-            onBellClick: () => {
-              // 打开通知页(进页会发 recent=true 让服务端 bump seen);本地先乐观清零红点。
-              this.unreadNotifications = 0;
-              this.onOpenNotifications();
-            }
-          })
-        }
-
-        this.AccountEntry()
+      HdsNavigation() {
+        this.HomeMainContent()
       }
-      .width('100%')
-      .height(56)
-      .padding({ left: 12, right: 12, top: 16, bottom: 14 })
-
-      // BottomEnd 供右下角悬浮按钮定位;Refresh 与空态列都是 100%×100%,不受对齐方式影响。
-      Stack({ alignContent: Alignment.BottomEnd }) {
-        Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
-          List({ scroller: this.listScroller }) {
-            ForEach(this.topics, (topic: Topic) => {
-              TopicListItem({
-                topic: topic,
-                category: CategoryIndex.find(this.categories, topic.categoryId),
-                parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
-                onTopicClick: (selectedTopic: Topic) => {
-                  // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
-                  selectedTopic.unseen = false;
-                  this.onTopicClick(selectedTopic);
-                },
-                onUnreadBadgeClick: (selectedTopic: Topic) => {
-                  this.handleUnreadBadgeClick(selectedTopic);
-                }
-              })
-              // key 纳入 bookmarked:相同 id 时 ForEach 复用旧子组件、不把 @ObjectLink 换到刷新后的新实例,
-              // 收藏后回列表刷新图标不更新。把书签态并入 key,变化时强制重建该行绑新实例。
-              // unread 走「同实例改字段 + @Observed 通知」路径,无需进 key。
-            }, (topic: Topic) => `${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
-
-            if (this.topics.length > 0) {
-              ListItem() {
-                Row() {
-                  if (this.isLoadingMore) {
-                    LoadingProgress()
-                      .width(18)
-                      .height(18)
-                      .color($r('app.color.brand'))
-                      .margin({ right: 8 })
-                  }
-
-                  Text(this.footerMessage)
-                    .fontSize(13)
-                    .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
-                }
-                .width('100%')
-                .height(54)
-                .justifyContent(FlexAlign.Center)
-              }
+      .titleBar({
+        avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+        enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+        style: {
+          scrollEffectOpts: {
+            enableScrollEffect: true,
+            scrollEffectType: preferredTitleBarScrollEffectType() as ScrollEffectType,
+            enableRefreshOffsetChange: true
+          },
+          originalStyle: {
+            backgroundStyle: {
+              backgroundColor: Color.Transparent,
+              blurRadius: 0
             }
+          },
+          scrollEffectStyle: {
+            backgroundStyle: {
+              backgroundColor: $r('app.color.home_title_bar_scrolled_bg'),
+              maskExtraHeight: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT,
+              blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
+            }
+          },
+          blurStrategy: BlurStrategy.ENABLE,
+          systemMaterialEffect: customSystemMaterialEffect(true) as SystemMaterialParams
+        },
+        content: {
+          stackBuilder: () => {
+            this.HomeTitleBarContent();
           }
-          .width('100%')
-          .height('100%')
-          .padding({ left: 12, right: 12, bottom: 0 })
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-          .onReachEnd(() => {
-            this.loadMoreTopics();
-          })
-          .onDidScroll(() => {
-            this.updateFabMode();
-          })
         }
-        .width('100%')
-        .height('100%')
-        // Refresh 会把子 List 裁剪到自身边界;子 List 的 expandSafeArea 无法穿透,
-        // 需在 Refresh 上同样声明,否则列表底部无法延伸覆盖底部操作条(安全区)。
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .pullToRefresh(true)
-        .refreshOffset(64)
-        .onRefreshing(() => {
-          this.refreshLatestTopics();
-        })
-
-        if (this.topics.length === 0) {
-          Column() {
-            // 门卫看「桥能否真发请求」而非 UI 解锁标志:看门狗/失败路径会把 isArkWebReady 置真但 executor
-            // 仍为空,那一刻发请求必被跳过。冷启动空窗统一显示品牌化「准备环境中」加载态,等宿主真就绪
-            // (hostReadyEpoch)再进 LoadStateView——此时要么已有数据、要么是真失败(CF/服务端)给重试,
-            // 从而不再硬闪「加载失败」。
-            if (!this.bridge.canFetch()) {
-              Image($r('app.media.linuxdo_logo'))
-                .width(64)
-                .height(64)
-                .margin({ bottom: 16 })
-
-              Text('准备环境中...')
-                .fontSize(15)
-                .fontColor($r('app.color.text_secondary'))
-                .textAlign(TextAlign.Center)
-            } else {
-              // 加载/失败/CF 挑战三态统一走共享组件:挑战态由组件接管全局恢复状态,
-              // 静默过验中转圈、数秒后放出"手动验证",终态直接给手动入口。二级页复用同一份,不再各写一套。
-              LoadStateView({
-                isLoading: this.isInitialLoading,
-                message: this.listMessage,
-                requiresChallenge: this.requiresChallenge,
-                showRetry: this.loadFailed && !this.isInitialLoading,
-                onRetry: () => {
-                  this.refreshLatestTopics();
-                }
-              })
-            }
-          }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .hitTestBehavior(HitTestMode.Transparent)
-        }
-
-        // 悬浮按钮:发帖 / 回到顶部同占一个坑位,按滚动位置换身份(详见 HomeFab)。
-        // 列表为空时(加载中/失败/CF 挑战)不出现——既无从回顶,空态下也不该冒出主动作。
-        if (this.topics.length > 0) {
-          HomeFab({
-            showBackToTop: this.showBackToTopFab,
-            onCompose: () => {
-              this.openComposer();
-            },
-            onBackToTop: () => {
-              this.scrollToTop();
-            }
-          })
-            .margin({ right: 16, bottom: 16 + this.sysBottomInset })
-        }
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      // 视口实测高度:换算"滑过几屏"的分母。窗口尺寸/分栏变化时会重新量。
-      .onAreaChange((_oldArea: Area, newArea: Area) => {
-        this.listViewportH = Number(newArea.height);
       })
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ top: this.sysTopInset })
-    .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .alignItems(HorizontalAlign.Start)
-    // 左滑跟手拉出个人中心:位移换算成 0~1 进度上抛,由宿主驱动 Navigation 的交互式转场。
-    .onAreaChange((_oldArea: Area, newArea: Area) => {
-      this.swipeAreaWidth = newArea.width as number;
-    })
-    .gesture(
-      // 仅向左、起手 10vp 才认:与 List 的竖向滚动靠方向隔离,与抽屉靠 showSideBar 闸隔离。
-      PanGesture({ direction: PanDirection.Left, distance: 10 })
-        .onActionStart(() => {
-          // 抽屉开着时左滑归抽屉(那是关抽屉手势),不抢。
-          if (this.showSideBar || this.swipeAreaWidth <= 0) {
-            this.swipeTracking = false;
-            return;
-          }
-          this.swipeTracking = true;
-          this.onProfileSwipeStart();
-        })
-        .onActionUpdate((event: GestureEvent) => {
-          if (!this.swipeTracking) {
-            return;
-          }
-          this.onProfileSwipeUpdate(this.swipeProgressOf(event.offsetX));
-        })
-        .onActionEnd((event: GestureEvent) => {
-          if (!this.swipeTracking) {
-            return;
-          }
-          this.swipeTracking = false;
-          // velocityX 向左为负,取反换成「向左甩得多快」。
-          this.onProfileSwipeEnd(this.swipeProgressOf(event.offsetX), -event.velocityX);
-        })
-        .onActionCancel(() => {
-          if (!this.swipeTracking) {
-            return;
-          }
-          this.swipeTracking = false;
-          // 手势被系统打断:当回弹处理,别把转场悬着。
-          this.onProfileSwipeEnd(0, 0);
-        })
-    )
+      .bindToScrollable([this.listScroller])
+      .titleMode(HdsNavigationTitleMode.MINI)
+      .hideBackButton(true)
+      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+      .width('100%')
+      .height('100%')
+      .backgroundColor($r('app.color.page_bg'))
 
       // 遮罩:抽屉打开时铺满,拦截并点击关闭,防止点穿到帖子列表。
       if (this.showSideBar) {
@@ -616,6 +471,228 @@ export struct HomePage {
         this.announceVisible = false;
       }
     })
+  }
+
+  @Builder
+  private HomeMainContent() {
+    // BottomEnd 供右下角悬浮按钮定位;Refresh 与空态列都是 100%×100%,不受对齐方式影响。
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Refresh({ refreshing: this.isRefreshing, promptText: '刷新中' }) {
+        List({ scroller: this.listScroller }) {
+          ListItem() {
+            Column() {
+              Blank()
+                .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+            }
+            .width('100%')
+          }
+
+          ForEach(this.topics, (topic: Topic) => {
+            TopicListItem({
+              topic: topic,
+              category: CategoryIndex.find(this.categories, topic.categoryId),
+              parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
+              onTopicClick: (selectedTopic: Topic) => {
+                // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
+                selectedTopic.unseen = false;
+                this.onTopicClick(selectedTopic);
+              },
+              onUnreadBadgeClick: (selectedTopic: Topic) => {
+                this.handleUnreadBadgeClick(selectedTopic);
+              }
+            })
+            // key 纳入 bookmarked:相同 id 时 ForEach 复用旧子组件、不把 @ObjectLink 换到刷新后的新实例,
+            // 收藏后回列表刷新图标不更新。把书签态并入 key,变化时强制重建该行绑新实例。
+            // unread 走「同实例改字段 + @Observed 通知」路径,无需进 key。
+          }, (topic: Topic) => `${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
+
+          if (this.topics.length > 0) {
+            ListItem() {
+              Row() {
+                if (this.isLoadingMore) {
+                  LoadingProgress()
+                    .width(18)
+                    .height(18)
+                    .color($r('app.color.brand'))
+                    .margin({ right: 8 })
+                }
+
+                Text(this.footerMessage)
+                  .fontSize(13)
+                  .fontColor(this.requiresChallenge ? $r('app.color.warning') : $r('app.color.text_secondary'))
+              }
+              .width('100%')
+              .height(54)
+              .justifyContent(FlexAlign.Center)
+            }
+          }
+        }
+        .width('100%')
+        .height(`calc(100% + ${immersiveTitleBarContentTopSpacer(this.sysTopInset)}vp)`)
+        .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
+        .clip(false)
+        .scrollBar(BarState.Off)
+        .padding({ left: 12, right: 12, bottom: 0 })
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        .onReachEnd(() => {
+          this.loadMoreTopics();
+        })
+        .onDidScroll(() => {
+          this.updateFabMode();
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .clip(false)
+      // Refresh 会把子 List 裁剪到自身边界;List 与 Refresh 都放开裁剪后内容才能进入标题栏下方。
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      .pullToRefresh(true)
+      .refreshOffset(64)
+      .onRefreshing(() => {
+        this.refreshLatestTopics();
+      })
+
+      ScrollBar({
+        scroller: this.listScroller,
+        direction: ScrollBarDirection.Vertical,
+        state: BarState.Auto
+      })
+        .height(`calc(100% - ${HDS_TITLE_BAR_MASK_EXTRA_HEIGHT}vp)`)
+        .margin({ top: HDS_TITLE_BAR_MASK_EXTRA_HEIGHT })
+        .align(Alignment.TopEnd)
+
+      if (this.topics.length === 0) {
+        Column() {
+          // 门卫看「桥能否真发请求」而非 UI 解锁标志:看门狗/失败路径会把 isArkWebReady 置真但 executor
+          // 仍为空,那一刻发请求必被跳过。冷启动空窗统一显示品牌化「准备环境中」加载态,等宿主真就绪
+          // (hostReadyEpoch)再进 LoadStateView——此时要么已有数据、要么是真失败(CF/服务端)给重试,
+          // 从而不再硬闪「加载失败」。
+          if (!this.bridge.canFetch()) {
+            Image($r('app.media.linuxdo_logo'))
+              .width(64)
+              .height(64)
+              .margin({ bottom: 16 })
+
+            Text('准备环境中...')
+              .fontSize(15)
+              .fontColor($r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+          } else {
+            // 加载/失败/CF 挑战三态统一走共享组件:挑战态由组件接管全局恢复状态,
+            // 静默过验中转圈、数秒后放出"手动验证",终态直接给手动入口。二级页复用同一份,不再各写一套。
+            LoadStateView({
+              isLoading: this.isInitialLoading,
+              message: this.listMessage,
+              requiresChallenge: this.requiresChallenge,
+              showRetry: this.loadFailed && !this.isInitialLoading,
+              onRetry: () => {
+                this.refreshLatestTopics();
+              }
+            })
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .hitTestBehavior(HitTestMode.Transparent)
+      }
+
+      // 悬浮按钮:发帖 / 回到顶部同占一个坑位,按滚动位置换身份(详见 HomeFab)。
+      // 列表为空时(加载中/失败/CF 挑战)不出现——既无从回顶,空态下也不该冒出主动作。
+      if (this.topics.length > 0) {
+        HomeFab({
+          showBackToTop: this.showBackToTopFab,
+          onCompose: () => {
+            this.openComposer();
+          },
+          onBackToTop: () => {
+            this.scrollToTop();
+          }
+        })
+          .margin({ right: 16, bottom: 16 + this.sysBottomInset })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor($r('app.color.page_bg'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    // 同时记录列表视口和手势宽度,避免同一组件挂两个 onAreaChange 时后者覆盖前者。
+    .onAreaChange((_oldArea: Area, newArea: Area) => {
+      this.listViewportH = Number(newArea.height);
+      this.swipeAreaWidth = newArea.width as number;
+    })
+    // 左滑跟手拉出个人中心:位移换算成 0~1 进度上抛,由宿主驱动 Navigation 的交互式转场。
+    .gesture(
+      // 仅向左、起手 10vp 才认:与 List 的竖向滚动靠方向隔离,与抽屉靠 showSideBar 闸隔离。
+      PanGesture({ direction: PanDirection.Left, distance: 10 })
+        .onActionStart(() => {
+          // 抽屉开着时左滑归抽屉(那是关抽屉手势),不抢。
+          if (this.showSideBar || this.swipeAreaWidth <= 0) {
+            this.swipeTracking = false;
+            return;
+          }
+          this.swipeTracking = true;
+          this.onProfileSwipeStart();
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.onProfileSwipeUpdate(this.swipeProgressOf(event.offsetX));
+        })
+        .onActionEnd((event: GestureEvent) => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.swipeTracking = false;
+          // velocityX 向左为负,取反换成「向左甩得多快」。
+          this.onProfileSwipeEnd(this.swipeProgressOf(event.offsetX), -event.velocityX);
+        })
+        .onActionCancel(() => {
+          if (!this.swipeTracking) {
+            return;
+          }
+          this.swipeTracking = false;
+          // 手势被系统打断:当回弹处理,别把转场悬着。
+          this.onProfileSwipeEnd(0, 0);
+        })
+    )
+  }
+
+  @Builder
+  private HomeTitleBarContent() {
+    Row() {
+      // 环境未就绪("准备环境中...")时抽屉尚无意义,隐藏汉堡入口(标题左移填满,就绪后再出现)。
+      if (this.isArkWebReady) {
+        this.MenuButton()
+      }
+
+      this.FeedTitle()
+
+      // 搜索入口:环境就绪后常驻(搜索匿名可用,不随登录态隐藏)。
+      if (this.isArkWebReady) {
+        this.SearchButton()
+      }
+
+      // 仅在会话已确认且已登录时显示铃铛(未登录/未确认不出现)。
+      if (this.hasCheckedSession && this.isLoggedIn) {
+        NotificationBell({
+          unreadCount: this.unreadNotifications,
+          onBellClick: () => {
+            // 打开通知页(进页会发 recent=true 让服务端 bump seen);本地先乐观清零红点。
+            this.unreadNotifications = 0;
+            this.onOpenNotifications();
+          }
+        })
+      }
+
+      this.AccountEntry()
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   // 版本公告弹层:标题 + 命中回复的完整富文本正文(含 [vXXXX] 版本号,超长可滚动)。
