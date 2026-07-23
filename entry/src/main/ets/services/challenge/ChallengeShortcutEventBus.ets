@@ -15,11 +15,17 @@ export type ChallengeShortcutListener = (blocked: boolean) => void;
 export class ChallengeShortcutEventBus {
   private static listeners: Map<number, ChallengeShortcutListener> = new Map();
   private static nextListenerId: number = 0;
-  // 当前是否被拦。进详情页时读它做初值(可能在别的页面就已经撞过盾)。
+  // 当前是否被拦。进入详情页时由页面先 reset,之后只接收本次阅读追踪产生的事件。
   private static blocked: boolean = false;
 
   static isBlocked(): boolean {
     return ChallengeShortcutEventBus.blocked;
+  }
+
+  // 进入新的帖子详情时清除上一个帖子的运行态,避免旧帖的撞盾结果直接带入新帖。
+  // 不广播:新详情页尚未开始本次 timings 追踪,此时不应让任何页面显示快捷入口。
+  static reset(): void {
+    ChallengeShortcutEventBus.blocked = false;
   }
 
   static subscribe(listener: ChallengeShortcutListener): () => void {

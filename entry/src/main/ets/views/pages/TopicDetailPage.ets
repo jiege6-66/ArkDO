@@ -226,9 +226,11 @@ export struct TopicDetailPage {
       });
     }
 
-    // 过盾快捷入口:载入开关(默认关)并订阅「是否正被盾拦着」。取初值是因为可能在别的页面就已撞过盾。
+    // 过盾快捷入口:每次进入新详情先清掉上一个帖子的运行态,只响应本次 timings 的撞盾结果。
+    // 这样旧帖曾被盾拦下不会让新帖首帧错误显示图标,且本次失败仍会通过订阅重新亮起。
     ChallengeShortcutPrefs.load(getContext(this));
-    this.challengeBlocked = ChallengeShortcutEventBus.isBlocked();
+    ChallengeShortcutEventBus.reset();
+    this.challengeBlocked = false;
     if (!this.unsubscribeChallengeShortcut) {
       this.unsubscribeChallengeShortcut = ChallengeShortcutEventBus.subscribe((blocked: boolean) => {
         this.challengeBlocked = blocked;

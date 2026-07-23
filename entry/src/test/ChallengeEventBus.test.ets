@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../main/ets/services/challenge/ChallengeEventBus';
+import { ChallengeShortcutEventBus } from '../main/ets/services/challenge/ChallengeShortcutEventBus';
 import { ChallengeState } from '../main/ets/services/network/NetworkTypes';
 
 export default function challengeEventBusTest() {
@@ -23,6 +24,24 @@ export default function challengeEventBusTest() {
       expect(receivedSource).assertEqual('/latest.json');
       expect(receivedStatusCode).assertEqual(403);
       expect(receivedChallengeState).assertEqual(ChallengeState.REQUIRED);
+    });
+
+    it('resetsShortcutStateBeforeTrackingANewTopic', 0, () => {
+      ChallengeShortcutEventBus.notifyBlocked();
+      expect(ChallengeShortcutEventBus.isBlocked()).assertTrue();
+
+      ChallengeShortcutEventBus.reset();
+      expect(ChallengeShortcutEventBus.isBlocked()).assertFalse();
+
+      let receivedBlocked: boolean = false;
+      const unsubscribe: () => void = ChallengeShortcutEventBus.subscribe((blocked: boolean) => {
+        receivedBlocked = blocked;
+      });
+      ChallengeShortcutEventBus.notifyBlocked();
+      unsubscribe();
+      ChallengeShortcutEventBus.notifyCleared();
+
+      expect(receivedBlocked).assertTrue();
     });
   });
 }
