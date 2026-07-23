@@ -20,7 +20,7 @@ struct Index {
     .height('100%')
   }
 
-  // 返回键:根级浮层优先消费;搜索覆盖层内部自己决定 pop 详情页还是关闭搜索。
+  // 返回键:根级浮层优先消费;搜索覆盖层内部自己决定 pop Web/详情页还是关闭搜索。
   onBackPress(): boolean {
     // 图片预览在最顶层,优先消费:bump 信号,ImageViewer 决定翻回上一张还是关闭。
     if (this.imageViewerVisible) {

@@ -1,13 +1,23 @@
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
-import { buildTopicDetailRouteParam, isTopicDetailRouteParam, TopicDetailRouteParam } from '../../navigation/AppRoutes';
+import {
+  buildTopicDetailRouteParam,
+  buildWebRouteParam,
+  isTopicDetailRouteParam,
+  isWebRouteParam,
+  TopicDetailRouteParam,
+  WebRouteParam
+} from '../../navigation/AppRoutes';
+import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { bumpTick, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SearchOverlay } from './SearchOverlay';
 import { ViewerImage } from './ImageViewer';
 import { TopicDetailPage } from '../pages/TopicDetailPage';
+import { WebViewPage } from '../pages/WebViewPage';
 
 const SEARCH_FLOW_TOPIC_DETAIL: string = 'searchTopicDetail';
+const SEARCH_FLOW_WEB: string = 'searchWeb';
 
 @Component
 export struct SearchFlow {
@@ -63,7 +73,7 @@ export struct SearchFlow {
             this.onOpenImages(images, startIndex);
           },
           onOpenLink: (url: string) => {
-            this.leaveSearchAndOpenLink(url);
+            this.handleOpenLink(url);
           },
           onOpenUser: (user: User) => {
             this.leaveSearchAndOpenUser(user);
@@ -72,6 +82,18 @@ export struct SearchFlow {
       }
       .hideTitleBar(true)
       .onBackPressed(() => this.consumeTopicDetailBack())
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === SEARCH_FLOW_WEB && isWebRouteParam(param)) {
+      NavDestination() {
+        WebViewPage({
+          url: (param as WebRouteParam).url,
+          pageTitle: (param as WebRouteParam).title ?? '',
+          onBack: () => {
+            this.popInternal();
+          }
+        })
+      }
+      .hideTitleBar(true)
       .backgroundColor($r('app.color.page_bg'))
     } else {
       NavDestination() {
@@ -131,7 +153,22 @@ export struct SearchFlow {
     this.onClose();
   }
 
-  private leaveSearchAndOpenLink(url: string): void {
+  private handleOpenLink(url: string): void {
+    const target: LinkTarget = LinkRouter.resolve(url);
+    if (target.kind === LinkTargetKind.WEB) {
+      if (target.url.length === 0) {
+        return;
+      }
+      this.navPathStack.pushPath(new NavPathInfo(
+        SEARCH_FLOW_WEB,
+        buildWebRouteParam(target.url)
+      ));
+      return;
+    }
+    this.leaveSearchAndOpenNativeTarget(url);
+  }
+
+  private leaveSearchAndOpenNativeTarget(url: string): void {
     this.onClose();
     this.onOpenLink(url);
   }

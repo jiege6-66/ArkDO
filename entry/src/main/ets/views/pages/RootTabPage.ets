@@ -111,7 +111,7 @@ export struct RootTabPage {
   // (padding 加在带页面背景色的容器上,背景自然填满状态栏条且颜色逐页正确);
   // 页面内遮罩/浮层留在未加 padding 的层级,天然盖满物理屏。此处 Navigation 不加任何避让。
   private viewerWindow?: window.Window = undefined;
-  // 搜索 Flow:根 Stack 覆盖层负责一镜到底;内部自带 Navigation 负责搜索结果 -> 详情 -> 返回结果。
+  // 搜索 Flow:根 Stack 覆盖层负责一镜到底;内部自带 Navigation 负责搜索结果 -> 详情 -> Web -> 原路返回。
   @State private searchFlowMounted: boolean = false;
   @State private showSearchFlow: boolean = false;
   // 系统返回键信号:SearchFlow 不进主 Navigation 栈,由 Index @Entry 拦截后 bump,SearchFlow 自己处理。
@@ -285,7 +285,7 @@ export struct RootTabPage {
       }
       this.RootNavigation()
 
-      // 搜索 Flow:根级覆盖层负责首页 -> 搜索的一镜到底;内部 Navigation 负责搜索结果 -> 详情。
+      // 搜索 Flow:根级覆盖层负责首页 -> 搜索的一镜到底;内部 Navigation 负责搜索结果 -> 详情 -> Web。
       if (this.searchFlowMounted) {
         SearchFlow({
           bridge: this.bridge,
@@ -1285,7 +1285,7 @@ export struct RootTabPage {
   }
 
   // 搜索 Flow 开关:根 Stack 覆盖层负责首页搜索图标 -> 搜索页图标的一镜到底;
-  // 搜索结果 -> 详情由 SearchFlow 内部 Navigation 承载,不进入主 Navigation 栈。
+  // 搜索结果 -> 详情 -> Web 由 SearchFlow 内部 Navigation 承载,不进入主 Navigation 栈。
   private openSearch(): void {
     if (this.showSearchFlow) {
       return;
