@@ -82,7 +82,7 @@ export struct SearchFlow {
       }
       .hideTitleBar(true)
       .onBackPressed(() => this.consumeTopicDetailBack())
-      .backgroundColor($r('app.color.page_bg'))
+      .backgroundColor($r('app.color.topic_detail_page_bg'))
     } else if (name === SEARCH_FLOW_WEB && isWebRouteParam(param)) {
       NavDestination() {
         WebViewPage({

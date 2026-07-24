@@ -761,6 +761,9 @@ export struct TopicDetailPage {
     }
     .width('100%')
     .height('100%')
+    // 楼层与摘要主体保持透明，统一透出详情页专用背景；浅色使用系统通用背景
+    // #F2F3F5，暗色资源仍保持原来的 #17191D，便于单独验证浅色视觉效果。
+    .backgroundColor($r('app.color.topic_detail_page_bg'))
   }
 
   // 点 FAB:回复整个话题(顶层回复)。

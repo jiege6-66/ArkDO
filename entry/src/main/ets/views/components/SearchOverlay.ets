@@ -11,6 +11,7 @@ import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { TopicListItem } from './TopicListItem';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { IMMERSIVE_PANEL_BLUR_RADIUS } from '../../common/ui/ImmersiveLightMaterial';
 
 const LOG_TAG: string = '[ArkDO][Search]';
 // 搜索输入框焦点 id:挂载后 requestFocus 弹软键盘。
@@ -21,6 +22,10 @@ const DEBOUNCE_MS: number = 350;
 const MIN_TERM_LEN: number = 2;
 // Discourse 整页搜索分页硬上限。
 const MAX_SEARCH_PAGE: number = 10;
+// 搜索栏正文高度：Row 内部 40vp，顶部 16vp、底部 12vp。状态栏高度运行时另行叠加。
+// 列表使用同一个数值作为 contentStartOffset，确保首项初始落在搜索栏下方；开始滚动后
+// offset 会随内容一起离场，列表的真实视口仍可延伸到固定搜索栏后面。
+const SEARCH_BAR_CONTENT_HEIGHT: number = 68;
 
 // 一镜到底共享元素 id:顶栏放大镜(源)与搜索页前导放大镜(目标)标同一 id,
 // 由 RootTabPage.openSearch/closeSearch 的 animateTo 插值。
@@ -82,13 +87,7 @@ export struct SearchOverlay {
   }
 
   build() {
-    Column() {
-      this.SearchBar()
-
-      Divider()
-        .color($r('app.color.border'))
-        .strokeWidth(1)
-
+    Stack({ alignContent: Alignment.TopStart }) {
       // 内容区:未达搜索字数显示历史,否则显示结果。
       Stack() {
         if (this.trimmedQuery().length < MIN_TERM_LEN) {
@@ -98,13 +97,18 @@ export struct SearchOverlay {
         }
       }
       .width('100%')
-      .layoutWeight(1)
+      .height('100%')
       .align(Alignment.TopStart)
+
+      // 搜索栏固定在结果列表上层。栏本身包含状态栏避让空间，并在同一节点执行背景采样、
+      // 模糊和半透明着色；结果滚入这里时才会呈现连续的沉浸光感，而不是单独悬空的模糊带。
+      this.SearchBar()
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
-    .backgroundColor($r('app.color.page_bg'))
+    // 内容区使用与顶部半透明材质相同的 RGB 基色。静止时上下连成一个完整表面；
+    // 列表滚入搜索栏后，顶部仍通过 backdropBlur 呈现内容变化，而不是变成纯实色栏。
+    .backgroundColor($r('app.color.immersive_search_page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
@@ -157,7 +161,7 @@ export struct SearchOverlay {
       // 高度由 TextInput(含上下 padding)撑,minHeight 兜底;别硬设 height 压死输入框裁掉光标。
       .constraintSize({ minHeight: 40 })
       .padding({ left: 12, right: 4 })
-      .backgroundColor($r('app.color.fill_subtle'))
+      .backgroundColor($r('app.color.immersive_search_field_bg'))
       .borderRadius(10)
       .alignItems(VerticalAlign.Center)
       .clip(false)
@@ -171,8 +175,17 @@ export struct SearchOverlay {
         })
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 16, bottom: 12 })
+    .padding({ left: 12, right: 12, top: 16 + this.sysTopInset, bottom: 12 })
     .alignItems(VerticalAlign.Center)
+    // 普通 ArkUI 搜索栏没有 HDS 标题栏的 systemMaterialEffect。与评论输入栏一样，
+    // 直接在可见覆盖层上模糊其后方列表，再叠加主题半透明底色；底部细高光只负责
+    // 收住材质边缘，不再使用原来的 1vp 实色 Divider。
+    .backdropBlur(IMMERSIVE_PANEL_BLUR_RADIUS)
+    .backgroundColor($r('app.color.immersive_search_bar_bg'))
+    .border({
+      width: { bottom: 0.5 },
+      color: $r('app.color.immersive_search_bar_highlight')
+    })
   }
 
   @Builder
@@ -185,64 +198,66 @@ export struct SearchOverlay {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.searchBarBottomOffset() })
       .justifyContent(FlexAlign.Center)
     } else {
-      Column() {
-        Row() {
-          Text('搜索历史')
-            .fontSize(13)
-            .fontColor($r('app.color.text_secondary'))
-            .layoutWeight(1)
-          Text('清空')
-            .fontSize(13)
-            .fontColor($r('app.color.text_tertiary'))
-            .onClick(() => {
-              this.clearHistory();
-            })
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 6 })
-
-        List() {
-          ForEach(this.history, (term: string) => {
-            ListItem() {
-              Row({ space: 10 }) {
-                FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_tertiary'), iconSize: 14 })
-                Text(term)
-                  .fontSize(15)
-                  .fontColor($r('app.color.text_primary'))
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-                Text('✕')
-                  .fontSize(13)
-                  .fontColor($r('app.color.text_tertiary'))
-                  .width(28)
-                  .height(28)
-                  .textAlign(TextAlign.Center)
-                  .onClick(() => {
-                    this.removeHistory(term);
-                  })
-              }
-              .width('100%')
-              .height(46)
-              .alignItems(VerticalAlign.Center)
+      List() {
+        ListItem() {
+          Row() {
+            Text('搜索历史')
+              .fontSize(13)
+              .fontColor($r('app.color.text_secondary'))
+              .layoutWeight(1)
+            Text('清空')
+              .fontSize(13)
+              .fontColor($r('app.color.text_tertiary'))
               .onClick(() => {
-                this.applyHistoryTerm(term);
+                this.clearHistory();
               })
-            }
-          }, (term: string) => term)
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 14, bottom: 6 })
         }
-        .width('100%')
-        .layoutWeight(1)
-        .padding({ left: 16, right: 16 })
-        // 滑动历史列表也收起键盘。
-        .onScrollStart(() => {
-          this.hideKeyboard();
-        })
+
+        ForEach(this.history, (term: string) => {
+          ListItem() {
+            Row({ space: 10 }) {
+              FaIconView({ icon: this.searchIcon(), color: $r('app.color.text_tertiary'), iconSize: 14 })
+              Text(term)
+                .fontSize(15)
+                .fontColor($r('app.color.text_primary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Text('✕')
+                .fontSize(13)
+                .fontColor($r('app.color.text_tertiary'))
+                .width(28)
+                .height(28)
+                .textAlign(TextAlign.Center)
+                .onClick(() => {
+                  this.removeHistory(term);
+                })
+            }
+            .width('100%')
+            .height(46)
+            .padding({ left: 16, right: 16 })
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => {
+              this.applyHistoryTerm(term);
+            })
+          }
+        }, (term: string) => term)
       }
       .width('100%')
       .height('100%')
+      .contentStartOffset(this.searchBarBottomOffset())
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      // 滑动历史列表也收起键盘。历史标题已成为第一个 ListItem，因此可以与条目一起
+      // 穿入搜索栏后方，不会留下一个固定在材质下方的第二层标题。
+      .onScrollStart(() => {
+        this.hideKeyboard();
+      })
     }
   }
 
@@ -287,8 +302,9 @@ export struct SearchOverlay {
       }
       .width('100%')
       .height('100%')
+      .contentStartOffset(this.searchBarBottomOffset())
       .padding({ left: 16, right: 16 })
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       .onReachEnd(() => {
         this.loadMore();
       })
@@ -307,6 +323,7 @@ export struct SearchOverlay {
         }
         .width('100%')
         .height('100%')
+        .padding({ top: this.searchBarBottomOffset() })
         .justifyContent(FlexAlign.Center)
         .hitTestBehavior(HitTestMode.Transparent)
       } else if (this.errorMessage.length > 0 && this.results.length === 0) {
@@ -318,6 +335,7 @@ export struct SearchOverlay {
         }
         .width('100%')
         .height('100%')
+        .padding({ top: this.searchBarBottomOffset() })
         .justifyContent(FlexAlign.Center)
         .hitTestBehavior(HitTestMode.Transparent)
       } else if (this.hasSearched && !this.isSearching && this.results.length === 0) {
@@ -329,6 +347,7 @@ export struct SearchOverlay {
         }
         .width('100%')
         .height('100%')
+        .padding({ top: this.searchBarBottomOffset() })
         .justifyContent(FlexAlign.Center)
         .hitTestBehavior(HitTestMode.Transparent)
       }
@@ -514,6 +533,10 @@ export struct SearchOverlay {
 
   private trimmedQuery(): string {
     return this.query.trim();
+  }
+
+  private searchBarBottomOffset(): number {
+    return this.sysTopInset + SEARCH_BAR_CONTENT_HEIGHT;
   }
 
   // 从搜索词拆出普通高亮词:去掉高级语法(in:title / category: / #版块 / @用户 / -排除)。

@@ -9,6 +9,10 @@
       "value": "#17191D"
     },
     {
+      "name": "topic_detail_page_bg",
+      "value": "#17191D"
+    },
+    {
       "name": "hds_title_bar_scrolled_bg",
       "value": "#BF17191D"
     },
@@ -30,6 +34,22 @@
     },
     {
       "name": "immersive_input_bar_highlight",
+      "value": "#66FFFFFF"
+    },
+    {
+      "name": "immersive_search_bar_bg",
+      "value": "#BF2A2E33"
+    },
+    {
+      "name": "immersive_search_page_bg",
+      "value": "#2A2E33"
+    },
+    {
+      "name": "immersive_search_field_bg",
+      "value": "#8023262C"
+    },
+    {
+      "name": "immersive_search_bar_highlight",
       "value": "#66FFFFFF"
     },
     {

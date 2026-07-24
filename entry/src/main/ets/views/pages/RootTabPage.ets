@@ -523,9 +523,9 @@ export struct RootTabPage {
       // 详情页返回键优先消费本页内联浮层:全屏编辑器 > 图片预览。二者都从详情页打开、
       // Navigation 栈非空,返回键先到栈顶 NavDestination(轮不到 Index @Entry),不拦会直接弹掉详情页。
       .onBackPressed(() => this.consumeTopicDetailBack())
-      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
-      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
-      .backgroundColor($r('app.color.page_bg'))
+      // NavDestination 自身会铺满含状态栏区域，必须与详情页根背景使用同一专用资源；
+      // 否则页面转场期间会短暂露出默认 page_bg，浅色下形成白色闪边。
+      .backgroundColor($r('app.color.topic_detail_page_bg'))
     } else if (name === AppRouteName.WEB && isWebRouteParam(param)) {
       NavDestination() {
         WebViewPage({
