@@ -223,7 +223,7 @@ export struct CommentInputBar {
           Button({ type: ButtonType.Circle, stateEffect: true }) {
             SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
               .fontSize(20)
-              .fontColor([$r('app.color.text_secondary')])
+              .fontColor([$r('app.color.icon_secondary')])
           }
           .width(40)
           .height(40)
