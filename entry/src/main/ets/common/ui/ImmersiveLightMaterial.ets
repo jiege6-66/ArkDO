@@ -12,6 +12,9 @@ export const HDS_MATERIAL_LEVEL_ADAPTIVE: number = 10;
 export const HDS_SCROLL_EFFECT_TYPE_GRADIENT_BLUR: number = 2;
 export const HDS_TITLE_BAR_BLUR_RADIUS: number = 24;
 export const HDS_TITLE_BAR_MASK_EXTRA_HEIGHT: number = 16;
+// 普通 ArkUI 浮层没有 HDS 的 systemMaterialEffect 接口，需要直接使用 backdropBlur。
+// 输入栏、搜索栏等面板统一从这里取半径，后续调整时不会出现不同页面各写一套数值。
+export const IMMERSIVE_PANEL_BLUR_RADIUS: number = 30;
 
 export enum ImmersiveLightArea {
   TITLE_BAR = 'titleBar',

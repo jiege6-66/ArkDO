@@ -4,6 +4,7 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { COMPOSER_GEOMETRY_ID } from '../pages/ComposerPage';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { BRAND_BLUE, ON_DARK_FG, SCRIM } from '../../common/theme/Palette';
+import { IMMERSIVE_PANEL_BLUR_RADIUS } from '../../common/ui/ImmersiveLightMaterial';
 
 // Discourse 经典蓝，作回复按钮背景（rgb(0,136,204)）。页面的悬浮回复按钮也复用此色。
 export const REPLY_BLUE: string = BRAND_BLUE;
@@ -212,7 +213,7 @@ export struct CommentInputBar {
             })
         }
         .layoutWeight(1)
-        .backgroundColor($r('app.color.fill_subtle'))
+        .backgroundColor($r('app.color.immersive_input_field_bg'))
         .borderRadius(8)
         .clip(false)
 
@@ -226,7 +227,7 @@ export struct CommentInputBar {
           }
           .width(40)
           .height(40)
-          .backgroundColor($r('app.color.fill_subtle'))
+          .backgroundColor($r('app.color.immersive_input_field_bg'))
           .onClick(() => {
             this.onExpand(this.text, this.keyboardHeight);
           })
@@ -260,10 +261,16 @@ export struct CommentInputBar {
       .alignItems(VerticalAlign.Bottom)
       // 键盘弹起：底部内边距只留 8（安全区被键盘遮住）；键盘收起：叠加底部安全区贴 Home 条之上。
       .padding({ left: 12, right: 12, top: 8, bottom: this.keyboardHeight > 0 ? 8 : 8 + this.bottomInset })
-      .backgroundColor($r('app.color.surface_card'))
+      // 输入条不是 HDS 组件，无法直接获得标题栏的 systemMaterialEffect。这里在同一个
+      // 可见节点上先采样并模糊背后的帖子内容，再叠加主题半透明底色；输入框自身也使用
+      // 半透明填充，避免把大部分模糊区域重新盖成实色。
+      .backdropBlur(IMMERSIVE_PANEL_BLUR_RADIUS)
+      .backgroundColor($r('app.color.immersive_input_bar_bg'))
       .border({
-        width: { top: 1 },
-        color: $r('app.color.border')
+        // 只保留 0.5vp 顶部高光，用于分清输入条与正文；比原来的 1vp 普通分割线更接近
+        // HDS 原生按钮的亮边，同时不会在暗色模式下形成一条粗白线。
+        width: { top: 0.5 },
+        color: $r('app.color.immersive_input_bar_highlight')
       })
       // 一镜到底的源：整条底部输入栏（全宽）与全屏编辑器主面板同 id。放在整条 Row 而非左侧
       // 窄输入框上——宽度本就是满的，生长基本只有竖直方向（从底部整条向上长满全屏），不再从

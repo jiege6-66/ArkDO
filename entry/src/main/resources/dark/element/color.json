@@ -21,6 +21,18 @@
       "value": "#66FFFFFF"
     },
     {
+      "name": "immersive_input_bar_bg",
+      "value": "#B32A2E33"
+    },
+    {
+      "name": "immersive_input_field_bg",
+      "value": "#8023262C"
+    },
+    {
+      "name": "immersive_input_bar_highlight",
+      "value": "#66FFFFFF"
+    },
+    {
       "name": "text_primary",
       "value": "#E7E9EE"
     },
