@@ -8,9 +8,11 @@ const CLOUDFLARE_MARKERS: string[] = [
   'just a moment'
 ];
 
-export function detectChallenge(statusCode: number, contentType: string, body: string): ChallengeState {
+export function detectChallenge(statusCode: number, contentType: string, body: string,
+  cfMitigated: string = ''): ChallengeState {
   const normalizedContentType: string = contentType.toLowerCase();
   const normalizedBody: string = body.toLowerCase();
+  const normalizedCfMitigated: string = cfMitigated.toLowerCase();
   const isJson: boolean =
     normalizedContentType.indexOf('application/json') >= 0 || looksLikeJson(normalizedBody);
 
@@ -20,19 +22,17 @@ export function detectChallenge(statusCode: number, contentType: string, body: s
     return ChallengeState.NONE;
   }
 
+  if (normalizedCfMitigated.indexOf('challenge') >= 0) {
+    return ChallengeState.REQUIRED;
+  }
+
   // 关键字子串匹配只作用于非 JSON（HTML/文本）正文。
   if (!isJson && containsCloudflareMarker(normalizedBody)) {
     return ChallengeState.REQUIRED;
   }
 
-  if (statusCode === 403 || statusCode === 429) {
-    return ChallengeState.SUSPECTED;
-  }
-
-  if (isHtmlResponse(normalizedContentType, normalizedBody) && !isJson) {
-    return ChallengeState.SUSPECTED;
-  }
-
+  // 403/429、普通登录页和错误页本身都不足以证明是 CF。没有明确标头或正文特征时,
+  // 交给网络层按普通 HTTP/响应结构错误处理,避免把掉登录误报成需要过盾。
   return ChallengeState.NONE;
 }
 
@@ -43,10 +43,6 @@ function containsCloudflareMarker(normalizedBody: string): boolean {
     }
   }
   return false;
-}
-
-function isHtmlResponse(normalizedContentType: string, normalizedBody: string): boolean {
-  return normalizedContentType.indexOf('text/html') >= 0 || normalizedBody.indexOf('<html') >= 0;
 }
 
 function looksLikeJson(normalizedBody: string): boolean {

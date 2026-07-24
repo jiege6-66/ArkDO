@@ -4,14 +4,14 @@ import { ChallengeState } from '../main/ets/services/network/NetworkTypes';
 
 export default function challengeDetectorTest() {
   describe('challengeDetectorTest', () => {
-    it('returnsSuspectedForForbiddenStatus', 0, () => {
+    it('doesNotTreatJsonForbiddenAsCloudflare', 0, () => {
       const state: ChallengeState = detectChallenge(403, 'application/json', '{"error":"forbidden"}');
-      expect(state).assertEqual(ChallengeState.SUSPECTED);
+      expect(state).assertEqual(ChallengeState.NONE);
     });
 
-    it('returnsSuspectedForTooManyRequests', 0, () => {
+    it('doesNotTreatJsonRateLimitAsCloudflare', 0, () => {
       const state: ChallengeState = detectChallenge(429, 'application/json', '{"error":"rate limited"}');
-      expect(state).assertEqual(ChallengeState.SUSPECTED);
+      expect(state).assertEqual(ChallengeState.NONE);
     });
 
     it('returnsRequiredForCloudflareHtml', 0, () => {
@@ -20,10 +20,21 @@ export default function challengeDetectorTest() {
       expect(state).assertEqual(ChallengeState.REQUIRED);
     });
 
-    it('returnsSuspectedForUnexpectedHtml', 0, () => {
+    it('returnsRequiredForCloudflareMitigatedHeader', 0, () => {
+      const state: ChallengeState = detectChallenge(403, 'text/html', '<html></html>', 'challenge');
+      expect(state).assertEqual(ChallengeState.REQUIRED);
+    });
+
+    it('doesNotTreatUnexpectedHtmlAsCloudflare', 0, () => {
       const body: string = '<html><body>Unexpected HTML</body></html>';
       const state: ChallengeState = detectChallenge(200, 'text/html', body);
-      expect(state).assertEqual(ChallengeState.SUSPECTED);
+      expect(state).assertEqual(ChallengeState.NONE);
+    });
+
+    it('doesNotTreatForbiddenLoginHtmlAsCloudflare', 0, () => {
+      const body: string = '<html><title>登录</title><body>Please log in</body></html>';
+      const state: ChallengeState = detectChallenge(403, 'text/html', body);
+      expect(state).assertEqual(ChallengeState.NONE);
     });
 
     it('returnsNoneForJsonResponse', 0, () => {

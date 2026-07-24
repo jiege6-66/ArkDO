@@ -3,6 +3,13 @@ import { LengthMetrics } from '@ohos.arkui.node';
 import { ButtonModifier } from '@ohos.arkui.modifier';
 
 class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
+  private readonly blurRadius: number;
+
+  constructor(blurRadius: number) {
+    super();
+    this.blurRadius = blurRadius;
+  }
+
   applyNormalAttribute(instance: ButtonAttribute): void {
     // primaryButton 会铺满整个 ActionBar，外层 backgroundBlurStyle 无法在按钮中间形成
     // 可见的背板采样。这里沿用 ClashBox 悬浮按钮已验证的同节点方案：
@@ -12,7 +19,7 @@ class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
     // HdsActionBar 没有标题栏的 systemMaterialEffect 接口，只能通过其官方开放的
     // buttonModifier 在最上层补一条细高光；0.5vp 避免高密度屏上出现明显的粗描边。
     instance
-      .backdropBlur(30)
+      .backdropBlur(this.blurRadius)
       .borderWidth(0.5)
       .borderColor($r('app.color.hds_floating_action_highlight'));
   }
@@ -23,8 +30,8 @@ class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
 // 两处统一维护，避免首页和详情页逐渐出现视觉差异。
 export const IMMERSIVE_ACTION_BAR_BLUR_STRATEGY: BlurStrategy = BlurStrategy.ENABLE;
 
-export function buildImmersiveFloatingActionButtonModifier(): ButtonModifier {
-  return new ImmersiveFloatingActionButtonModifier();
+export function buildImmersiveFloatingActionButtonModifier(blurRadius: number = 30): ButtonModifier {
+  return new ImmersiveFloatingActionButtonModifier(blurRadius);
 }
 
 export function buildImmersiveFloatingActionStyle(size: number = 52): ActionBarStyle {

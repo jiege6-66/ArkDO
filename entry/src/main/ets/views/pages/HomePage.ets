@@ -88,6 +88,8 @@ class NextFrameTask extends FrameCallback {
 @Component
 export struct HomePage {
   @State private topics: Topic[] = [];
+  // 完整刷新会替换整批 Topic 实例。版本变化后重建 TopicListItem，避免 @ObjectLink 仍绑定旧实例。
+  @State private topicListVersion: number = 0;
   @State private isInitialLoading: boolean = false;
   @State private isRefreshing: boolean = false;
   @State private isLoadingMore: boolean = false;
@@ -167,6 +169,8 @@ export struct HomePage {
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeTopicReadState?: () => void = undefined;
+  // 会话变化撞上在途列表请求时先记账，请求结束后再按最新 Cookie 补拉首页。
+  private pendingSessionRefresh: boolean = false;
   // 调试用:输入帖子 ID 直接跳转详情(有些帖子已从最新列表里翻走,无法在列表中找到)。
   private jumpDialogController: CustomDialogController = new CustomDialogController({
     builder: TopicJumpDialog({
@@ -475,10 +479,10 @@ export struct HomePage {
                 this.handleUnreadBadgeClick(selectedTopic);
               }
             })
-            // key 纳入 bookmarked:相同 id 时 ForEach 复用旧子组件、不把 @ObjectLink 换到刷新后的新实例,
-            // 收藏后回列表刷新图标不更新。把书签态并入 key,变化时强制重建该行绑新实例。
-            // unread 走「同实例改字段 + @Observed 通知」路径,无需进 key。
-          }, (topic: Topic) => `${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
+            // 完整刷新会 new 一批 Topic，版本入 key 后强制重绑 @ObjectLink；同实例上的收藏变化仍靠
+            // bookmarked 重建，已读状态则继续走 @Observed 精准更新，不必重建整行。
+          }, (topic: Topic) =>
+            `${this.topicListVersion}_${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
 
           if (this.topics.length > 0) {
             ListItem() {
@@ -972,10 +976,12 @@ export struct HomePage {
 
     if (result.success && result.data) {
       this.topics = result.data.topics;
+      this.topicListVersion++;
       this.currentPage = 0;
       this.hasMore = result.data.hasMore;
       this.listMessage = result.data.topics.length > 0 ? '' : '暂无帖子数据';
       this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
+      this.runPendingSessionRefresh();
       return;
     }
 
@@ -993,6 +999,7 @@ export struct HomePage {
     } else {
       this.footerMessage = '刷新失败,请重试';
     }
+    this.runPendingSessionRefresh();
   }
 
   private async loadMoreTopics(): Promise<void> {
@@ -1022,11 +1029,13 @@ export struct HomePage {
       this.currentPage = nextPage;
       this.hasMore = result.data.hasMore && result.data.topics.length > 0;
       this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
+      this.runPendingSessionRefresh();
       return;
     }
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
     this.footerMessage = result.error?.message ? `${result.error.message}，上拉重试` : '加载失败，上拉重试';
+    this.runPendingSessionRefresh();
   }
 
   private handleSessionChanged(version: number): void {
@@ -1037,6 +1046,21 @@ export struct HomePage {
     this.handledSessionVersion = version;
     Log.i(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
     this.footerMessage = '会话已更新，正在刷新';
+    if (!this.bridge.canFetch() || this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
+      this.pendingSessionRefresh = true;
+      Log.i(`${LOG_TAG} session refresh queued version=${version}`);
+      return;
+    }
+    this.refreshLatestTopics();
+  }
+
+  private runPendingSessionRefresh(): void {
+    if (!this.pendingSessionRefresh || !this.bridge.canFetch() ||
+      this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
+      return;
+    }
+    this.pendingSessionRefresh = false;
+    Log.i(`${LOG_TAG} run queued session refresh`);
     this.refreshLatestTopics();
   }
 
@@ -1088,7 +1112,10 @@ export struct HomePage {
     if (this.hostReadyEpoch <= 0) {
       return;
     }
-    if (this.topics.length === 0 || this.loadFailed) {
+    if (this.pendingSessionRefresh) {
+      this.loadSiteMetadataIfNeeded();
+      this.runPendingSessionRefresh();
+    } else if (this.topics.length === 0 || this.loadFailed) {
       this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }

@@ -64,6 +64,9 @@ export struct LoginPage {
         .onlineImageAccess(true)
         .imageAccess(true)
         .cacheMode(CacheMode.Default)
+        .onControllerAttached(() => {
+          WebSessionManager.applyUserAgent(this.controller, 'LoginPage');
+        })
         .onPageBegin((event: OnPageBeginEvent) => {
           Log.i(`${LOG_TAG} page begin url=${event.url}`);
         })
@@ -134,7 +137,7 @@ export struct LoginPage {
   }
 
   // 登录成功统一出口:单次守卫,停掉两路轮询、落盘 cookie,再通知上层(关登录页 + 刷新会话)。
-  private signalLoginSuccess(source: string, url: string): void {
+  private async signalLoginSuccess(source: string, url: string): Promise<void> {
     if (this.hasSignaledLoginSuccess) {
       return;
     }
@@ -142,7 +145,7 @@ export struct LoginPage {
     Log.i(`${LOG_TAG} login success signaled source=${source} url=${url}`);
     this.stopLoginCookiePolling();
     this.stopChallengeCookiePolling();
-    WebSessionManager.saveCookies('LoginPage');
+    await WebSessionManager.saveCookies('LoginPage');
     this.onLoginSuccess();
   }
 

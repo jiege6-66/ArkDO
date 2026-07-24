@@ -10,6 +10,7 @@ export interface CookiePresenceSnapshot {
 }
 
 export class WebSessionManager {
+  private static cookieSaveChain: Promise<void> = Promise.resolve();
   static configureCookieAccess(source: string): void {
     try {
       webview.WebCookieManager.putAcceptCookieEnabled(true);
@@ -29,14 +30,21 @@ export class WebSessionManager {
     }
   }
 
-  static saveCookies(source: string): void {
-    webview.WebCookieManager.saveCookieAsync()
-      .then(() => {
-        Log.i(`${LOG_TAG} cookie save success source=${source}`);
-      })
-      .catch((error: Object) => {
-        Log.i(`${LOG_TAG} cookie save failed source=${source} error=${JSON.stringify(error)}`);
-      });
+  static saveCookies(source: string): Promise<void> {
+    // 多个 WebView 的 onPageEnd 可能同时触发保存。串行化保存,避免后一次调用覆盖
+    // 前一次尚未落盘的 Cookie 快照;调用方也可以等待该 Promise 再关闭登录页。
+    const nextSave: Promise<void> = WebSessionManager.cookieSaveChain.then(() => {
+      return webview.WebCookieManager.saveCookieAsync()
+        .then(() => {
+          const authSnapshot: CookiePresenceSnapshot = WebSessionManager.getCookiePresenceSnapshot('_t');
+          Log.i(`${LOG_TAG} cookie save success source=${source} authCookiePresent=${authSnapshot.hasCookie} cookieHeaderLength=${authSnapshot.headerLength}`);
+        })
+        .catch((error: Object) => {
+          Log.i(`${LOG_TAG} cookie save failed source=${source} error=${JSON.stringify(error)}`);
+        });
+    });
+    WebSessionManager.cookieSaveChain = nextSave;
+    return nextSave;
   }
 
   static hasCookie(cookieName: string): boolean {

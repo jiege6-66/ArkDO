@@ -7,6 +7,8 @@ import {
   IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
 } from '../../common/ui/ImmersiveActionBarStyle';
 
+const HOME_FAB_BLUR_RADIUS: number = 20;
+
 @Component
 export struct HomeFab {
   // 由父页滚动位置驱动:true=回顶态,false=发帖态。
@@ -28,10 +30,10 @@ export struct HomeFab {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
       // 背景色必须落在按钮层：若只加到 ActionBar 外层，会被 HDS 模糊材质再次合成，
-      // 主题底色与同节点 backdropBlur(30) 配合：正文可以透光，但先被模糊，
+      // 首页采用稍浅的背景模糊：正文仍不可辨认，但滚动时材质变化更轻。
       // 不会像单纯透明背景一样仍能辨认；外层 ActionBar 保留官方交互与阴影能力。
       backgroundColor: ColorMetrics.resourceColor($r('app.color.hds_floating_action_bg')),
-      buttonModifier: buildImmersiveFloatingActionButtonModifier(),
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(HOME_FAB_BLUR_RADIUS),
       iconSize: LengthMetrics.vp(22),
       // 发帖/回复仍使用品牌蓝图标表达主操作，回顶态则沿用中性色降低视觉权重。
       iconFillColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_fg') : $r('app.color.fab_compose_bg')),

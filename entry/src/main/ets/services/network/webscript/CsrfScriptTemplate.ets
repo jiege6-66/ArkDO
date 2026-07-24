@@ -89,6 +89,7 @@ ${headers}
           window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
             statusCode: response.status,
             contentType: response.headers.get('content-type') || '',
+            cfMitigated: response.headers.get('cf-mitigated') || '',
             body: body,
             csrfSource: csrfSource,
             csrfLength: csrfLength

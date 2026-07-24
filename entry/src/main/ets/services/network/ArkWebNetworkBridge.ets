@@ -36,6 +36,7 @@ interface ArkWebResultReceiver {
 interface WebFetchEnvelope {
   statusCode?: number;
   contentType?: string;
+  cfMitigated?: string;
   body?: string;
   errorMessage?: string;
   // POST 诊断:本次使用的 CSRF token 来源(session/meta/none)与长度,用于定位 403 是否为 CSRF 不匹配。
@@ -720,6 +721,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
           window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
             statusCode: response.status,
             contentType: response.headers.get('content-type') || '',
+            cfMitigated: response.headers.get('cf-mitigated') || '',
             body: body
           }));
         }).catch((error) => {
@@ -917,8 +919,9 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     const statusCode: number = envelope.statusCode ? envelope.statusCode : 0;
     const contentType: string = envelope.contentType ? envelope.contentType : '';
+    const cfMitigated: string = envelope.cfMitigated ? envelope.cfMitigated : '';
     const body: string = envelope.body ? envelope.body : '';
-    const challengeState: ChallengeState = detectChallenge(statusCode, contentType, body);
+    const challengeState: ChallengeState = detectChallenge(statusCode, contentType, body, cfMitigated);
     logNetwork(`${method} ${path} response status=${statusCode} contentType=${contentType} bodyLength=${body.length} challenge=${challengeState}`);
     this.logResponseBody(path, contentType, body, method, statusCode, challengeState);
 

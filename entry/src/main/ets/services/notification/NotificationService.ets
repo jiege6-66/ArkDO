@@ -3,6 +3,7 @@ import { User } from '../../models/User';
 import { AuthService } from '../auth/AuthService';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { AppStateEventBus } from '../session/AppStateEventBus';
+import { SessionEventBus } from '../session/SessionEventBus';
 import { NotificationEventBus } from './NotificationEventBus';
 import { MarkReadByTopicResult, NotificationApi } from './NotificationApi';
 
@@ -100,6 +101,9 @@ export class NotificationService {
     if (result.data === undefined) {
       // 会话已失效(登出):清零。
       NotificationEventBus.publish({ unread: 0, highPriority: 0 });
+      // 通知轮询与 RootTabPage 的会话检查是两条独立链路。轮询先发现会话失效时,
+      // 必须通知根页面清掉 currentUser,否则头像和个人中心会继续显示旧账号。
+      SessionEventBus.notifySessionChanged();
       return;
     }
 

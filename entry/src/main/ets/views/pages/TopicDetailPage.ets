@@ -76,6 +76,8 @@ const SUCCESS_TOAST_DELAY_MS: number = 350;
 const BOOST_MAX_CHARS: number = 16;
 // 回帖草稿自动存防抖:停止输入这么久才真发一次(与发新主题同节奏)。
 const REPLY_DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
+// 末尾加载行已有 54vp；再补这段空白与底部安全区，让最后一楼操作区完全越过 52vp 悬浮回复按钮。
+const POST_LIST_BOTTOM_SPACER: number = 28;
 
 @Component
 export struct TopicDetailPage {
@@ -418,22 +420,29 @@ export struct TopicDetailPage {
 
       if (this.postCount > 0) {
         ListItem() {
-          Row() {
-            if (this.isLoadingMore) {
-              LoadingProgress()
-                .width(18)
-                .height(18)
-                .color($r('app.color.brand'))
-                .margin({ right: 8 })
-            }
+          Column() {
+            Row() {
+              if (this.isLoadingMore) {
+                LoadingProgress()
+                  .width(18)
+                  .height(18)
+                  .color($r('app.color.brand'))
+                  .margin({ right: 8 })
+              }
 
-            Text(this.loadMoreMessage)
-              .fontSize(13)
-              .fontColor($r('app.color.text_tertiary'))
+              Text(this.loadMoreMessage)
+                .fontSize(13)
+                .fontColor($r('app.color.text_tertiary'))
+            }
+            .width('100%')
+            .height(54)
+            .justifyContent(FlexAlign.Center)
+
+            // List 铺进底部系统区域，需把导航指示条高度一并计入可滚动尾距。
+            Blank()
+              .height(POST_LIST_BOTTOM_SPACER + this.sysBottomInset)
           }
           .width('100%')
-          .height(54)
-          .justifyContent(FlexAlign.Center)
         }
       }
     }

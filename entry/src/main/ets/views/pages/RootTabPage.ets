@@ -144,6 +144,9 @@ export struct RootTabPage {
   // 收尾动画等于白播(表现为"一松手就唰一下到位")。
   private profileSwipeSettling: boolean = false;
   private sessionCheckSequence: number = 0;
+  // 会话检查进行中又收到登录成功/会话变化时,不能丢掉这次新检查请求。
+  // 旧请求返回后会自动启动最新一轮,避免旧的「未登录」结果覆盖刚登录状态。
+  private sessionCheckQueued: boolean = false;
   // 上次会话检查是否失败(CF 盾/网络原因,状态可能不真实),下拉刷新时据此补查。
   private lastSessionCheckFailed: boolean = false;
   // 网络层自愈闸:长时间后台回前台后宿主 webview 连接/DNS 可能僵死(status=0 且非 CF 盾),
@@ -1357,8 +1360,8 @@ export struct RootTabPage {
   private handleLoginSuccess(): void {
     // 会话变化会触发 host webview 重载,先关闭就绪门闩,确保随后并发的 fetch 排队到重载完成后。
     this.bridge.markHostReloading();
+    // RootTabPage 自身订阅了 SessionEventBus,通知后会统一排队检查当前会话。
     SessionEventBus.notifySessionChanged();
-    this.checkCurrentUser();
     this.closeLoginPage();
   }
 
@@ -1411,16 +1414,24 @@ export struct RootTabPage {
   }
 
   private async checkCurrentUser(): Promise<void> {
-    if (!this.isArkWebReady || this.isCheckingSession) {
+    if (!this.isArkWebReady) {
       return;
     }
 
     const requestId: number = this.sessionCheckSequence + 1;
     this.sessionCheckSequence = requestId;
+    if (this.isCheckingSession) {
+      // 新的会话事件已经发生:递增后的 requestId 会让旧请求返回时放弃写状态。
+      this.sessionCheckQueued = true;
+      return;
+    }
+
     this.isCheckingSession = true;
     this.hasCheckedSession = false;
     const result: NetworkResult<User | undefined> = await new AuthService(this.bridge).getCurrentUser();
     if (requestId !== this.sessionCheckSequence) {
+      this.isCheckingSession = false;
+      this.startQueuedSessionCheckIfNeeded();
       return;
     }
 
@@ -1450,6 +1461,7 @@ export struct RootTabPage {
         // 登出/换号:清掉自愈基准,让下一个账号登录时重新兑现自己的订阅。
         this.pushCoordinator.resetReconcileState();
       }
+      this.startQueuedSessionCheckIfNeeded();
       return;
     }
 
@@ -1471,6 +1483,18 @@ export struct RootTabPage {
       Log.i(`${LOG_TAG} network failure self-heal: reload host and recheck`);
       this.reloadHostForDoh();
     }
+    this.startQueuedSessionCheckIfNeeded();
+  }
+
+  private startQueuedSessionCheckIfNeeded(): void {
+    if (!this.sessionCheckQueued) {
+      return;
+    }
+    this.sessionCheckQueued = false;
+    // 让当前响应先完成状态写入,再启动最新检查,避免递归叠加。
+    setTimeout(() => {
+      this.checkCurrentUser();
+    }, 0);
   }
 
   // 下拉刷新时的会话补查:仅在上次检查失败(状态可能不真实)时重查一次,正常情况零开销。
