@@ -149,6 +149,14 @@
       "value": "#F3F4F6"
     },
     {
+      "name": "post_content_surface_bg",
+      "value": "#E6E8EB"
+    },
+    {
+      "name": "post_content_border",
+      "value": "#C7CDD5"
+    },
+    {
       "name": "warn_soft_bg",
       "value": "#FEF3C7"
     },
@@ -210,7 +218,15 @@
     },
     {
       "name": "boost_bubble_bg",
-      "value": "#F2F2F2"
+      "value": "#E6E8EB"
+    },
+    {
+      "name": "post_reply_control_bg",
+      "value": "#E6E8EB"
+    },
+    {
+      "name": "post_reply_control_active_bg",
+      "value": "#D9DDE2"
     },
     {
       "name": "fab_compose_bg",

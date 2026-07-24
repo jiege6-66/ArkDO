@@ -149,6 +149,14 @@
       "value": "#23262C"
     },
     {
+      "name": "post_content_surface_bg",
+      "value": "#23262C"
+    },
+    {
+      "name": "post_content_border",
+      "value": "#454B54"
+    },
+    {
       "name": "warn_soft_bg",
       "value": "#3A2F14"
     },
@@ -211,6 +219,14 @@
     {
       "name": "boost_bubble_bg",
       "value": "#26292E"
+    },
+    {
+      "name": "post_reply_control_bg",
+      "value": "#23262C"
+    },
+    {
+      "name": "post_reply_control_active_bg",
+      "value": "#30343A"
     },
     {
       "name": "fab_compose_bg",

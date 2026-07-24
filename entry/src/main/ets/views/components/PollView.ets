@@ -142,7 +142,7 @@ export struct PollView {
 
           // 进度条:灰底 + 按占比宽度的填充(已投项高亮蓝)。
           Stack({ alignContent: Alignment.Start }) {
-            Row().width('100%').height(8).backgroundColor($r('app.color.fill_subtle')).borderRadius(4)
+            Row().width('100%').height(8).backgroundColor($r('app.color.post_content_surface_bg')).borderRadius(4)
             Row()
               .width(`${this.percentAt(index)}%`)
               .height(8)

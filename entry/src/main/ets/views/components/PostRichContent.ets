@@ -488,10 +488,10 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 10, bottom: 10 })
-    .backgroundColor($r('app.color.fill_subtle'))
+    .backgroundColor($r('app.color.post_content_surface_bg'))
     .border({
       width: { left: 3 },
-      color: $r('app.color.border')
+      color: $r('app.color.post_content_border')
     })
     // .borderRadius(8)
     .margin({ top: marginTop })
@@ -587,10 +587,10 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 10, right: 10, top: 10, bottom: 10 })
-    .backgroundColor($r('app.color.fill_subtle'))
+    .backgroundColor($r('app.color.post_content_surface_bg'))
     .border({
       width: { left: 3 },
-      color: $r('app.color.border')
+      color: $r('app.color.post_content_border')
     })
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
@@ -881,7 +881,7 @@ export struct PostRichContent {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor($r('app.color.fill_subtle'))
+    .backgroundColor($r('app.color.post_content_surface_bg'))
     .borderRadius(8)
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
@@ -943,7 +943,7 @@ export struct PostRichContent {
               .aspectRatio(this.getImageAspectRatio(block))
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH, maxHeight: this.wideImageMaxHeight() })
               .objectFit(ImageFit.Contain)
-              .backgroundColor($r('app.color.fill_subtle'))
+              .backgroundColor($r('app.color.post_content_surface_bg'))
               .onClick(() => {
                 this.openImageLink(block);
               })
@@ -953,7 +953,7 @@ export struct PostRichContent {
               .height(260)
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH })
               .objectFit(ImageFit.Contain)
-              .backgroundColor($r('app.color.fill_subtle'))
+              .backgroundColor($r('app.color.post_content_surface_bg'))
               .onClick(() => {
                 this.openImageLink(block);
               })
@@ -968,7 +968,7 @@ export struct PostRichContent {
           .aspectRatio(this.getImageAspectRatio(block))
           .constraintSize({ maxHeight: 520 })
           .objectFit(ImageFit.Contain)
-          .backgroundColor($r('app.color.fill_subtle'))
+          .backgroundColor($r('app.color.post_content_surface_bg'))
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -977,7 +977,7 @@ export struct PostRichContent {
           .width('100%')
           .height(260)
           .objectFit(ImageFit.Contain)
-          .backgroundColor($r('app.color.fill_subtle'))
+          .backgroundColor($r('app.color.post_content_surface_bg'))
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -1024,7 +1024,7 @@ export struct PostRichContent {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 链接预览卡片(onebox)。样式对齐官方 .onebox:白底 + 双层描边(内 1px #D3D3D3、外 4px #F2F2F2)、
+  // 链接预览卡片(onebox)。白底 + 双层描边，颜色跟随帖子正文嵌入层主题资源，
   // 2px 圆角、16px 内边距。外层留 4px 内边距给 outline 让位,避免被父容器裁掉。
   @Builder
   private OneboxBlock(block: RichBlock, marginTop: number) {
@@ -1079,8 +1079,8 @@ export struct PostRichContent {
       .padding(16)
       .backgroundColor($r('app.color.surface_card'))
       .borderRadius(2)
-      .border({ width: 1, color: $r('app.color.border') })
-      .outline({ width: 4, color: $r('app.color.page_bg_gray'), radius: 2 })
+      .border({ width: 1, color: $r('app.color.post_content_border') })
+      .outline({ width: 4, color: $r('app.color.post_content_surface_bg'), radius: 2 })
       .alignItems(HorizontalAlign.Start)
       .onClick(() => {
         this.openLink(block.href ? block.href : '');
@@ -1197,7 +1197,7 @@ export struct PostRichContent {
               })
             }, (cell: RichTableCell, c: number) => `${r}-${c}`)
           }
-          .backgroundColor(row.header ? $r('app.color.fill_subtle') : Color.Transparent)
+          .backgroundColor(row.header ? $r('app.color.post_content_surface_bg') : Color.Transparent)
         }, (row: RichTableRow, r: number) => `row-${r}`)
       }
       .width(this.tableTotalWidth(block))
@@ -1309,7 +1309,8 @@ export struct PostRichContent {
       }
     }
     .width('100%')
-    .backgroundColor($r('app.color.fill_subtle'))
+    // 折叠区使用正文嵌入层颜色，避免在详情页通用灰背景上失去边界。
+    .backgroundColor($r('app.color.post_content_surface_bg'))
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
   }

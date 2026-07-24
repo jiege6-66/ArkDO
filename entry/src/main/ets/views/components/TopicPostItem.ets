@@ -431,8 +431,9 @@ export struct TopicPostItem {
             }
             .alignItems(VerticalAlign.Center)
             .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            // 展开时用更深的 #E9E9E9 作为"已激活"态,收起时用较浅的 #F3F4F6。
-            .backgroundColor(this.repliesExpanded ? $r('app.color.surface_muted') : $r('app.color.fill_subtle'))
+            // 使用帖子内专用底色，避免详情页通用背景调整后入口与页面融为一体。
+            .backgroundColor(this.repliesExpanded ?
+              $r('app.color.post_reply_control_active_bg') : $r('app.color.post_reply_control_bg'))
             .borderRadius(4)
             .onClick(() => {
               this.toggleReplies();
