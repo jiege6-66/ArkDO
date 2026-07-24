@@ -56,6 +56,11 @@ import {
   buildImmersiveFloatingActionStyle,
   IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
 } from '../../common/ui/ImmersiveActionBarStyle';
+import {
+  SMART_REACH_ANIMATION_DURATION,
+  SMART_REACH_LEFT_HAND_STORAGE_KEY,
+  smartReachBottomAlignRules
+} from '../../common/ui/SmartReachLayout';
 
 const LOG_TAG: string = '[ArkDO][TopicDetail]';
 const POSTS_PAGE_SIZE: number = 20;
@@ -85,6 +90,9 @@ export struct TopicDetailPage {
   // 评论浮层/遮罩留在根 Stack 层不加避让,天然盖满整屏。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
+  @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
+  private smartReachLeftHanded: boolean = false;
+  @State private replyFabAlignRules: AlignRuleOption = smartReachBottomAlignRules(false);
   @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
   // detail 整体加载/替换时经 @Watch 从 detail.bookmarked 同步;楼层 toggle 收藏后由回调直接改写实现即时联动。
@@ -236,6 +244,7 @@ export struct TopicDetailPage {
   );
 
   aboutToAppear(): void {
+    this.replyFabAlignRules = smartReachBottomAlignRules(this.smartReachLeftHanded);
     if (!this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
         this.handleSessionChanged(version);
@@ -268,6 +277,15 @@ export struct TopicDetailPage {
       this.loadSiteMetadataIfNeeded();
       this.loadTopicDetail();
     }
+  }
+
+  private onSmartReachSideChanged(): void {
+    this.getUIContext().animateTo({
+      duration: SMART_REACH_ANIMATION_DURATION,
+      curve: Curve.EaseInOut
+    }, () => {
+      this.replyFabAlignRules = smartReachBottomAlignRules(this.smartReachLeftHanded);
+    });
   }
 
   aboutToDisappear(): void {
@@ -649,19 +667,30 @@ export struct TopicDetailPage {
     // 右下角悬浮回复按钮:仅在帖子已加载且浮层未展开时显示。
     // 窗口常驻全屏布局后不再有临时切换,按钮锚点全程稳定,无需再绑全屏标志防"闪回"。
     if (this.detail && !this.showComposer) {
-      HdsActionBar({
-        primaryButton: this.replyFabButton(),
-        actionBarStyle: this.replyFabStyle(),
-        blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
-      })
-      .width(52)
-      .height(52)
-      .margin({ right: 16, bottom: floatingActionBottomMargin(this.sysBottomInset) })
-      // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
-      .transition(TransitionEffect.asymmetric(
-        TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
-        TransitionEffect.IDENTITY
-      ))
+      RelativeContainer() {
+        HdsActionBar({
+          primaryButton: this.replyFabButton(),
+          actionBarStyle: this.replyFabStyle(),
+          blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
+        })
+          .id('smartReachReplyFab')
+          .alignRules(this.replyFabAlignRules)
+          .width(52)
+          .height(52)
+          .margin({
+            left: 16,
+            right: 16,
+            bottom: floatingActionBottomMargin(this.sysBottomInset)
+          })
+          // 不对称过渡:出现(关闭浮层后)淡入;消失(打开浮层时)立即移除,被同时淡入的遮罩盖住,毫无痕迹。
+          .transition(TransitionEffect.asymmetric(
+            TransitionEffect.OPACITY.animation({ duration: 150, curve: Curve.EaseOut }),
+            TransitionEffect.IDENTITY
+          ))
+      }
+      .width('100%')
+      .height('100%')
+      .hitTestBehavior(HitTestMode.Transparent)
     }
 
     // 向上补楼 / 跳楼定位的加载指示:悬浮小胶囊,不参与 List 布局(头插时列表零跳动的前提)。

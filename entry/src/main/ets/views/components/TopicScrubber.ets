@@ -1,7 +1,12 @@
-// 右缘楼层 scrubber(Discourse timeline 风):竖向 Slider 直接拖动跳楼。
+// 随握姿切换左右边缘的楼层 scrubber(Discourse timeline 风):竖向 Slider 直接拖动跳楼。
 import { ON_DARK_FG, SCRIM } from '../../common/theme/Palette';
+import {
+  SMART_REACH_ANIMATION_DURATION,
+  SMART_REACH_LEFT_HAND_STORAGE_KEY,
+  smartReachCenterAlignRules
+} from '../../common/ui/SmartReachLayout';
 // 用原生 Slider 而非手写手势——拖动→值映射框架托管,已填充段天然表达阅读进度。
-// 顶=1 楼(最早),拖动时左侧气泡实时显示目标楼号,松手上抛跳楼。
+// 顶=1 楼(最早),拖动时气泡显示在轨道内侧并实时显示目标楼号,松手上抛跳楼。
 
 // 轨道盒宽度:远宽于滑块本身,给气泡留足单行空间(气泡是盒内 position 子节点,宽度受父盒约束)。
 // 空白区靠 hitTestBehavior(Transparent) 放行触摸,只有右缘 Slider 拦截拖动。
@@ -9,6 +14,9 @@ const SCRUBBER_STACK_WIDTH: number = 200;
 
 @Component
 export struct TopicScrubber {
+  @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
+  private smartReachLeftHanded: boolean = false;
+  @State private trackAlignRules: AlignRuleOption = smartReachCenterAlignRules(false);
   // 当前视口楼号(父组件 onScrollIndex 持续下发)。非拖动态时经 @Watch 同步进 sliderValue,
   // 让滑块跟随阅读位置;拖动/跳楼加载期间不跟随,避免把滑块拽走。
   @Prop @Watch('syncFromCurrent') currentPostNumber: number = 1;
@@ -36,6 +44,16 @@ export struct TopicScrubber {
 
   aboutToAppear(): void {
     this.sliderValue = this.clamp(this.currentPostNumber);
+    this.trackAlignRules = smartReachCenterAlignRules(this.smartReachLeftHanded);
+  }
+
+  private onSmartReachSideChanged(): void {
+    this.getUIContext().animateTo({
+      duration: SMART_REACH_ANIMATION_DURATION,
+      curve: Curve.EaseInOut
+    }, () => {
+      this.trackAlignRules = smartReachCenterAlignRules(this.smartReachLeftHanded);
+    });
   }
 
   aboutToDisappear(): void {
@@ -55,11 +73,11 @@ export struct TopicScrubber {
     // 满屏透明覆盖层(满高):只在右缘 Slider 处拦截触摸,其余放行给 List 滚动。
     // 满高 + alignItems Center 让滑块在屏幕垂直居中(根节点若只有 55% 高,会被父 Stack
     // 的 BottomEnd 对齐贴到底部——这是之前"滑块靠下"的根因)。
-    Row() {
+    RelativeContainer() {
       // 轨道盒:Slider 与气泡同处一个 Stack,气泡按手柄 Y 绝对定位,才能贴着手柄上下走。
-      // 盒子加宽(SCRUBBER_STACK_WIDTH)给气泡留单行空间;Slider 靠 alignContent End 贴右缘。
+      // 盒子加宽(SCRUBBER_STACK_WIDTH)给气泡留单行空间；Slider 靠 alignContent 贴向持握侧。
       // onAreaChange 量到轨道实际像素高,供 thumbCenterY 换算手柄纵坐标。
-      Stack({ alignContent: Alignment.End }) {
+      Stack({ alignContent: this.smartReachLeftHanded ? Alignment.Start : Alignment.End }) {
         Slider({
           value: this.sliderValue,
           min: 1,
@@ -98,7 +116,7 @@ export struct TopicScrubber {
             }
           })
 
-        // 拖动/跳转中的气泡:right-center 锚点贴到手柄左侧、纵坐标对齐手柄中心。跳转态内联 loading。
+        // 拖动/跳转中的气泡贴在轨道内侧、纵坐标对齐手柄中心。跳转态内联 loading。
         if (this.dragging || this.jumping) {
           Row() {
             if (this.jumping) {
@@ -118,15 +136,17 @@ export struct TopicScrubber {
           .backgroundColor($r('app.color.brand'))
           .borderRadius(16)
           .shadow({ radius: 8, color: SCRIM, offsetX: 0, offsetY: 2 })
-          // 气泡右-中锚点落在 Slider 左侧一点、手柄中心高度处 → 气泡整体浮在手柄左边、与之等高。
-          .markAnchor({ x: '100%', y: '50%' })
+          // 右手时用气泡右锚点，左手时用左锚点，使气泡始终朝屏幕内侧展开。
+          .markAnchor({ x: this.smartReachLeftHanded ? 0 : '100%', y: '50%' })
           .position({ x: this.bubbleAnchorX(), y: this.thumbCenterY() })
         }
       }
       .width(SCRUBBER_STACK_WIDTH)
       .height('55%')
-      // Slider 轨道在自身宽度里居中,右侧留半个宽度空档;正向 offset 把长条整体推到贴右缘。
-      .offset({ x: 8 })
+      .id('smartReachTopicScrubberTrack')
+      .alignRules(this.trackAlignRules)
+      // Slider 在盒内靠持握侧；额外向屏幕边缘推出 8vp，保持改造前贴边距离。
+      .offset({ x: this.smartReachLeftHanded ? -8 : 8 })
       // 加宽后空白区不该挡列表滚动:整盒放行触摸,只有 Slider 子节点在右缘拦截拖动。
       .hitTestBehavior(HitTestMode.Transparent)
       .onAreaChange((_o: Area, area: Area) => {
@@ -135,18 +155,16 @@ export struct TopicScrubber {
     }
     .width('100%')
     .height('100%')
-    .justifyContent(FlexAlign.End)
-    .alignItems(VerticalAlign.Center)
-    // 贴紧右缘(原来留 4 的内边距,现在往右靠)。
-    .padding({ right: 0 })
     // 覆盖层本身不吃触摸,滚动照常穿透;只有 Slider 子节点在右缘拦截拖动。
     .hitTestBehavior(HitTestMode.Transparent)
   }
 
-  // 气泡右-中锚点的横坐标(相对轨道盒左上角,vp):落在 Slider 左缘再往左留 10vp 间隙。
-  // Slider 靠右对齐,其左缘 = 盒宽 − 滑块宽。
+  // 气泡内侧锚点的横坐标(相对轨道盒左上角,vp)，与 Slider 保持 10vp 间隙。
   private bubbleAnchorX(): number {
     const sliderW: number = this.isActive() ? 32 : 24;
+    if (this.smartReachLeftHanded) {
+      return sliderW + 10;
+    }
     return SCRUBBER_STACK_WIDTH - sliderW - 10;
   }
 

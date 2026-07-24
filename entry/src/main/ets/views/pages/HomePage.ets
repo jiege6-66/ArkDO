@@ -44,6 +44,11 @@ import {
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
+import {
+  SMART_REACH_ANIMATION_DURATION,
+  SMART_REACH_LEFT_HAND_STORAGE_KEY,
+  smartReachBottomAlignRules
+} from '../../common/ui/SmartReachLayout';
 
 const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
@@ -122,6 +127,10 @@ export struct HomePage {
   private listScroller: Scroller = new Scroller();
   // 右下角悬浮按钮当前身份:false=发帖,true=回到顶部。由滚动位置驱动。
   @State private showBackToTopFab: boolean = false;
+  // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
+  @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
+  private smartReachLeftHanded: boolean = false;
+  @State private fabAlignRules: AlignRuleOption = smartReachBottomAlignRules(false);
   // 列表视口实测高度(vp):把滚动偏移换算成"滑过几屏"的分母,onAreaChange 量得。
   @State private listViewportH: number = 0;
   // 发帖浮层开关。
@@ -189,6 +198,8 @@ export struct HomePage {
   private announceChecked: boolean = false;
 
   aboutToAppear(): void {
+    // 页面可能在左手状态已生效后才重新挂载，首帧直接使用当前侧，避免先从右侧飞入。
+    this.fabAlignRules = smartReachBottomAlignRules(this.smartReachLeftHanded);
     if (!this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
         this.handleSessionChanged(version);
@@ -214,6 +225,15 @@ export struct HomePage {
       this.refreshLatestTopics();
     }
     this.checkVersionAnnouncement();
+  }
+
+  private onSmartReachSideChanged(): void {
+    this.getUIContext().animateTo({
+      duration: SMART_REACH_ANIMATION_DURATION,
+      curve: Curve.EaseInOut
+    }, () => {
+      this.fabAlignRules = smartReachBottomAlignRules(this.smartReachLeftHanded);
+    });
   }
 
   aboutToDisappear(): void {
@@ -578,16 +598,24 @@ export struct HomePage {
       // 悬浮按钮:发帖 / 回到顶部同占一个坑位,按滚动位置换身份(详见 HomeFab)。
       // 列表为空时(加载中/失败/CF 挑战)不出现——既无从回顶,空态下也不该冒出主动作。
       if (this.topics.length > 0) {
-        HomeFab({
-          showBackToTop: this.showBackToTopFab,
-          onCompose: () => {
-            this.openComposer();
-          },
-          onBackToTop: () => {
-            this.scrollToTop();
-          }
-        })
-          .margin({ right: 16, bottom: 16 + this.sysBottomInset })
+        RelativeContainer() {
+          HomeFab({
+            showBackToTop: this.showBackToTopFab,
+            onCompose: () => {
+              this.openComposer();
+            },
+            onBackToTop: () => {
+              this.scrollToTop();
+            }
+          })
+            .id('smartReachHomeFab')
+            .alignRules(this.fabAlignRules)
+            .margin({ left: 16, right: 16, bottom: 16 + this.sysBottomInset })
+        }
+        .width('100%')
+        .height('100%')
+        // 覆盖层空白区域继续把列表滚动手势传下去，只有按钮本身响应点击。
+        .hitTestBehavior(HitTestMode.Transparent)
       }
     }
     .width('100%')

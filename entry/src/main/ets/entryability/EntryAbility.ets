@@ -20,6 +20,7 @@ import { PushNotificationNavigationEventBus } from '../services/push/PushNotific
 import { PushTokenUpdateEventBus } from '../services/push/PushTokenUpdateEventBus';
 import { loadPushRelayConfigFromRawContent, PUSH_RELAY_CONFIG_RAWFILE } from '../services/push/PushRelayConfig';
 import { pushService } from '@kit.PushKit';
+import { HoldingHandManager } from '../common/utils/HoldingHandManager';
 
 const DOMAIN = 0x0000;
 
@@ -39,6 +40,7 @@ export default class EntryAbility extends UIAbility {
     ThemeManager.init(this.context);
     // 响应式断点监听:决定平板横屏双栏 / 竖屏单栏,须早于首页渲染写入初始值。手机恒为非宽屏。
     BreakpointManager.init();
+    HoldingHandManager.init();
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
     // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。
@@ -63,6 +65,7 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    HoldingHandManager.destroy();
     this.unregisterCrashHandler();
     FileLogger.flush();
   }
@@ -85,6 +88,7 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      HoldingHandManager.activate();
     });
   }
 
@@ -97,12 +101,14 @@ export default class EntryAbility extends UIAbility {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
     AppStateEventBus.notifyForegroundChanged(true);
+    HoldingHandManager.resume();
   }
 
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
     AppStateEventBus.notifyForegroundChanged(false);
+    HoldingHandManager.pause();
     // 退后台可能随即被系统回收,把缓冲日志强制落盘,避免丢最后一段。
     FileLogger.flush();
   }
