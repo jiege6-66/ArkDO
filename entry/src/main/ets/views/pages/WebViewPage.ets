@@ -3,9 +3,17 @@ import webview from '@ohos.web.webview';
 import { image } from '@kit.ImageKit';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
+import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { showToast as promptToast } from '../../common/utils/Toast';
+import { immersiveTitleBarBottomOffset } from '../../common/ui/ImmersiveTitleBarLayout';
+import {
+  ImmersiveLightArea,
+  requiresHdsComponentSafeArea,
+  requiresHdsLayoutSafeAreaAvoidance
+} from '../../common/ui/ImmersiveLightMaterial';
+import { buildStaticImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][WebViewPage]';
 
@@ -37,153 +45,148 @@ export struct WebViewPage {
   }
 
   build() {
-    Column() {
-      this.TitleBar()
-
-      if (this.isLoading && this.progress < 100) {
-        Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
-          .color($r('app.color.brand'))
-          .backgroundColor($r('app.color.border'))
-          .width('100%')
-          .height(2)
-      }
-
-      Stack() {
-        Web({ src: this.url, controller: this.controller })
-          .javaScriptAccess(true)
-          .domStorageAccess(true)
-          .databaseAccess(true)
-          .onlineImageAccess(true)
-          .imageAccess(true)
-          .mixedMode(MixedMode.All)
-          .cacheMode(CacheMode.Default)
-          .width('100%')
-          .height('100%')
-          .onControllerAttached(() => {
-            WebSessionManager.applyUserAgent(this.controller, 'WebViewPage');
-          })
-          .onTitleReceive((event: OnTitleReceiveEvent) => {
-            // 仅当外部未指定标题时,用网页自身 title 兜底(避免覆盖 onebox 卡片带来的准确标题)。
-            if (this.pageTitle.length === 0 && event && event.title && event.title.length > 0) {
-              this.displayTitle = event.title;
-            }
-          })
-          .onProgressChange((event: OnProgressChangeEvent) => {
-            this.progress = event.newProgress;
-          })
-          // 引擎自己下载并解码的 favicon:走 ArkWeb 网络栈(吃 DoH)且不受 CORS 限制,
-          // 是被污染站点唯一能拿到图标的路径。同一页面可能回调多次(多个 <link rel=icon>),后到覆盖先到。
-          .onFaviconReceived((event: OnFaviconReceivedEvent) => {
-            if (event && event.favicon) {
-              this.onFaviconReceived(event.favicon);
-            }
-          })
-          // 新一轮导航开始:清掉上一次的错误页(重试成功时靠它把错误页揭掉)。
-          .onPageBegin(() => {
-            this.hasError = false;
-            this.errorDetail = '';
-          })
-          .onPageEnd(() => {
-            this.isLoading = false;
-            WebSessionManager.saveCookies('WebViewPage');
-          })
-          .onErrorReceive((event: OnErrorReceiveEvent) => {
-            this.handleErrorReceive(event);
-          })
-
-        if (this.hasError) {
-          this.ErrorView()
+    Stack({ alignContent: Alignment.TopStart }) {
+      // ArkWeb 没有可传给 HDS 的 Scroller，网页视口从标题栏下方开始，避免任意网页的
+      // 首屏正文被覆盖；顶部按钮和背景材质仍完全由 HdsNavigation 负责。
+      Column() {
+        if (this.isLoading && this.progress < 100) {
+          Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
+            .color($r('app.color.brand'))
+            .backgroundColor($r('app.color.border'))
+            .width('100%')
+            .height(2)
         }
+
+        Stack() {
+          Web({ src: this.url, controller: this.controller })
+            .javaScriptAccess(true)
+            .domStorageAccess(true)
+            .databaseAccess(true)
+            .onlineImageAccess(true)
+            .imageAccess(true)
+            .mixedMode(MixedMode.All)
+            .cacheMode(CacheMode.Default)
+            .width('100%')
+            .height('100%')
+            .onControllerAttached(() => {
+              WebSessionManager.applyUserAgent(this.controller, 'WebViewPage');
+            })
+            .onTitleReceive((event: OnTitleReceiveEvent) => {
+              // 仅当外部未指定标题时,用网页自身 title 兜底(避免覆盖 onebox 卡片带来的准确标题)。
+              if (this.pageTitle.length === 0 && event && event.title && event.title.length > 0) {
+                this.displayTitle = event.title;
+              }
+            })
+            .onProgressChange((event: OnProgressChangeEvent) => {
+              this.progress = event.newProgress;
+            })
+            // 引擎自己下载并解码的 favicon:走 ArkWeb 网络栈(吃 DoH)且不受 CORS 限制,
+            // 是被污染站点唯一能拿到图标的路径。同一页面可能回调多次(多个 <link rel=icon>),后到覆盖先到。
+            .onFaviconReceived((event: OnFaviconReceivedEvent) => {
+              if (event && event.favicon) {
+                this.onFaviconReceived(event.favicon);
+              }
+            })
+            // 新一轮导航开始:清掉上一次的错误页(重试成功时靠它把错误页揭掉)。
+            .onPageBegin(() => {
+              this.hasError = false;
+              this.errorDetail = '';
+            })
+            .onPageEnd(() => {
+              this.isLoading = false;
+              WebSessionManager.saveCookies('WebViewPage');
+            })
+            .onErrorReceive((event: OnErrorReceiveEvent) => {
+              this.handleErrorReceive(event);
+            })
+
+          if (this.hasError) {
+            this.ErrorView()
+          }
+        }
+        .layoutWeight(1)
+        .width('100%')
       }
-      .layoutWeight(1)
       .width('100%')
+      .height('100%')
+      .padding({ top: immersiveTitleBarBottomOffset(this.sysTopInset) })
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+
+      this.WebTitleBarOverlay()
     }
     .width('100%')
     .height('100%')
-    .padding({ top: this.sysTopInset })
     .backgroundColor($r('app.color.page_bg'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder
-  private TitleBar() {
-    Row({ space: 8 }) {
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.chevron_left'))
-          .fontSize(28)
-          .fontColor([$r('app.color.text_primary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(40)
-      .height(40)
-      .backgroundColor($r('app.color.surface_muted'))
-      .onClick(() => {
-        this.handleBack();
-      })
-
-      Column() {
-        Text(this.displayTitle)
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-        Text(this.hostOf(this.url))
-          .fontSize(12)
-          .fontColor($r('app.color.text_tertiary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .margin({ top: 1 })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      // 刷新:OAuth 回跳卡住、页面半死时的第一手段,故给独立按钮而非藏进菜单。
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-          .fontSize(19)
-          .fontColor([$r('app.color.text_secondary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(36)
-      .height(36)
-      .backgroundColor(Color.Transparent)
-      .onClick(() => {
-        this.reload();
-      })
-
-      Button({ type: ButtonType.Circle, stateEffect: true }) {
-        SymbolGlyph($r('sys.symbol.more'))
-          .fontSize(19)
-          .fontColor([$r('app.color.text_secondary')])
-          .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-      }
-      .width(36)
-      .height(36)
-      .backgroundColor(Color.Transparent)
-      .bindMenu([
-        {
-          value: '复制链接',
+  private WebTitleBarOverlay() {
+    HdsNavigation() {
+      Column()
+        .width('100%')
+        .height('100%')
+    }
+    .titleBar({
+      avoidLayoutSafeArea: requiresHdsLayoutSafeAreaAvoidance(ImmersiveLightArea.TITLE_BAR),
+      enableComponentSafeArea: requiresHdsComponentSafeArea(ImmersiveLightArea.TITLE_BAR),
+      // 通用页面背景在浅色模式为 #F2F3F5，避免标题栏叠在白底上后看起来接近纯白；
+      // 暗色资源仍是项目统一的 #17191D。
+      style: buildStaticImmersiveTitleBarStyle({
+        staticBackgroundColor: $r('app.color.topic_detail_page_bg')
+      }),
+      content: {
+        title: {
+          mainTitle: this.displayTitle,
+          subTitle: this.hostOf(this.currentUrl())
+        },
+        backIcon: {
+          icon: $r('sys.symbol.chevron_left'),
+          label: '返回',
           action: () => {
-            this.copyLink();
+            this.handleBack();
           }
         },
-        {
-          value: '用浏览器打开',
-          action: () => {
-            this.openInBrowser();
-          }
+        // maxCount=2 时保留第一个“刷新”原生按钮，剩余两项由 HDS 自动收进更多菜单。
+        // 这样刷新仍是一键操作，复制与外开则使用系统菜单，不再维护自绘 more 按钮。
+        menu: {
+          maxCount: 2,
+          value: [{
+            content: {
+              icon: $r('sys.symbol.arrow_clockwise'),
+              label: '刷新',
+              isEnabled: true,
+              action: () => {
+                this.reload();
+              }
+            }
+          }, {
+            content: {
+              label: '复制链接',
+              isEnabled: true,
+              action: () => {
+                this.copyLink();
+              }
+            }
+          }, {
+            content: {
+              icon: $r('sys.symbol.arrow_right_up_and_square'),
+              label: '用浏览器打开',
+              isEnabled: true,
+              action: () => {
+                this.openInBrowser();
+              }
+            }
+          }]
         }
-      ])
-    }
+      }
+    })
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
-    .height(52)
-    .padding({ left: 12, right: 8 })
-    .alignItems(VerticalAlign.Center)
-    .backgroundColor($r('app.color.page_bg'))
-    .border({ width: { bottom: 0.5 }, color: $r('app.color.border') })
+    .height('100%')
+    .backgroundColor(Color.Transparent)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   // 加载失败盖在 Web 之上。除了报错,还要替用户回答"为什么打不开、现在能干什么":

@@ -22,6 +22,8 @@ export interface ImmersiveTitleBarStyleConfig {
   enableRefreshOffsetChange?: boolean;
   blurEffectiveStartOffset?: LengthMetrics;
   blurEffectiveEndOffset?: LengthMetrics;
+  // 静态标题栏可按页面指定主题背景；滚动标题栏仍统一使用全局半透明背景。
+  staticBackgroundColor?: ResourceColor;
   // HDS 只开放按钮容器背景与前景色，不开放边框/圆角。该参数只调整返回按钮背景，
   // 未传时保持系统默认沉浸光感按钮，便于先在单个页面验证对比度。
   backIconBackgroundColor?: ResourceColor;
@@ -93,6 +95,33 @@ export function buildImmersiveTitleBarStyle(
     // 滚动态先用主题半透明底色压淡深色内容，再执行渐变模糊，消除过渡阶段的黑影。
     scrollEffectStyle: scrollEffectStyle,
     // 模糊始终启用以抑制滚动黑影；材质默认交给系统 ADAPTIVE，保留原生按钮高光边缘。
+    blurStrategy: BlurStrategy.ENABLE,
+    systemMaterialEffect: (config.materialEffect !== undefined
+      ? config.materialEffect
+      : adaptiveSystemMaterialEffect()) as SystemMaterialParams
+  };
+}
+
+// ArkWeb 等滚动组件不暴露可传给 HdsNavigation.bindToScrollable 的 Scroller，无法由
+// HDS 读取滚动偏移。此类页面使用始终开启的静态材质标题栏：按钮仍由系统 ADAPTIVE
+// 材质绘制原生亮边，标题栏背景则固定为统一的半透明模糊样式。
+export function buildStaticImmersiveTitleBarStyle(
+  config: ImmersiveTitleBarStyleConfig = {}
+): TitleBarStyleOptions {
+  const contentStyle: HdsTitleBarContentStyle | undefined = buildTitleBarContentStyle(config);
+  const originalStyle: HdsNavigationTitleBarStyle = {
+    backgroundStyle: {
+      backgroundColor: config.staticBackgroundColor !== undefined
+        ? config.staticBackgroundColor
+        : $r('app.color.hds_title_bar_scrolled_bg'),
+      blurRadius: HDS_TITLE_BAR_BLUR_RADIUS
+    }
+  };
+  if (contentStyle !== undefined) {
+    originalStyle.contentStyle = contentStyle;
+  }
+  return {
+    originalStyle: originalStyle,
     blurStrategy: BlurStrategy.ENABLE,
     systemMaterialEffect: (config.materialEffect !== undefined
       ? config.materialEffect
