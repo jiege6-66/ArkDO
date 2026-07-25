@@ -124,6 +124,33 @@ export default function cookedHtmlParserTest() {
       expect(hasInlineImage).assertTrue();
     });
 
+    it('keepsEmojiOnlyParagraphInline', 0, () => {
+      const html: string = '<p><img class="emoji" src="https://cdn.example/heart.png" ' +
+        'alt=":heart:" width="20" height="20"></p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      expect(inlines.length).assertEqual(1);
+      expect(inlines[0].type).assertEqual(RichInlineType.IMAGE);
+    });
+
+    it('keepsMultipleEmojiOnlyParagraphInline', 0, () => {
+      const html: string = '<p><img class="emoji" src="https://cdn.example/heart.png" alt=":heart:"> ' +
+        '<img class="emoji" src="https://cdn.example/smile.png" alt=":smile:"></p>';
+
+      const blocks: RichBlock[] = CookedHtmlParser.parse(html);
+
+      expect(blocks.length).assertEqual(1);
+      expect(blocks[0].type).assertEqual(RichBlockType.PARAGRAPH);
+      const inlines: RichInlineNode[] = blocks[0].inlines ? blocks[0].inlines as RichInlineNode[] : [];
+      const imageCount: number = inlines.filter((node: RichInlineNode) =>
+        node.type === RichInlineType.IMAGE).length;
+      expect(imageCount).assertEqual(2);
+    });
+
     it('parsesDetailsBlocksAsDisclosureBlocks', 0, () => {
       const html: string = '<details><summary>总结</summary><p>我的用户名是： Ryan119911</p></details>';
 

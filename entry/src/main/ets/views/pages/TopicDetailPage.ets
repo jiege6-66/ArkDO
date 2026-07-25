@@ -723,6 +723,9 @@ export struct TopicDetailPage {
         minChars: this.boostTargetPostId > 0 ? 1 : 16,
         // boost 服务端上限 16 字,超了只回 {"failed":"FAILED"} 的 422;回复不限(NO_MAX_CHARS)。
         maxChars: this.boostTargetPostId > 0 ? BOOST_MAX_CHARS : NO_MAX_CHARS,
+        // 普通回复与 Boost 都在底部输入条直接显示表情图片 Span，并按一个字符计数。
+        // 展开后的全屏编辑器仍接收序列化短码，继续使用现有 TextArea Markdown 编辑模式。
+        richEmojiMode: true,
         // 带回上次未发出的内容。boost 与回复各自独立;boost 还要再按楼区分。
         initialText: this.boostTargetPostId > 0
           ? (this.pendingBoostByPostId.get(this.boostTargetPostId) ?? '')
@@ -738,6 +741,7 @@ export struct TopicDetailPage {
           }
         },
         onClose: () => {
+          AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, false);
           this.showComposer = false;
           this.replyTargetPostNumber = 0;
           this.boostTargetPostId = 0;
@@ -804,6 +808,7 @@ export struct TopicDetailPage {
     this.boostTargetPostId = 0;
     this.replyTargetPostNumber = 0;
     this.composerPlaceholder = '回复当前话题';
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
   }
 
@@ -816,6 +821,7 @@ export struct TopicDetailPage {
     this.boostTargetPostId = 0;
     this.replyTargetPostNumber = post.postNumber;
     this.composerPlaceholder = `回复${this.resolveAuthorName(post)}`;
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
   }
 
@@ -828,6 +834,7 @@ export struct TopicDetailPage {
     this.replyTargetPostNumber = 0;
     this.boostTargetPostId = post.id;
     this.composerPlaceholder = '发一个 boost…';
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
   }
 

@@ -26,6 +26,12 @@ import profileFormatTest from './ProfileFormat.test';
 import immersiveLightMaterialTest from './ImmersiveLightMaterial.test';
 import floatingActionLayoutTest from './FloatingActionLayout.test';
 import immersiveTitleBarLayoutTest from './ImmersiveTitleBarLayout.test';
+import emojiCatalogTest from './EmojiCatalog.test';
+import boostEditDocumentTest from './BoostEditDocument.test';
+import emojiInsertTest from './EmojiInsert.test';
+import emojiPreviewHtmlTest from './EmojiPreviewHtml.test';
+import emojiShortcodeEditTest from './EmojiShortcodeEdit.test';
+import commentInputPresentationTest from './CommentInputPresentation.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -55,4 +61,10 @@ export default function testsuite() {
   immersiveLightMaterialTest();
   floatingActionLayoutTest();
   immersiveTitleBarLayoutTest();
+  emojiCatalogTest();
+  boostEditDocumentTest();
+  emojiInsertTest();
+  emojiPreviewHtmlTest();
+  emojiShortcodeEditTest();
+  commentInputPresentationTest();
 }

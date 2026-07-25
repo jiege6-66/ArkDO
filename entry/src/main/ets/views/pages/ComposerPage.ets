@@ -13,7 +13,9 @@ import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/Imme
 import { JsonNetworkClient } from '../../services/network/NetworkTypes';
 import { UploadService, UploadedImage } from '../../services/upload/UploadService';
 import { MarkdownRenderService } from '../../services/content/MarkdownRenderService';
+import { EmojiPreviewHtml } from '../../services/content/EmojiPreviewHtml';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
+import { getEmojiUrl } from '../components/EmojiUrlRegistry';
 import { TopicCategory } from '../../models/Topic';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { getCategoryColor, getCategoryIcon, getCategoryLogo, getTagColor, getTagIcon, resolveBadgeAssetUrl } from '../components/TopicBadgeUtils';
@@ -32,6 +34,7 @@ import {
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { EmojiDeleteResult, EmojiShortcodeEdit } from '../../utils/EmojiShortcodeEdit';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
 // 一次最多选图张数(对齐 Discourse composer 手感)。
@@ -513,7 +516,7 @@ export struct ComposerPage {
     this.uploadDone = 0;
   }
 
-  // 切到预览:先离屏编译 markdown→HTML→替换 upload:// 短码为真实直链,再 animateTo 交叉淡入切模式(无白屏)。
+  // 切到预览:离屏编译 markdown→HTML,解析图片和表情短码后再交叉淡入切模式(无白屏)。
   private async enterPreview(): Promise<void> {
     if (this.mode === ComposerMode.Preview) {
       return;
@@ -527,7 +530,8 @@ export struct ComposerPage {
         await this.uploadService.prefetchShortUrls(this.text);
       }
       const raw: string = await this.mdService.render(this.text);
-      html = this.uploadService ? this.uploadService.resolvePreviewHtml(raw) : raw;
+      const resolvedUploads: string = this.uploadService ? this.uploadService.resolvePreviewHtml(raw) : raw;
+      html = EmojiPreviewHtml.render(resolvedUploads, getEmojiUrl);
     } catch (error) {
       Log.i(`${LOG_TAG} preview render failed`);
       html = '';
@@ -542,6 +546,29 @@ export struct ComposerPage {
       return;
     }
     this.crossFadeTo(ComposerMode.Edit);
+  }
+
+  private onWillDeleteText(value: DeleteValue): boolean {
+    if (this.selStart !== this.selEnd) {
+      return true;
+    }
+    const result: EmojiDeleteResult | undefined = value.direction === TextDeleteDirection.BACKWARD
+      ? EmojiShortcodeEdit.deleteBackward(this.text, this.selStart,
+        (name: string): boolean => getEmojiUrl(name) !== undefined)
+      : EmojiShortcodeEdit.deleteForward(this.text, this.selStart,
+        (name: string): boolean => getEmojiUrl(name) !== undefined);
+    if (!result) {
+      return true;
+    }
+    this.text = result.text;
+    this.selStart = result.caret;
+    this.selEnd = result.caret;
+    this.onTextChange(result.text);
+    this.scheduleDraftSave();
+    setTimeout(() => {
+      this.textController.caretPosition(result.caret);
+    }, 0);
+    return false;
   }
 
   // 内容区交叉淡入:淡出→切模式→淡入,一次连续过渡(不跳路由)。
@@ -1321,6 +1348,9 @@ export struct ComposerPage {
           .onTextSelectionChange((start: number, end: number) => {
             this.selStart = start;
             this.selEnd = end;
+          })
+          .onWillDelete((value: DeleteValue): boolean => {
+            return this.onWillDeleteText(value);
           })
           // 挂载即抢焦点:与内联输入条卸载几乎同帧,焦点无缝转移,键盘不收(消除"收起再弹起")。
           .onAppear(() => {

@@ -14,9 +14,27 @@ const EMOJI_CDN_BASE = AppConstants.STATIC_CDN_BASE;
 interface RawEmojiEntry {
   name?: string;
   url?: string;
+  tonable?: boolean;
+  created_by?: string;
+}
+
+export interface EmojiItem {
+  name: string;
+  url: string;
+  groupKey: string;
+  tonable: boolean;
+  createdBy?: string;
+}
+
+export interface EmojiGroup {
+  key: string;
+  items: EmojiItem[];
 }
 
 const emojiUrlMap: Map<string, string> = new Map();
+const emojiNameByUrl: Map<string, string> = new Map();
+const emojiItemMap: Map<string, EmojiItem> = new Map();
+let emojiGroups: EmojiGroup[] = [];
 let emojiUrlsLoaded: boolean = false;
 
 export function loadEmojiUrlsFromRawContent(rawContent: Uint8Array): number {
@@ -25,6 +43,9 @@ export function loadEmojiUrlsFromRawContent(rawContent: Uint8Array): number {
     return loadEmojiUrlsFromJson(json);
   } catch (err) {
     emojiUrlMap.clear();
+    emojiNameByUrl.clear();
+    emojiItemMap.clear();
+    emojiGroups = [];
     emojiUrlsLoaded = true;
     return 0;
   }
@@ -32,6 +53,9 @@ export function loadEmojiUrlsFromRawContent(rawContent: Uint8Array): number {
 
 export function loadEmojiUrlsFromJson(json: string): number {
   emojiUrlMap.clear();
+  emojiNameByUrl.clear();
+  emojiItemMap.clear();
+  emojiGroups = [];
 
   let parsed: Record<string, RawEmojiEntry[]>;
   try {
@@ -40,19 +64,39 @@ export function loadEmojiUrlsFromJson(json: string): number {
     emojiUrlsLoaded = true;
     return 0;
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    emojiUrlsLoaded = true;
+    return 0;
+  }
 
   const groupKeys: string[] = Object.keys(parsed);
   for (let g: number = 0; g < groupKeys.length; g++) {
-    const entries: RawEmojiEntry[] = parsed[groupKeys[g]];
+    const groupKey: string = groupKeys[g];
+    const entries: RawEmojiEntry[] = parsed[groupKey];
     if (!Array.isArray(entries)) {
       continue;
     }
+    const items: EmojiItem[] = [];
     for (let i: number = 0; i < entries.length; i++) {
       const entry: RawEmojiEntry = entries[i];
       if (entry && typeof entry.name === 'string' && entry.name.length > 0 &&
         typeof entry.url === 'string' && entry.url.length > 0) {
-        emojiUrlMap.set(entry.name, resolveEmojiUrl(entry.url));
+        const resolvedUrl: string = resolveEmojiUrl(entry.url);
+        const item: EmojiItem = {
+          name: entry.name,
+          url: resolvedUrl,
+          groupKey: groupKey,
+          tonable: entry.tonable === true,
+          createdBy: entry.created_by
+        };
+        items.push(item);
+        emojiUrlMap.set(item.name, item.url);
+        emojiNameByUrl.set(item.url, item.name);
+        emojiItemMap.set(item.name, item);
       }
+    }
+    if (items.length > 0) {
+      emojiGroups.push({ key: groupKey, items: items });
     }
   }
 
@@ -66,6 +110,31 @@ export function getEmojiUrl(name?: string): string | undefined {
     return undefined;
   }
   return emojiUrlMap.get(name);
+}
+
+export function getEmojiNameByUrl(url?: string): string | undefined {
+  if (!url || url.length === 0) {
+    return undefined;
+  }
+  return emojiNameByUrl.get(url);
+}
+
+// 返回目录快照，调用方可以安全切换/筛选分组，不会改坏全局注册表。
+export function getEmojiGroups(): EmojiGroup[] {
+  const groups: EmojiGroup[] = [];
+  for (let index: number = 0; index < emojiGroups.length; index++) {
+    const group: EmojiGroup = emojiGroups[index];
+    const snapshot: EmojiGroup = { key: group.key, items: group.items.slice() };
+    groups.push(snapshot);
+  }
+  return groups;
+}
+
+export function getEmojiItem(name?: string): EmojiItem | undefined {
+  if (!name || name.length === 0) {
+    return undefined;
+  }
+  return emojiItemMap.get(name);
 }
 
 export function hasLoadedEmojiUrls(): boolean {
@@ -82,6 +151,9 @@ export function ensureEmojiUrlsLoaded(manager: resourceManager.ResourceManager):
     return loadEmojiUrlsFromRawContent(rawContent);
   } catch (err) {
     emojiUrlMap.clear();
+    emojiNameByUrl.clear();
+    emojiItemMap.clear();
+    emojiGroups = [];
     emojiUrlsLoaded = true;
     return 0;
   }

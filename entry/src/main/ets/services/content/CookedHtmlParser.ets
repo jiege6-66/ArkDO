@@ -392,6 +392,10 @@ export class CookedHtmlParser {
 
   private static blockFromElement(tagName: string, openTag: string, innerHtml: string): RichBlock[] {
     if (tagName === 'p') {
+      // 只有 emoji 的段落也必须走 ImageSpan；否则会被下面的“单图段落”快路径提升为大图块。
+      if (CookedHtmlParser.isEmojiOnlyParagraph(innerHtml)) {
+        return CookedHtmlParser.paragraphBlocks(innerHtml);
+      }
       const imageBlock: RichBlock | undefined = CookedHtmlParser.singleImageParagraph(innerHtml);
       if (imageBlock) {
         return [imageBlock];
@@ -1492,6 +1496,23 @@ export class CookedHtmlParser {
       return CookedHtmlParser.imageBlockFromTag(uploadPreviewMatch[1], linkMatch ? extractAttr(linkMatch[0], 'href') : '');
     }
     return undefined;
+  }
+
+  private static isEmojiOnlyParagraph(innerHtml: string): boolean {
+    const imageTags: RegExpMatchArray | null = innerHtml.match(/<img\b[^>]*>/gi);
+    if (!imageTags || imageTags.length === 0) {
+      return false;
+    }
+    for (let index: number = 0; index < imageTags.length; index++) {
+      if (!hasClassContaining(imageTags[index], 'emoji')) {
+        return false;
+      }
+    }
+    const residual: string = innerHtml
+      .replace(/<img\b[^>]*>/gi, '')
+      .replace(/<br\s*\/?>/gi, '')
+      .trim();
+    return residual.length === 0;
   }
 
   private static imageContainerBlocks(innerHtml: string): RichBlock[] {
