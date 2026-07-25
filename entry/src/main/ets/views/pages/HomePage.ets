@@ -16,6 +16,7 @@ import { LoadStateView } from '../components/LoadStateView';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
+import { TopicDataSource } from '../../services/topic/TopicDataSource';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
@@ -70,7 +71,7 @@ const FAB_TOP_HIDE_RATIO: number = 1.2;
 // 首页坐在 navBar(非 NavDestination),系统返回键须由 @Entry(Index)的 onBackPress 拦截——
 // 可见时 bump BACK_TICK,首页监听后关闭。与详情页回帖浮层各用一套 key,互不干扰。
 // 回顶动画:只有最后一屏走动画,这是那一屏的时长。
-const SCROLL_TOP_MS: number = 380;
+const SCROLL_TOP_MS: number = 460;
 // 瞬移落地的重试上限:惯性未停时 scrollTo 可能被"顶回去",逐帧再钉;超过则放弃动画直接到顶,
 // 宁可生硬也不能卡在半路。
 const SCROLL_TOP_MAX_RETRY: number = 3;
@@ -95,6 +96,7 @@ export struct HomePage {
   @State private topics: Topic[] = [];
   // 完整刷新会替换整批 Topic 实例。版本变化后重建 TopicListItem，避免 @ObjectLink 仍绑定旧实例。
   @State private topicListVersion: number = 0;
+  private topicDataSource: TopicDataSource = new TopicDataSource();
   @State private isInitialLoading: boolean = false;
   @State private isRefreshing: boolean = false;
   @State private isLoadingMore: boolean = false;
@@ -288,8 +290,10 @@ export struct HomePage {
   // 瞬移到起跑线,并在下一帧确认它真的落地了再起动画。
   // 之所以要"确认":点击时列表可能还在惯性滑行,惯性会把瞬移顶回去,
   // 动画段于是又从几万 vp 外起跑——这正是回顶时灵时不灵的来源。
+  // 首页改为 LazyForEach 后,长距离按绝对 yOffset 跳转会触发懒列表估算/补建大量中间项；
+  // 改按 index 直接跳到首个帖子项,再动画补完顶部 spacer,成本稳定。
   private teleportThenAnimate(runway: number, attempt: number): void {
-    this.listScroller.scrollTo({ xOffset: 0, yOffset: runway });
+    this.listScroller.scrollToIndex(1, false);
     this.getUIContext().postFrameCallback(new NextFrameTask(() => {
       // 1vp 容差:像素取整/浮点误差,不必较真。
       if (this.listScroller.currentOffset().yOffset <= runway + 1) {
@@ -485,7 +489,7 @@ export struct HomePage {
             .width('100%')
           }
 
-          ForEach(this.topics, (topic: Topic) => {
+          LazyForEach(this.topicDataSource, (topic: Topic) => {
             TopicListItem({
               topic: topic,
               category: CategoryIndex.find(this.categories, topic.categoryId),
@@ -936,6 +940,7 @@ export struct HomePage {
 
   private resetAndReload(): void {
     this.topics = [];
+    this.topicDataSource.reset([]);
     this.currentPage = 0;
     this.hasMore = true;
     this.loadFailed = false;
@@ -1004,6 +1009,7 @@ export struct HomePage {
 
     if (result.success && result.data) {
       this.topics = result.data.topics;
+      this.topicDataSource.reset(this.topics);
       this.topicListVersion++;
       this.currentPage = 0;
       this.hasMore = result.data.hasMore;
@@ -1053,7 +1059,8 @@ export struct HomePage {
     this.isLoadingMore = false;
 
     if (result.success && result.data) {
-      this.topics = this.mergeTopics(this.topics, result.data.topics);
+      this.topicDataSource.appendUnique(result.data.topics);
+      this.topics = this.topicDataSource.getAll();
       this.currentPage = nextPage;
       this.hasMore = result.data.hasMore && result.data.topics.length > 0;
       this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
@@ -1228,26 +1235,6 @@ export struct HomePage {
     }
   }
 
-  private mergeTopics(existingTopics: Topic[], nextTopics: Topic[]): Topic[] {
-    const seenTopicIds: Map<number, boolean> = new Map();
-    const mergedTopics: Topic[] = [];
-
-    for (let index: number = 0; index < existingTopics.length; index++) {
-      const topic: Topic = existingTopics[index];
-      seenTopicIds.set(topic.id, true);
-      mergedTopics.push(topic);
-    }
-
-    for (let index: number = 0; index < nextTopics.length; index++) {
-      const topic: Topic = nextTopics[index];
-      if (!seenTopicIds.get(topic.id)) {
-        seenTopicIds.set(topic.id, true);
-        mergedTopics.push(topic);
-      }
-    }
-
-    return mergedTopics;
-  }
 }
 
 // 调试用输入框:填帖子 ID 直接跳转详情。

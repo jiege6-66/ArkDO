@@ -6,8 +6,10 @@ import { ArkWebNetworkBridge, ImageFetchResult } from './ArkWebNetworkBridge';
 const LOG_TAG: string = '[ArkDO][Avatar]';
 // 并发取图上限:头像一次可能几十张,限流避免瞬间灌爆 host webview 的 runJavaScript 通道。
 const MAX_CONCURRENCY: number = 5;
-// 已解码 PixelMap 内存缓存上限:超出按插入序淘汰最旧(仅丢引用不 release,防止仍在显示的图被销毁崩溃)。
-const MAX_CACHE_ENTRIES: number = 400;
+// 已解码 PixelMap 内存缓存上限:首页长列表头像会快速累积,控制上限避免高水位过宽。
+// 超出按插入序淘汰最旧(仅丢引用不 release,防止仍在显示的图被销毁崩溃)。
+const MAX_CACHE_ENTRIES: number = 160;
+const CACHE_LOG_STEP: number = 20;
 
 /**
  * 头像 PixelMap 缓存。原生 Image 走系统 netstack 会被 SNI 封锁(TLS 握手 RST),
@@ -26,6 +28,7 @@ export class AvatarImageCache {
   private inflight: Map<string, Promise<image.PixelMap | undefined>> = new Map();
   private active: number = 0;
   private queue: Array<() => void> = [];
+  private lastLoggedCacheBucket: number = -1;
 
   /** 注入 host webview 的 bridge(唯一联通 host 文档的实例)。在 host 就绪处调用一次。 */
   attachBridge(bridge: ArkWebNetworkBridge): void {
@@ -35,6 +38,10 @@ export class AvatarImageCache {
   /** 同步命中已解码缓存(供首帧直接显示,避免闪烁)。 */
   getCached(url: string): image.PixelMap | undefined {
     return this.cache.get(url);
+  }
+
+  debugSnapshot(): string {
+    return `cache=${this.cache.size}/${MAX_CACHE_ENTRIES} inflight=${this.inflight.size} active=${this.active} queue=${this.queue.length}`;
   }
 
   /** 取头像 PixelMap:命中缓存直接返回;否则经 host webview 取字节并解码。失败返回 undefined。 */
@@ -72,6 +79,10 @@ export class AvatarImageCache {
         return undefined;
       }
       const bytes: Uint8Array = new util.Base64Helper().decodeSync(result.base64, util.Type.BASIC);
+      if (this.isSvgImage(result.contentType, bytes)) {
+        Log.i(`${LOG_TAG} skip svg avatar url=${url}`);
+        return undefined;
+      }
       // 切出精确字节区间再交给解码器,避免 base64 解码结果带偏移/多余尾字节。
       const buffer: ArrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       const source: image.ImageSource = image.createImageSource(buffer);
@@ -88,14 +99,39 @@ export class AvatarImageCache {
   }
 
   private put(url: string, pixelMap: image.PixelMap): void {
+    let evicted: boolean = false;
     if (this.cache.size >= MAX_CACHE_ENTRIES) {
       const oldest: string | undefined = this.cache.keys().next().value;
       if (oldest !== undefined) {
         // 只移除引用不 release：被淘汰的图可能仍绑定在某个 Image 上,release 会崩溃,交给 GC。
         this.cache.delete(oldest);
+        evicted = true;
       }
     }
     this.cache.set(url, pixelMap);
+    this.logCacheStatsIfNeeded(evicted);
+  }
+
+  private logCacheStatsIfNeeded(evicted: boolean): void {
+    const bucket: number = Math.floor(this.cache.size / CACHE_LOG_STEP);
+    if (!evicted && bucket === this.lastLoggedCacheBucket) {
+      return;
+    }
+    this.lastLoggedCacheBucket = bucket;
+    Log.i(`${LOG_TAG} stats ${this.debugSnapshot()} evicted=${evicted}`);
+  }
+
+  private isSvgImage(contentType: string, bytes: Uint8Array): boolean {
+    if (contentType.toLowerCase().indexOf('svg') >= 0) {
+      return true;
+    }
+    const probeLength: number = Math.min(bytes.byteLength, 128);
+    let head: string = '';
+    for (let index: number = 0; index < probeLength; index++) {
+      head += String.fromCharCode(bytes[index]);
+    }
+    const normalized: string = head.trim().toLowerCase();
+    return normalized.startsWith('<?xml') || normalized.startsWith('<svg') || normalized.indexOf('<svg') >= 0;
   }
 
   private acquire(): Promise<void> {

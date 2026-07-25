@@ -32,6 +32,7 @@ import emojiInsertTest from './EmojiInsert.test';
 import emojiPreviewHtmlTest from './EmojiPreviewHtml.test';
 import emojiShortcodeEditTest from './EmojiShortcodeEdit.test';
 import commentInputPresentationTest from './CommentInputPresentation.test';
+import topicDataSourceTest from './TopicDataSource.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -67,4 +68,5 @@ export default function testsuite() {
   emojiPreviewHtmlTest();
   emojiShortcodeEditTest();
   commentInputPresentationTest();
+  topicDataSourceTest();
 }
