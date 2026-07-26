@@ -3,6 +3,9 @@ import { Log } from '../logging/Log';
 const LOG_TAG: string = '[ArkDO][LoginGate]';
 const STORAGE_KEY_LOGGED_IN: string = 'arkdoIsLoggedIn';
 
+/** 全局登录态在 AppStorage 中的 key，供宿主 webview 等通过 @StorageProp 响应式绑定（如 MessageBus 启停）。 */
+export const LOGGED_IN_STORAGE_KEY: string = STORAGE_KEY_LOGGED_IN;
+
 export type RequireLoginListener = () => void;
 // 登录态由「未登录」翻成「已登录」时触发:供已在场的页面(如详情页)补做只在登录后才能起的动作。
 export type LoginStateListener = () => void;

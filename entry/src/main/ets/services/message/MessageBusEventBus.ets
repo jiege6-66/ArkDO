@@ -7,6 +7,12 @@ const LOG_TAG: string = '[ArkDO][MessageBus]';
 export interface MessageBusData {
   topic_id?: number;
   message_type?: string;
+  // /notification/<id> 频道 payload 的未读数（user.rb publish_notifications_state:921-931，已核源码）。
+  // 铃铛角标用 all_unread_notifications_count（总未读，含私信）；unread_notifications 只含
+  // high_priority=FALSE，漏私信，不能用于角标。unread_high_priority_notifications 为高优先级子集。
+  all_unread_notifications_count?: number;
+  unread_notifications?: number;
+  unread_high_priority_notifications?: number;
 }
 
 export interface MessageBusEvent {

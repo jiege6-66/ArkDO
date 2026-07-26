@@ -11,7 +11,8 @@ export interface User {
   flairColor?: string;
   flairName?: string;
   // 来自 /session/current.json 的 current_user:头像未读徽标用。
-  // unreadNotifications=常规未读(蓝点数字);unreadHighPriorityNotifications=高优先级(私信等)。
+  // unreadNotifications=总未读(含私信等高优先级,对齐 Discourse 铃铛角标);
+  // unreadHighPriorityNotifications=其中的高优先级子集(私信等)。
   unreadNotifications?: number;
   unreadHighPriorityNotifications?: number;
   // 未发出的草稿数(current_user.draft_count),个人中心草稿角标用。

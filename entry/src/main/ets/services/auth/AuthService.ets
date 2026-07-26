@@ -16,6 +16,9 @@ interface DiscourseCurrentUser {
   animated_avatar?: string;
   unread_notifications?: number;
   unread_high_priority_notifications?: number;
+  // 总未读(含私信等高优先级),对应铃铛角标真值(user.rb all_unread_notifications_count:816)。
+  // unread_notifications 只数 high_priority=FALSE,会漏掉私信,不能用于角标。
+  all_unread_notifications_count?: number;
   draft_count?: number;
 }
 
@@ -62,7 +65,9 @@ export class AuthService {
           displayName: sourceUser.name,
           avatarTemplate: sourceUser.avatar_template,
           animatedAvatar: sourceUser.animated_avatar ? sourceUser.animated_avatar : undefined,
-          unreadNotifications: typeof sourceUser.unread_notifications === 'number' ? sourceUser.unread_notifications : 0,
+          unreadNotifications: typeof sourceUser.all_unread_notifications_count === 'number'
+            ? sourceUser.all_unread_notifications_count
+            : (typeof sourceUser.unread_notifications === 'number' ? sourceUser.unread_notifications : 0),
           unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0,
           draftCount: typeof sourceUser.draft_count === 'number' ? sourceUser.draft_count : 0
         }

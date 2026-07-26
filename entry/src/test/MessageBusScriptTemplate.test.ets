@@ -89,5 +89,15 @@ export default function messageBusScriptTemplateTest() {
       expect(script).assertContain("querySelector('meta[name=shared_session_key]')");
       expect(script).assertContain("headers['X-Shared-Session-Key'] = state.sharedSessionKey");
     });
+
+    it('subscribesNotificationChannelForLoggedInUser', 0, () => {
+      const script: string = buildMessageBusScript();
+
+      // 从 preloaded.currentUser 解析登录用户 id（兼容字符串化 JSON）。
+      expect(script).assertContain('preloaded.currentUser');
+      // 仅登录时订阅 /notification/<id>，游标 -1 只收新消息。
+      expect(script).assertContain('pollConfig.currentUserId > 0');
+      expect(script).assertContain("state.channels['/notification/' + pollConfig.currentUserId] = -1");
+    });
   });
 }

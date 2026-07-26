@@ -3,6 +3,8 @@ import webview from '@ohos.web.webview';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
+import { AppStateEventBus } from '../../services/session/AppStateEventBus';
+import { LOGGED_IN_STORAGE_KEY } from '../../services/session/LoginGate';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimeTopicsPrefs';
 
@@ -28,9 +30,18 @@ export struct ArkWebHost {
   private bootWatchdogTimer: number = -1;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
-  // 「实时更新话题」开关。默认关⇒宿主加载完成时不注入长轮询；运行中翻转由 @Watch 即时启停。
-  @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeEnabledChanged')
+  private unsubscribeAppState?: () => void = undefined;
+  // MessageBus 长轮询的运行条件 = (已登录 || 「实时更新话题」开) && 前台。
+  //  - 登录用户默认需要它承载实时通知(/notification/<id>)；
+  //  - 匿名用户仅在开了「实时话题」时用它承载首页提示条(/latest)；
+  //  - 后台一律停:省电,且与 NotificationService 的前台化轮询保持一致。
+  // 任一条件翻转都经 @Watch / 前台订阅走 onMessageBusGateChanged 即时启停。
+  @StorageProp(LOGGED_IN_STORAGE_KEY) @Watch('onMessageBusGateChanged')
+  private isLoggedIn: boolean = false;
+  @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onMessageBusGateChanged')
   private realtimeEnabled: boolean = false;
+  // 前台标志。AppStateEventBus 默认前台,冷启动即真;后台切换经订阅更新并触发启停。
+  private isForeground: boolean = AppStateEventBus.isForeground();
 
   aboutToAppear(): void {
     // 计时锚点③:宿主 webview 开始初始化并加载 BASE_URL。到 onPageEnd 就绪之间即为桥初始化耗时。
@@ -42,6 +53,13 @@ export struct ArkWebHost {
         this.reloadBaseUrl(version);
       });
     }
+    // 前后台切换驱动 MessageBus 启停:回前台若满足条件则重注入(脚本幂等),切后台则停循环。
+    if (!this.unsubscribeAppState) {
+      this.unsubscribeAppState = AppStateEventBus.subscribe((isForeground: boolean) => {
+        this.isForeground = isForeground;
+        this.onMessageBusGateChanged();
+      });
+    }
     this.startBootWatchdog();
   }
 
@@ -51,12 +69,21 @@ export struct ArkWebHost {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
     }
+    if (this.unsubscribeAppState) {
+      this.unsubscribeAppState();
+      this.unsubscribeAppState = undefined;
+    }
   }
 
-  // 开关运行中翻转：开⇒注入长轮询(脚本幂等，controller 未就绪时 no-op，随后 onPageEnd 兜底)；
-  // 关⇒置停止标志让文档内循环自然退出。
-  private onRealtimeEnabledChanged(): void {
-    if (this.realtimeEnabled) {
+  // 运行条件的返回值。
+  private shouldRunMessageBus(): boolean {
+    return (this.isLoggedIn || this.realtimeEnabled) && this.isForeground;
+  }
+
+  // 运行条件翻转(登录态/实时开关/前后台任一变化)：满足⇒注入长轮询(脚本幂等，controller 未就绪时
+  // no-op，随后 onPageEnd 兜底)；不满足⇒置停止标志让文档内循环自然退出。
+  private onMessageBusGateChanged(): void {
+    if (this.shouldRunMessageBus()) {
       this.bridge.startMessageBus();
     } else {
       this.bridge.stopMessageBus();
@@ -107,8 +134,8 @@ export struct ArkWebHost {
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
         this.bridge.markHostReady();
-        // 仅在「实时更新话题」开启时注入长轮询；关闭时(默认)彻底不启动，零后台联网。
-        if (this.realtimeEnabled) {
+        // 满足运行条件((已登录||实时话题开)&&前台)才注入长轮询；否则彻底不启动，零后台联网。
+        if (this.shouldRunMessageBus()) {
           this.bridge.startMessageBus();
         }
         this.syncSessionVersion();

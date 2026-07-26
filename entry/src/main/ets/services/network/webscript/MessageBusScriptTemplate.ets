@@ -57,6 +57,7 @@ export function buildMessageBusScript(): string {
         const fallbackConfig = {
           baseUrl: fallback,
           sharedSessionKey: '',
+          currentUserId: 0,
           source: 'fallback'
         };
         try {
@@ -83,6 +84,18 @@ export function buildMessageBusScript(): string {
             return fallbackConfig;
           }
           const preloaded = JSON.parse(rawPreloaded);
+          // 登录用户 id：用于订阅 /notification/<id>。preloaded.currentUser 与 siteSettings 一样
+          // 可能是字符串化 JSON，两种形态都兼容；解析失败/未登录则保持 0（不订阅通知频道）。
+          let currentUserId = 0;
+          try {
+            const currentUser = typeof preloaded.currentUser === 'string'
+              ? JSON.parse(preloaded.currentUser)
+              : preloaded.currentUser;
+            if (currentUser && typeof currentUser.id === 'number') {
+              currentUserId = currentUser.id;
+            }
+          } catch (_) {
+          }
           const siteSettings = typeof preloaded.siteSettings === 'string'
             ? JSON.parse(preloaded.siteSettings)
             : preloaded.siteSettings;
@@ -90,6 +103,7 @@ export function buildMessageBusScript(): string {
             ? siteSettings.long_polling_base_url
             : findLongPollingBaseUrl(preloaded, 0);
           if (!configured) {
+            fallbackConfig.currentUserId = currentUserId;
             fallbackConfig.source = 'setting-missing';
             return fallbackConfig;
           }
@@ -98,6 +112,7 @@ export function buildMessageBusScript(): string {
           return {
             baseUrl: resolved.endsWith('/') ? resolved : resolved + '/',
             sharedSessionKey: sharedSessionMeta ? (sharedSessionMeta.getAttribute('content') || '') : '',
+            currentUserId: currentUserId,
             source: 'site-settings'
           };
         } catch (_) {
@@ -131,11 +146,16 @@ export function buildMessageBusScript(): string {
         const pollConfig = await resolvePollBaseUrl();
         state.baseUrl = pollConfig.baseUrl;
         state.sharedSessionKey = pollConfig.sharedSessionKey;
+        // 已登录才订阅通知频道；游标 -1=只收新消息（旧通知无需回放，权威计数由 ArkTS 侧 refresh 兜底）。
+        if (pollConfig.currentUserId > 0) {
+          state.channels['/notification/' + pollConfig.currentUserId] = -1;
+        }
         emit({
           type: 'status',
           stage: 'config-ready',
           message: state.baseUrl + ' source=' + pollConfig.source +
-            ' sharedSessionKey=' + String(Boolean(state.sharedSessionKey))
+            ' sharedSessionKey=' + String(Boolean(state.sharedSessionKey)) +
+            ' userId=' + String(pollConfig.currentUserId)
         });
         const backoff = async () => {
           const waitMs = state.retryDelayMs;
