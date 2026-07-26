@@ -3,6 +3,13 @@ import { RelativeTime } from '../../common/utils/RelativeTime';
 import { FONT_BODY_LARGE } from '../../common/theme/Metrics';
 import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
+import {
+  incomingHighlightRemainingMs,
+  incomingTopicHighlightBackground
+} from './HomeIncomingTopicsPrompt';
+import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
+
+const INCOMING_HIGHLIGHT_FADE_MS: number = 600;
 
 // 摘要高亮分段:hit 为命中词(染品牌色),否则普通文本。
 interface BlurbSegment {
@@ -22,14 +29,55 @@ export struct TopicListItem {
   onUnreadBadgeClick: (topic: Topic) => void = () => {};
   // 搜索场景高亮词(空格拆分的普通关键词):在 searchBlurb 摘要里把命中词染色。普通 feed 传空。
   searchHighlights: string[] = [];
+  // 首页取消 List 外层留白后由内容层补回；其他列表仍沿用各自的外层 padding。
+  contentHorizontalPadding: number = 0;
+  // 首页增量置顶高亮使用统一截止时间。懒加载条目晚创建时只播放剩余时长，过期后不重播。
+  @Prop @Watch('onIncomingHighlightChanged') incomingHighlightUntil: number = 0;
+  @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
+  @State private incomingHighlightActive: boolean = false;
+  private incomingHighlightTimerId: number = -1;
+
+  aboutToAppear(): void {
+    this.playIncomingHighlight();
+  }
+
+  private onIncomingHighlightChanged(): void {
+    this.playIncomingHighlight();
+  }
+
+  private playIncomingHighlight(): void {
+    const remainingMs: number = incomingHighlightRemainingMs(this.incomingHighlightUntil, Date.now());
+    if (this.incomingHighlightTimerId >= 0) {
+      clearTimeout(this.incomingHighlightTimerId);
+      this.incomingHighlightTimerId = -1;
+    }
+    if (remainingMs <= 0) {
+      this.incomingHighlightActive = false;
+      return;
+    }
+    this.incomingHighlightActive = true;
+    const holdMs: number = Math.max(0, remainingMs - INCOMING_HIGHLIGHT_FADE_MS);
+    this.incomingHighlightTimerId = setTimeout(() => {
+      this.incomingHighlightActive = false;
+      this.incomingHighlightTimerId = -1;
+    }, holdMs);
+  }
+
+  aboutToDisappear(): void {
+    if (this.incomingHighlightTimerId >= 0) {
+      clearTimeout(this.incomingHighlightTimerId);
+      this.incomingHighlightTimerId = -1;
+    }
+  }
 
   build() {
     ListItem() {
-      Row() {
-        UserAvatar({ user: this.topic.author, avatarSize: 48 })
-          .margin({ right: 8 })
+      Column() {
+        Row() {
+          UserAvatar({ user: this.topic.author, avatarSize: 48 })
+            .margin({ right: 8 })
 
-        Column() {
+          Column() {
           // 未读徽标 / 小蓝点都作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面。
           // 二者互斥:有未读回复 → 蓝色数字药丸(左右加空格撑开背景);否则(全新主题)→ 小蓝点。
           // 未读标记不做 baselineOffset:ArkUI 会把偏移后的内联 Span 纳入行盒计算,
@@ -129,17 +177,27 @@ export struct TopicListItem {
             .alignItems(VerticalAlign.Center)
             .margin({ top: 3 })
           }
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        .padding({
+          left: this.contentHorizontalPadding,
+          right: this.contentHorizontalPadding,
+          top: 8,
+          bottom: 8
+        })
+        .backgroundColor(incomingTopicHighlightBackground(this.incomingHighlightActive, this.appIsDark))
+        .animation({ duration: INCOMING_HIGHLIGHT_FADE_MS, curve: Curve.EaseOut })
+        .alignItems(VerticalAlign.Top)
+
+        Divider()
+          .color($r('app.color.border'))
+          .strokeWidth(1)
+          .margin({ left: this.contentHorizontalPadding, right: this.contentHorizontalPadding })
       }
       .width('100%')
-      .padding({ top: 8, bottom: 8 })
-      .border({
-        width: { bottom: 1 },
-        color: $r('app.color.border')
-      })
-      .alignItems(VerticalAlign.Top)
       .onClick(() => {
         // 有未读徽标 → 整行点击直跳第一条未读楼;否则从第 1 层打开。
         if (this.hasUnreadBadge()) {

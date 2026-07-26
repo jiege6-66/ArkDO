@@ -9,6 +9,8 @@ import { detectChallenge } from './ChallengeDetector';
 import { FileLogger } from '../logging/FileLogger';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 import { buildCsrfScript } from './webscript/CsrfScriptTemplate';
+import { buildMessageBusScript } from './webscript/MessageBusScriptTemplate';
+import { MessageBusEventBus } from '../message/MessageBusEventBus';
 
 const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
 // 媒体下载兜底超时:委托始终不回调(如 URL 无效/挑战未过)时,自愈拒绝以免播放器永久转圈。
@@ -31,6 +33,7 @@ export interface ArkWebJsonExecutor {
 
 interface ArkWebResultReceiver {
   onJsonResult(requestId: string, payload: string): void;
+  onBusEvent(payload: string): void;
 }
 
 interface WebFetchEnvelope {
@@ -92,6 +95,10 @@ export class ArkWebCallbackProxy {
   onJsonResult(requestId: string, payload: string): void {
     this.receiver.onJsonResult(requestId, payload);
   }
+
+  onBusEvent(payload: string): void {
+    this.receiver.onBusEvent(payload);
+  }
 }
 
 class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
@@ -141,6 +148,10 @@ class WebviewJsonExecutor implements ArkWebJsonExecutor, ArkWebResultReceiver {
     clearTimeout(pendingRequest.timeoutId);
     this.pendingRequests.delete(requestId);
     pendingRequest.resolve(payload);
+  }
+
+  onBusEvent(payload: string): void {
+    MessageBusEventBus.publishPayload(payload);
   }
 
   private rejectRequest(requestId: string, message: string): void {
@@ -396,6 +407,20 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  startMessageBus(): void {
+    if (!this.controller) {
+      logNetwork('MessageBus start skipped: controller not ready');
+      return;
+    }
+    try {
+      this.controller.runJavaScript(buildMessageBusScript()).catch(() => {
+        logNetwork('MessageBus script injection failed');
+      });
+    } catch (error) {
+      logNetwork('MessageBus script injection failed');
+    }
+  }
+
   private whenHostReady(): Promise<void> {
     if (!this.reloading) {
       return Promise.resolve();
@@ -418,7 +443,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return {
       object: executor.getCallbackProxy(),
       name: 'ArkDOBridge',
-      methodList: ['onJsonResult'],
+      methodList: ['onJsonResult', 'onBusEvent'],
       controller: controller
     };
   }

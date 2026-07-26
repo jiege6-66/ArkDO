@@ -432,6 +432,44 @@ export class TopicService {
     return this.getFeedPage(FeedKey.LATEST, page);
   }
 
+  async getLatestTopicsByIds(topicIds: number[]): Promise<NetworkResult<Topic[]>> {
+    const normalizedIds: number[] = [];
+    const seenIds: Set<number> = new Set<number>();
+    for (let index: number = 0; index < topicIds.length; index++) {
+      const topicId: number = Math.floor(topicIds[index]);
+      if (!Number.isFinite(topicId) || topicId <= 0 || seenIds.has(topicId)) {
+        continue;
+      }
+      seenIds.add(topicId);
+      normalizedIds.push(topicId);
+    }
+    if (normalizedIds.length === 0) {
+      return {
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: []
+      };
+    }
+
+    const pageResult: NetworkResult<TopicPage> =
+      await this.getTopicListPage(`/latest.json?topic_ids=${normalizedIds.join(',')}`, 0);
+    if (!pageResult.success) {
+      return {
+        success: false,
+        statusCode: pageResult.statusCode,
+        challengeState: pageResult.challengeState,
+        error: pageResult.error
+      };
+    }
+    return {
+      success: true,
+      statusCode: pageResult.statusCode,
+      challengeState: pageResult.challengeState,
+      data: pageResult.data ? pageResult.data.topics : []
+    };
+  }
+
   // 全站内置入口(最新/热门/未读/新主题)分页:响应体均为 topic_list.topics 结构,共用解析。
   async getFeedPage(feedKey: string, page: number): Promise<NetworkResult<TopicPage>> {
     return this.getTopicListPage(this.getFeedPath(feedKey, page), page);

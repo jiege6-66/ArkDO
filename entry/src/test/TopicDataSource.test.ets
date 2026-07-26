@@ -6,6 +6,10 @@ class RecordingListener implements DataChangeListener {
   reloads: number = 0;
   datasetChanges: number = 0;
   singleAdds: number = 0;
+  addedAt: number = -1;
+  addedCount: number = 0;
+  deletedAt: number = -1;
+  deletedCount: number = 0;
 
   onDataReloaded(): void {
     this.reloads += 1;
@@ -39,6 +43,16 @@ class RecordingListener implements DataChangeListener {
 
   onDatasetChange(operations: DataOperation[]): void {
     this.datasetChanges += operations.length;
+    for (let index: number = 0; index < operations.length; index++) {
+      const operation: DataOperation = operations[index];
+      if (operation.type === DataOperationType.ADD) {
+        this.addedAt = operation.index;
+        this.addedCount = operation.count ?? 1;
+      } else if (operation.type === DataOperationType.DELETE) {
+        this.deletedAt = operation.index;
+        this.deletedCount = operation.count ?? 1;
+      }
+    }
   }
 }
 
@@ -76,6 +90,30 @@ export default function topicDataSourceTest() {
       expect(source.totalCount()).assertEqual(3);
       expect(source.getAll()[2].id).assertEqual(3);
       expect(listener.reloads).assertEqual(1);
+    });
+
+    it('prependsIncomingTopicsAndReplacesExistingRows', 0, () => {
+      const source: TopicDataSource = new TopicDataSource();
+      const listener: RecordingListener = new RecordingListener();
+      source.registerDataChangeListener(listener);
+      source.reset([topic(1, 'one old'), topic(2, 'two'), topic(3, 'three old')]);
+      listener.reloads = 0;
+
+      const changed: number = source.prependOrReplace([
+        topic(3, 'three updated'),
+        topic(4, 'four new'),
+        topic(3, 'three duplicate')
+      ]);
+
+      expect(changed).assertEqual(2);
+      expect(source.totalCount()).assertEqual(4);
+      expect(source.getAll()[0].id).assertEqual(3);
+      expect(source.getAll()[0].title).assertEqual('three updated');
+      expect(source.getAll()[1].id).assertEqual(4);
+      expect(source.getAll()[2].id).assertEqual(1);
+      expect(source.getAll()[3].id).assertEqual(2);
+      expect(listener.reloads).assertEqual(1);
+      expect(listener.datasetChanges).assertEqual(0);
     });
   });
 }

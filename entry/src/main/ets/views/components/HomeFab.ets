@@ -15,6 +15,7 @@ export struct HomeFab {
   @Prop showBackToTop: boolean = false;
   onCompose: () => void = () => {};
   onBackToTop: () => void = () => {};
+  onDebugLongPress: () => void = () => {};
 
   build() {
     HdsActionBar({
@@ -24,6 +25,13 @@ export struct HomeFab {
     })
     .width(52)
     .height(52)
+    // 临时调试入口:长按 FAB 递增首页 incoming 提示计数。MessageBus 接入后删除。
+    .priorityGesture(
+      LongPressGesture({ repeat: false, duration: 500 })
+        .onAction(() => {
+          this.onDebugLongPress();
+        })
+    )
   }
 
   private fabButton(): ActionBarButton {

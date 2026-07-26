@@ -143,6 +143,48 @@ export default function topicServiceTest() {
       expect(result.data?.[0].author?.username).assertEqual('linuxdo_user');
     });
 
+    it('loadsIncomingLatestTopicsByUniqueIds', 0, async () => {
+      const payload: string = '{"topic_list":{"topics":[{"id":42,"title":"更新话题","posts_count":2,"reply_count":1,"like_count":0},{"id":7,"title":"新话题","posts_count":1,"reply_count":0,"like_count":0}]},"users":[]}';
+      const bridge: FakeBridge = new FakeBridge({
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: payload
+      });
+      const service: TopicService = new TopicService(bridge);
+
+      const result: NetworkResult<Topic[]> = await service.getLatestTopicsByIds([42, 7, 42]);
+
+      expect(bridge.requestedPath).assertEqual('/latest.json?topic_ids=42,7');
+      expect(result.success).assertTrue();
+      expect(result.data?.length).assertEqual(2);
+      expect(result.data?.[0].id).assertEqual(42);
+      expect(result.data?.[1].id).assertEqual(7);
+    });
+
+    it('loadsAllIncomingTopicIdsInOneRequest', 0, async () => {
+      const ids: number[] = [];
+      for (let id: number = 1; id <= 65; id++) {
+        ids.push(id);
+      }
+      const bridge: SequenceBridge = new SequenceBridge([{
+        success: true,
+        statusCode: 200,
+        challengeState: ChallengeState.NONE,
+        data: '{"topic_list":{"topics":[{"id":65,"title":"服务端第一条"},{"id":1,"title":"服务端第二条"}]},"users":[]}'
+      }]);
+      const service: TopicService = new TopicService(bridge);
+
+      const result: NetworkResult<Topic[]> = await service.getLatestTopicsByIds(ids);
+
+      expect(bridge.requestedPaths.length).assertEqual(1);
+      expect(bridge.requestedPaths[0]).assertEqual(`/latest.json?topic_ids=${ids.join(',')}`);
+      expect(result.success).assertTrue();
+      expect(result.data?.length).assertEqual(2);
+      expect(result.data?.[0].id).assertEqual(65);
+      expect(result.data?.[1].id).assertEqual(1);
+    });
+
     it('usesFirstPosterUserIdAsTopicAuthor', 0, async () => {
       const payload: string = '{"topic_list":{"topics":[{"id":43,"title":"中文 poster 描述","posts_count":1,"reply_count":0,"like_count":0,"posters":[{"user_id":8,"description":"原始作者"},{"user_id":9,"description":"最近回复"}]}]},"users":[{"id":8,"username":"first_user","name":"First User","avatar_template":"/first/{size}.png"},{"id":9,"username":"wrong_user","name":"Wrong User","avatar_template":"/wrong/{size}.png"}]}';
       const bridge: FakeBridge = new FakeBridge({

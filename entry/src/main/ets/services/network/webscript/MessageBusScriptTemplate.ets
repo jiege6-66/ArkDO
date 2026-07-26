@@ -1,0 +1,254 @@
+// MessageBus long poll 必须完整地留在 ArkWeb 文档中运行。ArkTS 只接收轻量事件，
+// 避免占用一次性 JSON 请求通道，也不受原生请求超时限制。
+export function buildMessageBusScript(): string {
+  return `(() => {
+      const emit = (event) => {
+        try {
+          window.ArkDOBridge.onBusEvent(JSON.stringify(event));
+        } catch (_) {
+        }
+      };
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const uniqueId = () => 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+        const random = (Math.random() * 16) | 0;
+        const value = char === 'x' ? random : (random & 0x3) | 0x8;
+        return value.toString(16);
+      });
+      const findLongPollingBaseUrl = (value, depth) => {
+        if (value === null || value === undefined || depth > 8) {
+          return '';
+        }
+        if (typeof value === 'string') {
+          if (!value.includes('long_polling_base_url')) {
+            return '';
+          }
+          try {
+            return findLongPollingBaseUrl(JSON.parse(value), depth + 1);
+          } catch (_) {
+            return '';
+          }
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findLongPollingBaseUrl(item, depth + 1);
+            if (found) {
+              return found;
+            }
+          }
+          return '';
+        }
+        if (typeof value === 'object') {
+          if (typeof value.long_polling_base_url === 'string') {
+            return value.long_polling_base_url;
+          }
+          for (const key of Object.keys(value)) {
+            const found = findLongPollingBaseUrl(value[key], depth + 1);
+            if (found) {
+              return found;
+            }
+          }
+        }
+        return '';
+      };
+      const resolvePollBaseUrl = async () => {
+        const fallback = new URL('/', window.location.origin).toString();
+        const fallbackConfig = {
+          baseUrl: fallback,
+          sharedSessionKey: '',
+          source: 'fallback'
+        };
+        try {
+          const response = await fetch(fallback, {
+            credentials: 'include',
+            cache: 'no-store',
+            headers: {
+              'Accept': 'text/html',
+              'X-Requested-With': 'XMLHttpRequest'
+            }
+          });
+          if (!response.ok) {
+            fallbackConfig.source = 'http-' + response.status;
+            return fallbackConfig;
+          }
+          const html = await response.text();
+          const documentRoot = new DOMParser().parseFromString(html, 'text/html');
+          const preload = documentRoot.querySelector('#data-preloaded');
+          const rawPreloaded = preload
+            ? (preload.textContent || preload.getAttribute('data-preloaded') || '')
+            : '';
+          if (!rawPreloaded) {
+            fallbackConfig.source = 'preload-missing';
+            return fallbackConfig;
+          }
+          const preloaded = JSON.parse(rawPreloaded);
+          const siteSettings = typeof preloaded.siteSettings === 'string'
+            ? JSON.parse(preloaded.siteSettings)
+            : preloaded.siteSettings;
+          const configured = siteSettings && typeof siteSettings.long_polling_base_url === 'string'
+            ? siteSettings.long_polling_base_url
+            : findLongPollingBaseUrl(preloaded, 0);
+          if (!configured) {
+            fallbackConfig.source = 'setting-missing';
+            return fallbackConfig;
+          }
+          const resolved = new URL(configured, fallback).toString();
+          const sharedSessionMeta = documentRoot.querySelector('meta[name=shared_session_key]');
+          return {
+            baseUrl: resolved.endsWith('/') ? resolved : resolved + '/',
+            sharedSessionKey: sharedSessionMeta ? (sharedSessionMeta.getAttribute('content') || '') : '',
+            source: 'site-settings'
+          };
+        } catch (_) {
+          fallbackConfig.source = 'parse-error';
+          return fallbackConfig;
+        }
+      };
+      const start = async () => {
+        if (window.__arkdoMessageBusStarted) {
+          return;
+        }
+        window.__arkdoMessageBusStarted = true;
+        const state = {
+          clientId: uniqueId(),
+          baseUrl: '',
+          sharedSessionKey: '',
+          channels: { '/latest': -1 },
+          seq: 0,
+          running: true,
+          retryDelayMs: 1000
+        };
+        emit({ type: 'status', stage: 'started', message: 'message bus loop started' });
+        const pollConfig = await resolvePollBaseUrl();
+        state.baseUrl = pollConfig.baseUrl;
+        state.sharedSessionKey = pollConfig.sharedSessionKey;
+        emit({
+          type: 'status',
+          stage: 'config-ready',
+          message: state.baseUrl + ' source=' + pollConfig.source +
+            ' sharedSessionKey=' + String(Boolean(state.sharedSessionKey))
+        });
+        const backoff = async () => {
+          const waitMs = state.retryDelayMs;
+          state.retryDelayMs = Math.min(state.retryDelayMs * 2, 30000);
+          await delay(waitMs);
+        };
+        const stopForChallenge = (event) => {
+          emit(event);
+          state.running = false;
+          window.__arkdoMessageBusStarted = false;
+          setTimeout(start, 30000);
+        };
+
+        const poll = async () => {
+          while (state.running) {
+            const body = new URLSearchParams();
+            Object.keys(state.channels).forEach((channel) => {
+              body.append(channel, String(state.channels[channel]));
+            });
+            body.append('__seq', String(++state.seq));
+
+            try {
+              const headers = {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-SILENCE-LOGGER': 'true',
+                'Dont-Chunk': 'true'
+              };
+              if (state.sharedSessionKey && new URL(state.baseUrl).origin !== window.location.origin) {
+                headers['X-Shared-Session-Key'] = state.sharedSessionKey;
+              }
+              const response = await fetch(
+                new URL('message-bus/' + encodeURIComponent(state.clientId) + '/poll', state.baseUrl).toString(),
+                {
+                  method: 'POST',
+                  credentials: 'include',
+                  cache: 'no-store',
+                  headers: headers,
+                  body: body.toString()
+                }
+              );
+              const responseText = await response.text();
+              if (response.status === 403 || response.status === 429) {
+                stopForChallenge({ type: 'challenge', statusCode: response.status, message: 'message bus blocked' });
+                return;
+              }
+
+              let messages;
+              try {
+                messages = JSON.parse(responseText);
+              } catch (_) {
+                const contentType = response.headers ? (response.headers.get('content-type') || '') : '';
+                const lowerBody = responseText.toLowerCase();
+                const looksLikeChallenge = response.status === 403 || response.status === 429 ||
+                  contentType.includes('text/html') || lowerBody.includes('cf-chl') ||
+                  lowerBody.includes('just a moment');
+                if (looksLikeChallenge) {
+                  stopForChallenge({
+                    type: 'challenge',
+                    statusCode: response.status,
+                    message: 'message bus returned challenge html'
+                  });
+                  return;
+                }
+                emit({
+                  type: 'error',
+                  stage: 'poll-response',
+                  statusCode: response.status,
+                  message: 'message bus returned non-json'
+                });
+                await backoff();
+                continue;
+              }
+              if (!response.ok || !Array.isArray(messages)) {
+                emit({ type: 'error', statusCode: response.status, message: 'message bus poll failed' });
+                await backoff();
+                continue;
+              }
+
+              state.retryDelayMs = 1000;
+              for (const message of messages) {
+                if (!message || typeof message.channel !== 'string') {
+                  continue;
+                }
+                if (message.channel === '/__status' && message.data && typeof message.data === 'object') {
+                  Object.keys(state.channels).forEach((channel) => {
+                    if (typeof message.data[channel] === 'number') {
+                      state.channels[channel] = message.data[channel];
+                      emit({
+                        type: 'status',
+                        stage: 'cursor-ready',
+                        channel: channel,
+                        messageId: message.data[channel],
+                        message: 'message bus cursor initialized'
+                      });
+                    }
+                  });
+                  continue;
+                }
+                if (typeof message.message_id !== 'number') {
+                  continue;
+                }
+                if (Object.prototype.hasOwnProperty.call(state.channels, message.channel)) {
+                  state.channels[message.channel] = message.message_id;
+                }
+                emit({
+                  type: 'message',
+                  channel: message.channel,
+                  messageId: message.message_id,
+                  data: message.data
+                });
+              }
+            } catch (error) {
+              emit({ type: 'error', statusCode: 0, message: String(error) });
+              await backoff();
+            }
+          }
+        };
+
+        poll();
+      };
+
+      start();
+      return 'started';
+    })();`;
+}

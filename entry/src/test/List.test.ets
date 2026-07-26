@@ -33,6 +33,10 @@ import emojiPreviewHtmlTest from './EmojiPreviewHtml.test';
 import emojiShortcodeEditTest from './EmojiShortcodeEdit.test';
 import commentInputPresentationTest from './CommentInputPresentation.test';
 import topicDataSourceTest from './TopicDataSource.test';
+import homeIncomingTopicsPromptTest from './HomeIncomingTopicsPrompt.test';
+import homeIncomingTopicsControllerTest from './HomeIncomingTopicsController.test';
+import messageBusScriptTemplateTest from './MessageBusScriptTemplate.test';
+import messageBusEventBusTest from './MessageBusEventBus.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -69,4 +73,8 @@ export default function testsuite() {
   emojiShortcodeEditTest();
   commentInputPresentationTest();
   topicDataSourceTest();
+  homeIncomingTopicsPromptTest();
+  homeIncomingTopicsControllerTest();
+  messageBusScriptTemplateTest();
+  messageBusEventBusTest();
 }

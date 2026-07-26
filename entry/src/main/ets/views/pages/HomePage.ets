@@ -15,6 +15,11 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoadStateView } from '../components/LoadStateView';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
+import {
+  extractMessageBusTopicId,
+  MessageBusEvent,
+  MessageBusEventBus
+} from '../../services/message/MessageBusEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicDataSource } from '../../services/topic/TopicDataSource';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -22,6 +27,20 @@ import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
 import { HomeFab } from '../components/HomeFab';
+import {
+  HomeIncomingTopicsPrompt,
+  shouldShowIncomingTopicsPrompt
+} from '../components/HomeIncomingTopicsPrompt';
+import {
+  addIncomingTopicId,
+  addIncomingTopicMessage,
+  clearHomeIncomingTopics,
+  createHomeIncomingTopicsState,
+  HomeIncomingTopicsState,
+  homeIncomingTopicsCount,
+  removeIncomingTopicsSnapshot,
+  snapshotHomeIncomingTopics
+} from '../../services/home/HomeIncomingTopicsController';
 import { ComposerPage } from './ComposerPage';
 import { LoginGate } from '../../services/session/LoginGate';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
@@ -75,6 +94,11 @@ const SCROLL_TOP_MS: number = 460;
 // 瞬移落地的重试上限:惯性未停时 scrollTo 可能被"顶回去",逐帧再钉;超过则放弃动画直接到顶,
 // 宁可生硬也不能卡在半路。
 const SCROLL_TOP_MAX_RETRY: number = 3;
+const INCOMING_HIGHLIGHT_MS: number = 1500;
+const INCOMING_PROMPT_HEIGHT: number = 44;
+const INCOMING_PROMPT_ENTER_MS: number = 240;
+const INCOMING_PROMPT_EXIT_MS: number = 180;
+const INCOMING_INSERT_MS: number = 280;
 
 // 下一帧回调。setTimeout(0) 只是"下一个宏任务",跟"上一帧已渲染"没有任何保证关系,
 // 用它串瞬移→动画会时灵时不灵;postFrameCallback 才是真正的帧边界。
@@ -124,11 +148,21 @@ export struct HomePage {
   // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
   @State private unreadNotifications: number = 0;
   private unsubscribeNotifications?: () => void = undefined;
+  private unsubscribeMessageBus?: () => void = undefined;
   private categoryIndex: CategoryIndex = new CategoryIndex();
   // 帖子列表的 Scroller:回顶按钮要用它跳回顶部,滚动阈值判定也靠它读当前偏移。
   private listScroller: Scroller = new Scroller();
   // 右下角悬浮按钮当前身份:false=发帖,true=回到顶部。由滚动位置驱动。
   @State private showBackToTopFab: boolean = false;
+  // MessageBus 接入后写入 topicId；当前长按 FAB 注入模拟 topicId 验证去重计数链路。
+  @State private incomingTopicsState: HomeIncomingTopicsState = createHomeIncomingTopicsState();
+  @State private isLoadingIncoming: boolean = false;
+  @State private incomingHighlightedTopicIds: number[] = [];
+  @State private incomingHighlightDeadline: number = 0;
+  @State private incomingPromptHeight: number = 0;
+  @State private incomingPromptOpacity: number = 0;
+  private incomingRequestEpoch: number = 0;
+  private incomingHighlightEpoch: number = 0;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
   private smartReachLeftHanded: boolean = false;
@@ -182,6 +216,8 @@ export struct HomePage {
   private unsubscribeTopicReadState?: () => void = undefined;
   // 会话变化撞上在途列表请求时先记账，请求结束后再按最新 Cookie 补拉首页。
   private pendingSessionRefresh: boolean = false;
+  // 用户点 incoming 提示时若列表请求在途，等当前请求结束再做增量加载；成功前不丢 topic ID。
+  @State private pendingIncomingRefresh: boolean = false;
   // 调试用:输入帖子 ID 直接跳转详情(有些帖子已从最新列表里翻走,无法在列表中找到)。
   private jumpDialogController: CustomDialogController = new CustomDialogController({
     builder: TopicJumpDialog({
@@ -220,6 +256,11 @@ export struct HomePage {
         this.unreadNotifications = snapshot.unread;
       });
     }
+    if (!this.unsubscribeMessageBus) {
+      this.unsubscribeMessageBus = MessageBusEventBus.subscribe((event: MessageBusEvent) => {
+        this.handleMessageBusEvent(event);
+      });
+    }
     this.refreshDrawerPrefs();
     this.syncSessionVersion();
     if (this.isArkWebReady && this.topics.length === 0) {
@@ -250,6 +291,10 @@ export struct HomePage {
     if (this.unsubscribeNotifications) {
       this.unsubscribeNotifications();
       this.unsubscribeNotifications = undefined;
+    }
+    if (this.unsubscribeMessageBus) {
+      this.unsubscribeMessageBus();
+      this.unsubscribeMessageBus = undefined;
     }
   }
 
@@ -489,11 +534,20 @@ export struct HomePage {
             .width('100%')
           }
 
+          ListItem() {
+            this.IncomingTopicsPrompt()
+          }
+          .height(this.incomingPromptHeight)
+          .opacity(this.incomingPromptOpacity)
+          .clip(true)
+
           LazyForEach(this.topicDataSource, (topic: Topic) => {
             TopicListItem({
               topic: topic,
               category: CategoryIndex.find(this.categories, topic.categoryId),
               parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
+              contentHorizontalPadding: 12,
+              incomingHighlightUntil: this.incomingTopicHighlightDeadline(topic.id),
               onTopicClick: (selectedTopic: Topic) => {
                 // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
                 selectedTopic.unseen = false;
@@ -506,7 +560,8 @@ export struct HomePage {
             // 完整刷新会 new 一批 Topic，版本入 key 后强制重绑 @ObjectLink；同实例上的收藏变化仍靠
             // bookmarked 重建，已读状态则继续走 @Observed 精准更新，不必重建整行。
           }, (topic: Topic) =>
-            `${this.topicListVersion}_${topic.id}_${topic.bookmarked === true ? 1 : 0}`)
+            `${this.topicListVersion}_${topic.id}_${topic.bookmarked === true ? 1 : 0}_` +
+              `${this.incomingTopicHighlightDeadline(topic.id)}`)
 
           if (this.topics.length > 0) {
             ListItem() {
@@ -534,7 +589,7 @@ export struct HomePage {
         .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
         .clip(false)
         .scrollBar(BarState.Off)
-        .padding({ left: 12, right: 12, bottom: 0 })
+        .padding({ bottom: 0 })
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
           this.loadMoreTopics();
@@ -551,7 +606,7 @@ export struct HomePage {
       .pullToRefresh(true)
       .refreshOffset(64)
       .onRefreshing(() => {
-        this.refreshLatestTopics();
+        this.handleManualRefresh();
       })
 
       ScrollBar({
@@ -603,18 +658,13 @@ export struct HomePage {
       // 列表为空时(加载中/失败/CF 挑战)不出现——既无从回顶,空态下也不该冒出主动作。
       if (this.topics.length > 0) {
         RelativeContainer() {
-          HomeFab({
-            showBackToTop: this.showBackToTopFab,
-            onCompose: () => {
-              this.openComposer();
-            },
-            onBackToTop: () => {
-              this.scrollToTop();
-            }
-          })
-            .id('smartReachHomeFab')
+          Row() {
+            this.HomeFloatingButton()
+          }
+            .id('smartReachHomeFabCluster')
             .alignRules(this.fabAlignRules)
             .margin({ left: 16, right: 16, bottom: 16 + this.sysBottomInset })
+            .alignItems(VerticalAlign.Center)
         }
         .width('100%')
         .height('100%')
@@ -667,6 +717,40 @@ export struct HomePage {
           this.onProfileSwipeEnd(0, 0);
         })
     )
+  }
+
+  @Builder
+  private HomeFloatingButton() {
+    HomeFab({
+      showBackToTop: this.showBackToTopFab,
+      onCompose: () => {
+        this.openComposer();
+      },
+      onBackToTop: () => {
+        this.scrollToTop();
+      },
+      onDebugLongPress: () => {
+        this.debugIncrementIncomingTopicsPrompt();
+      }
+    })
+      .id('smartReachHomeFab')
+  }
+
+  @Builder
+  private IncomingTopicsPrompt() {
+    if (shouldShowIncomingTopicsPrompt(this.incomingTopicsPromptCount())) {
+      HomeIncomingTopicsPrompt({
+        count: this.incomingTopicsPromptCount(),
+        loading: this.isLoadingIncoming || this.pendingIncomingRefresh,
+        onPromptClick: () => {
+          this.handleIncomingTopicsPromptClick();
+        }
+      })
+    }
+  }
+
+  private incomingTopicsPromptCount(): number {
+    return homeIncomingTopicsCount(this.incomingTopicsState);
   }
 
   @Builder
@@ -939,13 +1023,84 @@ export struct HomePage {
   }
 
   private resetAndReload(): void {
+    this.incomingRequestEpoch++;
+    this.isLoadingIncoming = false;
+    this.incomingHighlightEpoch++;
+    this.incomingHighlightedTopicIds = [];
+    this.incomingHighlightDeadline = 0;
+    this.incomingPromptHeight = 0;
+    this.incomingPromptOpacity = 0;
     this.topics = [];
     this.topicDataSource.reset([]);
+    this.incomingTopicsState = clearHomeIncomingTopics(this.incomingTopicsState);
+    this.pendingIncomingRefresh = false;
     this.currentPage = 0;
     this.hasMore = true;
     this.loadFailed = false;
     // 换内容源后列表从头开始,按钮身份跟着复位——否则会卡在回顶态(新列表已在顶部,却显示回顶)。
     this.showBackToTopFab = false;
+    this.refreshLatestTopics();
+  }
+
+  private handleIncomingTopicsPromptClick(): void {
+    this.pendingIncomingRefresh = true;
+    this.runPendingIncomingRefresh();
+  }
+
+  private handleMessageBusEvent(event: MessageBusEvent): void {
+    if (event.channel !== '/latest' || this.selectedCategory !== undefined ||
+      this.selectedFeedKey !== FeedKey.LATEST) {
+      return;
+    }
+    const topicId: number | undefined = extractMessageBusTopicId(event);
+    if (topicId === undefined) {
+      return;
+    }
+    const previousCount: number = this.incomingTopicsPromptCount();
+    this.incomingTopicsState = addIncomingTopicMessage(
+      this.incomingTopicsState,
+      topicId,
+      event.messageId === undefined ? 0 : event.messageId
+    );
+    if (previousCount === 0 && this.incomingTopicsPromptCount() > 0) {
+      this.expandIncomingTopicsPrompt();
+    }
+  }
+
+  // 临时调试入口:长按首页 FAB，把当前列表中的真实话题注入 incoming，便于验证增量请求和高亮。
+  private debugIncrementIncomingTopicsPrompt(): void {
+    if (this.topics.length === 0) {
+      return;
+    }
+    const topicIndex: number = Math.min(this.incomingTopicsPromptCount(), this.topics.length - 1);
+    const previousCount: number = this.incomingTopicsPromptCount();
+    this.incomingTopicsState = addIncomingTopicId(this.incomingTopicsState, this.topics[topicIndex].id);
+    if (previousCount === 0 && this.incomingTopicsPromptCount() > 0) {
+      this.expandIncomingTopicsPrompt();
+    }
+  }
+
+  private expandIncomingTopicsPrompt(): void {
+    this.getUIContext().animateTo({ duration: INCOMING_PROMPT_ENTER_MS, curve: Curve.EaseOut }, () => {
+      this.incomingPromptHeight = INCOMING_PROMPT_HEIGHT;
+      this.incomingPromptOpacity = 1;
+    });
+  }
+
+  private collapseIncomingTopicsPrompt(): void {
+    this.getUIContext().animateTo({ duration: INCOMING_PROMPT_EXIT_MS, curve: Curve.EaseIn }, () => {
+      this.incomingPromptHeight = 0;
+      this.incomingPromptOpacity = 0;
+    });
+  }
+
+  private handleManualRefresh(): void {
+    // 下拉刷新代表用户主动查看最新列表。先丢弃这一刻之前的提示；刷新期间的新消息会写入新状态。
+    this.incomingRequestEpoch++;
+    this.isLoadingIncoming = false;
+    this.pendingIncomingRefresh = false;
+    this.incomingTopicsState = clearHomeIncomingTopics(this.incomingTopicsState);
+    this.collapseIncomingTopicsPrompt();
     this.refreshLatestTopics();
   }
 
@@ -974,21 +1129,21 @@ export struct HomePage {
     promptToast(this.getUIContext(), message);
   }
 
-  private async refreshLatestTopics(): Promise<void> {
+  private async refreshLatestTopics(): Promise<boolean> {
     // 门卫看「桥能否真发请求」(executor 已挂),而非 UI 解锁标志 isArkWebReady:
     // 看门狗/失败路径会把 isArkWebReady 置真但 executor 仍为空,此时若照发请求必被跳过、硬闪「加载失败」。
     // 冷启动空窗里停在「连接中」软状态,等宿主真就绪(hostReadyEpoch)再自动补拉,避免错误闪屏。
     if (!this.bridge.canFetch()) {
       this.listMessage = '正在连接服务器…';
-      return;
+      return false;
     }
 
     this.loadSiteMetadataIfNeeded();
     // 顺带补查会话状态:上次 current.json 被 CF 拦截时右上角可能误显示为未登录。
     this.onSessionRecheck();
 
-    if (this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
-      return;
+    if (this.isRefreshing || this.isLoadingMore || this.isInitialLoading || this.isLoadingIncoming) {
+      return false;
     }
 
     const isFirstLoad: boolean = this.topics.length === 0;
@@ -1016,7 +1171,8 @@ export struct HomePage {
       this.listMessage = result.data.topics.length > 0 ? '' : '暂无帖子数据';
       this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
       this.runPendingSessionRefresh();
-      return;
+      this.runPendingIncomingRefresh();
+      return true;
     }
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
@@ -1034,6 +1190,8 @@ export struct HomePage {
       this.footerMessage = '刷新失败,请重试';
     }
     this.runPendingSessionRefresh();
+    this.runPendingIncomingRefresh();
+    return false;
   }
 
   private async loadMoreTopics(): Promise<void> {
@@ -1046,7 +1204,8 @@ export struct HomePage {
 
     this.loadSiteMetadataIfNeeded();
 
-    if (this.isRefreshing || this.isLoadingMore || !this.hasMore || this.topics.length === 0) {
+    if (this.isRefreshing || this.isLoadingMore || this.isLoadingIncoming ||
+      !this.hasMore || this.topics.length === 0) {
       return;
     }
 
@@ -1065,12 +1224,14 @@ export struct HomePage {
       this.hasMore = result.data.hasMore && result.data.topics.length > 0;
       this.footerMessage = this.hasMore ? '上拉加载更多' : '没有更多了';
       this.runPendingSessionRefresh();
+      this.runPendingIncomingRefresh();
       return;
     }
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
     this.footerMessage = result.error?.message ? `${result.error.message}，上拉重试` : '加载失败，上拉重试';
     this.runPendingSessionRefresh();
+    this.runPendingIncomingRefresh();
   }
 
   private handleSessionChanged(version: number): void {
@@ -1081,7 +1242,8 @@ export struct HomePage {
     this.handledSessionVersion = version;
     Log.i(`${LOG_TAG} session changed version=${version}, refresh latest topics`);
     this.footerMessage = '会话已更新，正在刷新';
-    if (!this.bridge.canFetch() || this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
+    if (!this.bridge.canFetch() || this.isRefreshing || this.isLoadingMore || this.isInitialLoading ||
+      this.isLoadingIncoming) {
       this.pendingSessionRefresh = true;
       Log.i(`${LOG_TAG} session refresh queued version=${version}`);
       return;
@@ -1091,12 +1253,94 @@ export struct HomePage {
 
   private runPendingSessionRefresh(): void {
     if (!this.pendingSessionRefresh || !this.bridge.canFetch() ||
-      this.isRefreshing || this.isLoadingMore || this.isInitialLoading) {
+      this.isRefreshing || this.isLoadingMore || this.isInitialLoading || this.isLoadingIncoming) {
       return;
     }
     this.pendingSessionRefresh = false;
     Log.i(`${LOG_TAG} run queued session refresh`);
     this.refreshLatestTopics();
+  }
+
+  private runPendingIncomingRefresh(): void {
+    if (!this.pendingIncomingRefresh || !this.bridge.canFetch() || this.isRefreshing ||
+      this.isLoadingMore || this.isInitialLoading || this.isLoadingIncoming) {
+      return;
+    }
+    const snapshot: HomeIncomingTopicsState = snapshotHomeIncomingTopics(this.incomingTopicsState);
+    if (snapshot.topicIds.length === 0) {
+      this.pendingIncomingRefresh = false;
+      return;
+    }
+    this.pendingIncomingRefresh = false;
+    this.loadIncomingTopics(snapshot);
+  }
+
+  private async loadIncomingTopics(snapshot: HomeIncomingTopicsState): Promise<void> {
+    this.isLoadingIncoming = true;
+    const requestEpoch: number = ++this.incomingRequestEpoch;
+    Log.i(`${LOG_TAG} incoming topics fetch started count=${snapshot.topicIds.length}`);
+    const result: NetworkResult<Topic[]> =
+      await new TopicService(this.bridge).getLatestTopicsByIds(snapshot.topicIds);
+    if (requestEpoch !== this.incomingRequestEpoch) {
+      return;
+    }
+    this.isLoadingIncoming = false;
+
+    if (result.success && result.data) {
+      const incomingTopics: Topic[] = result.data;
+      if (incomingTopics.length === 0) {
+        Log.i(`${LOG_TAG} incoming topics fetch returned empty requested=${snapshot.topicIds.length}`);
+        this.showToast('暂未获取到新话题，请稍后重试');
+        this.runPendingSessionRefresh();
+        return;
+      }
+      this.startIncomingHighlight(incomingTopics);
+      this.getUIContext().animateTo({ duration: INCOMING_INSERT_MS, curve: Curve.EaseOut }, () => {
+        this.topicDataSource.prependOrReplace(incomingTopics);
+        this.topics = this.topicDataSource.getAll();
+        this.incomingTopicsState = removeIncomingTopicsSnapshot(this.incomingTopicsState, snapshot);
+        if (this.incomingTopicsPromptCount() === 0) {
+          this.incomingPromptHeight = 0;
+          this.incomingPromptOpacity = 0;
+        }
+      });
+      Log.i(`${LOG_TAG} incoming topics fetch completed requested=${snapshot.topicIds.length} ` +
+        `received=${incomingTopics.length} remaining=${this.incomingTopicsPromptCount()}`);
+      this.runPendingSessionRefresh();
+      return;
+    }
+
+    Log.i(`${LOG_TAG} incoming topics fetch failed status=${result.statusCode} ` +
+      `error=${result.error?.message ?? ''}`);
+    this.showToast('加载新话题失败，请重试');
+    this.runPendingSessionRefresh();
+  }
+
+  private startIncomingHighlight(topics: Topic[]): void {
+    const topicIds: number[] = [];
+    for (let index: number = 0; index < topics.length; index++) {
+      if (topicIds.indexOf(topics[index].id) < 0) {
+        topicIds.push(topics[index].id);
+      }
+    }
+    if (topicIds.length === 0) {
+      return;
+    }
+
+    const highlightEpoch: number = ++this.incomingHighlightEpoch;
+    this.incomingHighlightedTopicIds = topicIds;
+    this.incomingHighlightDeadline = Date.now() + INCOMING_HIGHLIGHT_MS;
+    setTimeout(() => {
+      if (highlightEpoch !== this.incomingHighlightEpoch) {
+        return;
+      }
+      this.incomingHighlightedTopicIds = [];
+      this.incomingHighlightDeadline = 0;
+    }, INCOMING_HIGHLIGHT_MS);
+  }
+
+  private incomingTopicHighlightDeadline(topicId: number): number {
+    return this.incomingHighlightedTopicIds.indexOf(topicId) >= 0 ? this.incomingHighlightDeadline : 0;
   }
 
   private handleTopicReadStateChanged(state: TopicReadState): void {
@@ -1154,6 +1398,7 @@ export struct HomePage {
       this.loadSiteMetadataIfNeeded();
       this.refreshLatestTopics();
     }
+    this.runPendingIncomingRefresh();
     this.checkVersionAnnouncement();
   }
 

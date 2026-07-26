@@ -48,6 +48,32 @@ export class TopicDataSource implements IDataSource {
     return fresh.length;
   }
 
+  prependOrReplace(nextTopics: Topic[]): number {
+    const incoming: Topic[] = [];
+    const incomingIds: Set<number> = new Set<number>();
+    for (let index: number = 0; index < nextTopics.length; index++) {
+      const topic: Topic = nextTopics[index];
+      if (incomingIds.has(topic.id)) {
+        continue;
+      }
+      incomingIds.add(topic.id);
+      incoming.push(topic);
+    }
+    if (incoming.length === 0) {
+      return 0;
+    }
+
+    const remaining: Topic[] = [];
+    for (let index: number = 0; index < this.topics.length; index++) {
+      if (!incomingIds.has(this.topics[index].id)) {
+        remaining.push(this.topics[index]);
+      }
+    }
+    this.topics = incoming.concat(remaining);
+    this.notifyReload();
+    return incoming.length;
+  }
+
   private collectFresh(nextTopics: Topic[]): Topic[] {
     const seenIds: Set<number> = new Set();
     for (let index: number = 0; index < this.topics.length; index++) {

@@ -93,6 +93,7 @@ export struct ArkWebHost {
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
         this.bridge.markHostReady();
+        this.bridge.startMessageBus();
         this.syncSessionVersion();
         if (!this.hasNotifiedReady) {
           this.hasNotifiedReady = true;
