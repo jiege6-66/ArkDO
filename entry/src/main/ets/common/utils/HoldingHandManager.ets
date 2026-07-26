@@ -1,13 +1,20 @@
 import { motion } from '@kit.MultimodalAwarenessKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { Log } from '../../services/logging/Log';
 import { AppStateEventBus } from '../../services/session/AppStateEventBus';
 import { SMART_REACH_LEFT_HAND_STORAGE_KEY } from '../ui/SmartReachLayout';
 
 const LOG_TAG: string = '[ArkDO][SmartReach]';
+// 与 ThemeManager / RealtimeTopicsPrefs 等共用同一个 preferences 库，只是键不同。
+const PREF_STORE_NAME: string = 'app_settings';
+const PREF_KEY_ENABLED: string = 'smart_reach_enabled';
 
 // 全应用只订阅一次握姿变化。页面只消费 AppStorage 中的稳定左右状态，避免各自重复监听传感器。
 export class HoldingHandManager {
+  // 智感握姿开关(默认关)。关闭时传感器不订阅，布局恒为默认右侧。init 时从 preferences 载入。
+  private static enabled: boolean = false;
   private static activated: boolean = false;
   private static subscribed: boolean = false;
   private static unsupported: boolean = false;
@@ -24,9 +31,44 @@ export class HoldingHandManager {
       }
     };
 
-  static init(): void {
+  static init(context: common.Context): void {
     // 默认右侧与改造前布局完全一致；不支持该能力或订阅失败时不改变现有界面。
     AppStorage.setOrCreate<boolean>(SMART_REACH_LEFT_HAND_STORAGE_KEY, false);
+    // 读取开关(默认关)。关闭时 start() 直接跳过订阅，界面沿用默认右侧布局。
+    try {
+      const store: preferences.Preferences = preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
+      const value: preferences.ValueType = store.getSync(PREF_KEY_ENABLED, false);
+      HoldingHandManager.enabled = value === true;
+    } catch (err) {
+      HoldingHandManager.enabled = false;
+      Log.i(`${LOG_TAG} read enabled failed, fallback to disabled`);
+    }
+  }
+
+  static isEnabled(): boolean {
+    return HoldingHandManager.enabled;
+  }
+
+  // 用户在设置里切换开关：持久化并即时生效。开⇒(已激活且前台时)订阅传感器开始识别；
+  // 关⇒停订阅并把布局复位到默认右侧。
+  static setEnabled(context: common.Context, enabled: boolean): void {
+    HoldingHandManager.enabled = enabled;
+    try {
+      const store: preferences.Preferences = preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
+      store.putSync(PREF_KEY_ENABLED, enabled);
+      store.flush();
+      Log.i(`${LOG_TAG} enabled=${enabled}`);
+    } catch (err) {
+      Log.i(`${LOG_TAG} save enabled failed enabled=${enabled}`);
+    }
+    if (enabled) {
+      if (HoldingHandManager.activated && AppStateEventBus.isForeground()) {
+        HoldingHandManager.start();
+      }
+    } else {
+      HoldingHandManager.stop();
+      AppStorage.setOrCreate<boolean>(SMART_REACH_LEFT_HAND_STORAGE_KEY, false);
+    }
   }
 
   // UIContent 首帧创建完成后才激活，确保传感器首个回调写入 AppStorage 时已有 UI 观察者。
@@ -53,6 +95,10 @@ export class HoldingHandManager {
   }
 
   private static start(): void {
+    // 开关关闭(默认)时不订阅传感器：零后台功耗，布局恒为默认右侧。
+    if (!HoldingHandManager.enabled) {
+      return;
+    }
     if (HoldingHandManager.subscribed || HoldingHandManager.unsupported) {
       return;
     }

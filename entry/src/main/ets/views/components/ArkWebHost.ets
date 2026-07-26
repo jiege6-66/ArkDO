@@ -4,6 +4,7 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
+import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimeTopicsPrefs';
 
 const LOG_TAG: string = '[ArkDO][ArkWebHost]';
 // 冷启动看门狗:宿主首屏在此时长内仍未就绪(onErrorReceive 也没抓到,例如慢速僵死连接),
@@ -27,6 +28,9 @@ export struct ArkWebHost {
   private bootWatchdogTimer: number = -1;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
+  // 「实时更新话题」开关。默认关⇒宿主加载完成时不注入长轮询；运行中翻转由 @Watch 即时启停。
+  @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeEnabledChanged')
+  private realtimeEnabled: boolean = false;
 
   aboutToAppear(): void {
     // 计时锚点③:宿主 webview 开始初始化并加载 BASE_URL。到 onPageEnd 就绪之间即为桥初始化耗时。
@@ -46,6 +50,16 @@ export struct ArkWebHost {
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
+    }
+  }
+
+  // 开关运行中翻转：开⇒注入长轮询(脚本幂等，controller 未就绪时 no-op，随后 onPageEnd 兜底)；
+  // 关⇒置停止标志让文档内循环自然退出。
+  private onRealtimeEnabledChanged(): void {
+    if (this.realtimeEnabled) {
+      this.bridge.startMessageBus();
+    } else {
+      this.bridge.stopMessageBus();
     }
   }
 
@@ -93,7 +107,10 @@ export struct ArkWebHost {
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
         this.bridge.markHostReady();
-        this.bridge.startMessageBus();
+        // 仅在「实时更新话题」开启时注入长轮询；关闭时(默认)彻底不启动，零后台联网。
+        if (this.realtimeEnabled) {
+          this.bridge.startMessageBus();
+        }
         this.syncSessionVersion();
         if (!this.hasNotifiedReady) {
           this.hasNotifiedReady = true;

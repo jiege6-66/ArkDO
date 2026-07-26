@@ -421,6 +421,25 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  // 与 startMessageBus 对称：置全局停止标志，让文档内正在跑的轮询循环下一轮自然退出。
+  // controller 未就绪时 no-op——此时本就没有注入过循环。
+  stopMessageBus(): void {
+    if (!this.controller) {
+      logNetwork('MessageBus stop skipped: controller not ready');
+      return;
+    }
+    try {
+      this.controller.runJavaScript(
+        'window.__arkdoMessageBusStopRequested = true; window.__arkdoMessageBusStarted = false; ' +
+        'window.__arkdoMessageBusGeneration = (window.__arkdoMessageBusGeneration || 0) + 1;'
+      ).catch(() => {
+        logNetwork('MessageBus stop injection failed');
+      });
+    } catch (error) {
+      logNetwork('MessageBus stop injection failed');
+    }
+  }
+
   private whenHostReady(): Promise<void> {
     if (!this.reloading) {
       return Promise.resolve();

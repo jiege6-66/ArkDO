@@ -7,6 +7,8 @@ import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/th
 import { DohManager, DohServer } from '../../services/network/DohManager';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortcutPrefs';
+import { RealtimeTopicsPrefs } from '../../services/realtime/RealtimeTopicsPrefs';
+import { HoldingHandManager } from '../../common/utils/HoldingHandManager';
 import { SitePrefs } from '../../services/site/SitePrefs';
 import { User } from '../../models/User';
 import { PushRegistrationResult, PushStatusResult } from '../../services/push/PushSubscriptionService';
@@ -81,6 +83,10 @@ export struct SettingsPage {
   @State private verboseLog: boolean = false;
   // 帖子页过盾快捷入口开关(默认关),进页时从 preferences 载入。
   @State private challengeShortcutEnabled: boolean = false;
+  // 实时更新话题开关(默认关),进页时从 preferences 载入。
+  @State private realtimeTopicsEnabled: boolean = false;
+  // 智感握姿开关(默认关),进页时从 HoldingHandManager 读取。
+  @State private smartReachEnabled: boolean = false;
   @State private isExportingLog: boolean = false;
   @State private pushEnabled: boolean = false;
   @State private pushRegistering: boolean = false;
@@ -149,6 +155,8 @@ export struct SettingsPage {
     this.readAppVersion();
     this.verboseLog = FileLogger.isVerbose();
     this.loadChallengeShortcutEnabled();
+    this.realtimeTopicsEnabled = RealtimeTopicsPrefs.isEnabled();
+    this.smartReachEnabled = HoldingHandManager.isEnabled();
     this.refreshLogSize();
     this.refreshDohSummary();
     this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
@@ -328,6 +336,10 @@ export struct SettingsPage {
         })
         this.HairlineInset()
         this.ChallengeShortcutCell()
+        this.HairlineInset()
+        this.RealtimeTopicsCell()
+        this.HairlineInset()
+        this.SmartReachCell()
         this.HairlineInset()
         this.PushNotificationCell()
         // 测试推送紧跟开关:刚开完就想验一下是否真能收到,这是最顺的动线。
@@ -619,6 +631,70 @@ export struct SettingsPage {
         .onChange((isOn: boolean) => {
           this.challengeShortcutEnabled = isOn;
           ChallengeShortcutPrefs.setEnabled(getContext(this), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+  }
+
+  @Builder
+  private RealtimeTopicsCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.dot_radiowaves_left_and_right'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('实时更新话题')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('首页实时接收新话题/更新提示，需保持后台联网')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.realtimeTopicsEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.realtimeTopicsEnabled = isOn;
+          RealtimeTopicsPrefs.setEnabled(getContext(this), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+  }
+
+  @Builder
+  private SmartReachCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('智感握姿')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('识别单手握持方向，把悬浮按钮移到顺手一侧')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.smartReachEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.smartReachEnabled = isOn;
+          HoldingHandManager.setEnabled(getContext(this), isOn);
         })
     }
     .width('100%')

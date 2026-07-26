@@ -38,6 +38,24 @@ export default function messageBusScriptTemplateTest() {
       expect(script).assertContain('setTimeout(start, 30000)');
     });
 
+    it('honorsExternalStopRequestFlag', 0, () => {
+      const script: string = buildMessageBusScript();
+
+      // 注入即清停止标志，让本次循环起跑。
+      expect(script).assertContain('window.__arkdoMessageBusStopRequested = false');
+      // start() 与 poll 循环都尊重外部停止请求。
+      expect(script).assertContain('if (window.__arkdoMessageBusStopRequested)');
+      expect(script).assertContain('while (state.running && !window.__arkdoMessageBusStopRequested');
+    });
+
+    it('killsSupersededLoopsViaGenerationToken', 0, () => {
+      const script: string = buildMessageBusScript();
+
+      // 每次 start 捕获并递增全局代次；poll 循环据此在被取代时退出，防止快速关→开双开。
+      expect(script).assertContain('window.__arkdoMessageBusGeneration = generation');
+      expect(script).assertContain('generation === window.__arkdoMessageBusGeneration');
+    });
+
     it('usesOfficialUuidClientIdAndReportsLifecycle', 0, () => {
       const script: string = buildMessageBusScript();
 

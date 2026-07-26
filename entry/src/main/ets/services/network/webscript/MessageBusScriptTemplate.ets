@@ -2,6 +2,8 @@
 // 避免占用一次性 JSON 请求通道，也不受原生请求超时限制。
 export function buildMessageBusScript(): string {
   return `(() => {
+      // 注入即代表"要运行"：清掉可能残留的停止请求，让本次循环正常起跑。
+      window.__arkdoMessageBusStopRequested = false;
       const emit = (event) => {
         try {
           window.ArkDOBridge.onBusEvent(JSON.stringify(event));
@@ -104,10 +106,18 @@ export function buildMessageBusScript(): string {
         }
       };
       const start = async () => {
+        // 覆盖 challenge 后 setTimeout(start,30000) 的延迟重启：期间被请求停止则不再起跑。
+        if (window.__arkdoMessageBusStopRequested) {
+          return;
+        }
         if (window.__arkdoMessageBusStarted) {
           return;
         }
         window.__arkdoMessageBusStarted = true;
+        // 本次循环的代次：stop 与新的 start 都会 bump 全局代次，旧循环据此在下一轮自然退出。
+        // 防止快速「关→开」时旧循环(仍在 await 中)因停止标志被重置而复活，造成双开。
+        const generation = (window.__arkdoMessageBusGeneration || 0) + 1;
+        window.__arkdoMessageBusGeneration = generation;
         const state = {
           clientId: uniqueId(),
           baseUrl: '',
@@ -140,7 +150,8 @@ export function buildMessageBusScript(): string {
         };
 
         const poll = async () => {
-          while (state.running) {
+          while (state.running && !window.__arkdoMessageBusStopRequested &&
+            generation === window.__arkdoMessageBusGeneration) {
             const body = new URLSearchParams();
             Object.keys(state.channels).forEach((channel) => {
               body.append(channel, String(state.channels[channel]));
@@ -242,6 +253,11 @@ export function buildMessageBusScript(): string {
               emit({ type: 'error', statusCode: 0, message: String(error) });
               await backoff();
             }
+          }
+          // 退出循环时复位启动标志，允许重新起跑；但仅当自己仍是最新代次——被更新的循环取代时
+          // 不能清掉接替者的运行标志。
+          if (generation === window.__arkdoMessageBusGeneration) {
+            window.__arkdoMessageBusStarted = false;
           }
         };
 

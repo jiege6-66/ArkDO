@@ -42,6 +42,7 @@ import {
 } from '../../services/home/HomeIncomingTopicsController';
 import { ComposerPage } from './ComposerPage';
 import { LoginGate } from '../../services/session/LoginGate';
+import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimeTopicsPrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 import { SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
@@ -175,6 +176,9 @@ export struct HomePage {
   private incomingInsertMeasuredIds: number[] = [];
   private incomingInsertMeasuredHeight: number = 0;
   private incomingInsertPlayed: boolean = false;
+  // 「实时更新话题」开关。关闭(默认)时忽略事件、隐藏提示；运行中翻转由 @Watch 中和残留态。
+  @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeTopicsEnabledChanged')
+  private realtimeTopicsEnabled: boolean = false;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
   private smartReachLeftHanded: boolean = false;
@@ -1087,7 +1091,20 @@ export struct HomePage {
     this.runPendingIncomingRefresh();
   }
 
+  // 实时开关翻转:关⇒中和所有 incoming 运行态并动画收起提示条(轮询由 ArkWebHost 侧停掉);
+  // 开⇒无需动作,事件恢复流入后按既有逻辑自然展示提示。
+  private onRealtimeTopicsEnabledChanged(): void {
+    if (!this.realtimeTopicsEnabled) {
+      this.clearIncomingTopicsState();
+      this.collapseIncomingTopicsPrompt();
+    }
+  }
+
   private handleMessageBusEvent(event: MessageBusEvent): void {
+    // 实时开关关闭时忽略一切事件(防御性：轮询循环此时也已停，订阅仍常驻)。
+    if (!this.realtimeTopicsEnabled) {
+      return;
+    }
     if (event.channel !== '/latest' || this.selectedCategory !== undefined ||
       this.selectedFeedKey !== FeedKey.LATEST) {
       return;

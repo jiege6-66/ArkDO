@@ -21,6 +21,7 @@ import { PushTokenUpdateEventBus } from '../services/push/PushTokenUpdateEventBu
 import { loadPushRelayConfigFromRawContent, PUSH_RELAY_CONFIG_RAWFILE } from '../services/push/PushRelayConfig';
 import { pushService } from '@kit.PushKit';
 import { HoldingHandManager } from '../common/utils/HoldingHandManager';
+import { RealtimeTopicsPrefs } from '../services/realtime/RealtimeTopicsPrefs';
 
 const DOMAIN = 0x0000;
 
@@ -40,7 +41,10 @@ export default class EntryAbility extends UIAbility {
     ThemeManager.init(this.context);
     // 响应式断点监听:决定平板横屏双栏 / 竖屏单栏,须早于首页渲染写入初始值。手机恒为非宽屏。
     BreakpointManager.init();
-    HoldingHandManager.init();
+    HoldingHandManager.init(this.context);
+    // 「实时更新话题」开关：读盘并种入 AppStorage 镜像，须早于宿主 webview 与首页挂载，
+    // 保证首个 onPageEnd 的注入决策拿到正确值(默认关⇒不注入长轮询)。
+    RealtimeTopicsPrefs.load(this.context);
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
     // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。
