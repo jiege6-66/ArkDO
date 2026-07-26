@@ -32,7 +32,6 @@ import {
   shouldShowIncomingTopicsPrompt
 } from '../components/HomeIncomingTopicsPrompt';
 import {
-  addIncomingTopicId,
   addIncomingTopicMessage,
   clearHomeIncomingTopics,
   createHomeIncomingTopicsState,
@@ -728,9 +727,6 @@ export struct HomePage {
       },
       onBackToTop: () => {
         this.scrollToTop();
-      },
-      onDebugLongPress: () => {
-        this.debugIncrementIncomingTopicsPrompt();
       }
     })
       .id('smartReachHomeFab')
@@ -1062,19 +1058,6 @@ export struct HomePage {
       topicId,
       event.messageId === undefined ? 0 : event.messageId
     );
-    if (previousCount === 0 && this.incomingTopicsPromptCount() > 0) {
-      this.expandIncomingTopicsPrompt();
-    }
-  }
-
-  // 临时调试入口:长按首页 FAB，把当前列表中的真实话题注入 incoming，便于验证增量请求和高亮。
-  private debugIncrementIncomingTopicsPrompt(): void {
-    if (this.topics.length === 0) {
-      return;
-    }
-    const topicIndex: number = Math.min(this.incomingTopicsPromptCount(), this.topics.length - 1);
-    const previousCount: number = this.incomingTopicsPromptCount();
-    this.incomingTopicsState = addIncomingTopicId(this.incomingTopicsState, this.topics[topicIndex].id);
     if (previousCount === 0 && this.incomingTopicsPromptCount() > 0) {
       this.expandIncomingTopicsPrompt();
     }

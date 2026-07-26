@@ -52,11 +52,6 @@ import {
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 import {
-  buildImmersiveFloatingActionButtonModifier,
-  buildImmersiveFloatingActionStyle,
-  IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
-} from '../../common/ui/ImmersiveActionBarStyle';
-import {
   SMART_REACH_ANIMATION_DURATION,
   SMART_REACH_LEFT_HAND_STORAGE_KEY,
   smartReachBottomAlignRules
@@ -670,8 +665,7 @@ export struct TopicDetailPage {
       RelativeContainer() {
         HdsActionBar({
           primaryButton: this.replyFabButton(),
-          actionBarStyle: this.replyFabStyle(),
-          blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
+          actionBarStyle: this.replyFabStyle()
         })
           .id('smartReachReplyFab')
           .alignRules(this.replyFabAlignRules)
@@ -1347,10 +1341,8 @@ export struct TopicDetailPage {
   private replyFabButton(): ActionBarButton {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
-      // 主题底色与同节点 backdropBlur(30) 配合：正文可以透光，但会先被模糊；
-      // 外层 HdsActionBar 保留官方交互与阴影能力。
-      backgroundColor: ColorMetrics.resourceColor($r('app.color.hds_floating_action_bg')),
-      buttonModifier: buildImmersiveFloatingActionButtonModifier(),
+      // 与首页 FAB 统一:不再叠加模糊材质背板,仅由 HDS 官方按钮承载位置、阴影与交互。
+      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
       iconSize: LengthMetrics.vp(22),
       // 品牌蓝仅用于图标，仍能明确表达“回复”这个主操作。
       iconFillColor: ColorMetrics.resourceColor(REPLY_BLUE),
@@ -1363,7 +1355,15 @@ export struct TopicDetailPage {
   }
 
   private replyFabStyle(): ActionBarStyle {
-    return buildImmersiveFloatingActionStyle();
+    return new ActionBarStyle({
+      height: LengthMetrics.vp(52),
+      backgroundBlurStyle: BlurStyle.NONE,
+      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
+      innerSpace: LengthMetrics.vp(0),
+      startSpace: LengthMetrics.vp(0),
+      endSpace: LengthMetrics.vp(0),
+      isHorizontal: true
+    });
   }
 
   private replyFabSymbolModifier(): SymbolGlyphModifier {

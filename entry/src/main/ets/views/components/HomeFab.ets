@@ -1,13 +1,6 @@
 import { ActionBarButton, ActionBarStyle, HdsActionBar } from '@kit.UIDesignKit';
 import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
-import {
-  buildImmersiveFloatingActionButtonModifier,
-  buildImmersiveFloatingActionStyle,
-  IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
-} from '../../common/ui/ImmersiveActionBarStyle';
-
-const HOME_FAB_BLUR_RADIUS: number = 20;
 
 @Component
 export struct HomeFab {
@@ -15,35 +8,23 @@ export struct HomeFab {
   @Prop showBackToTop: boolean = false;
   onCompose: () => void = () => {};
   onBackToTop: () => void = () => {};
-  onDebugLongPress: () => void = () => {};
 
   build() {
+    // 位置、阴影、点击态均由 HdsActionBar 官方按钮承载;之前额外叠的 Circle 会在按钮上方
+    // 露出一圈方框(形状阴影按矩形包围盒投射)+ 圆形描边,这里不再自绘背板。
     HdsActionBar({
       primaryButton: this.fabButton(),
-      actionBarStyle: this.fabStyle(),
-      blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_STRATEGY
+      actionBarStyle: this.fabStyle()
     })
     .width(52)
     .height(52)
-    // 临时调试入口:长按 FAB 递增首页 incoming 提示计数。MessageBus 接入后删除。
-    .priorityGesture(
-      LongPressGesture({ repeat: false, duration: 500 })
-        .onAction(() => {
-          this.onDebugLongPress();
-        })
-    )
   }
 
   private fabButton(): ActionBarButton {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
-      // 背景色必须落在按钮层：若只加到 ActionBar 外层，会被 HDS 模糊材质再次合成，
-      // 首页采用稍浅的背景模糊：正文仍不可辨认，但滚动时材质变化更轻。
-      // 不会像单纯透明背景一样仍能辨认；外层 ActionBar 保留官方交互与阴影能力。
-      backgroundColor: ColorMetrics.resourceColor($r('app.color.hds_floating_action_bg')),
-      buttonModifier: buildImmersiveFloatingActionButtonModifier(HOME_FAB_BLUR_RADIUS),
+      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
       iconSize: LengthMetrics.vp(22),
-      // 发帖/回复仍使用品牌蓝图标表达主操作，回顶态则沿用中性色降低视觉权重。
       iconFillColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_fg') : $r('app.color.fab_compose_bg')),
       baseIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.square_and_pencil'), $r('app.color.fab_compose_bg')),
       altIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.arrow_up_to_line'), $r('app.color.fab_top_fg')),
@@ -59,9 +40,16 @@ export struct HomeFab {
   }
 
   private fabStyle(): ActionBarStyle {
-    const style: ActionBarStyle = buildImmersiveFloatingActionStyle();
-    style.isPrimaryIconChanged = this.showBackToTop;
-    return style;
+    return new ActionBarStyle({
+      height: LengthMetrics.vp(52),
+      backgroundBlurStyle: BlurStyle.NONE,
+      backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
+      innerSpace: LengthMetrics.vp(0),
+      startSpace: LengthMetrics.vp(0),
+      endSpace: LengthMetrics.vp(0),
+      isHorizontal: true,
+      isPrimaryIconChanged: this.showBackToTop
+    });
   }
 
   private symbolModifier(icon: Resource, color: ResourceColor): SymbolGlyphModifier {
