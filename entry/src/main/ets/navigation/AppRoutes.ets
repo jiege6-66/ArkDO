@@ -3,6 +3,11 @@ export enum AppRouteName {
   PROFILE = 'profile',
   SETTINGS = 'settings',
   DOH_SETTINGS = 'dohSettings',
+  // 设置页拆出的分类子页:通知 / 网络与安全 / 实验性功能 / 诊断日志。
+  PUSH_SETTINGS = 'pushSettings',
+  NETWORK_SETTINGS = 'networkSettings',
+  LAB_SETTINGS = 'labSettings',
+  DIAGNOSTICS_SETTINGS = 'diagnosticsSettings',
   LEVEL_PROGRESS = 'levelProgress',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
@@ -54,6 +59,47 @@ export interface DohSettingsRouteParam {
 }
 
 export function buildDohSettingsRouteParam(source: string): DohSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+// 设置分类子页参数:均只留来源标记,页面数据各自从 prefs/服务读取。
+export interface PushSettingsRouteParam {
+  source: string;
+}
+
+export function buildPushSettingsRouteParam(source: string): PushSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+export interface NetworkSettingsRouteParam {
+  source: string;
+}
+
+export function buildNetworkSettingsRouteParam(source: string): NetworkSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+export interface LabSettingsRouteParam {
+  source: string;
+}
+
+export function buildLabSettingsRouteParam(source: string): LabSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+export interface DiagnosticsSettingsRouteParam {
+  source: string;
+}
+
+export function buildDiagnosticsSettingsRouteParam(source: string): DiagnosticsSettingsRouteParam {
   return {
     source: source
   };

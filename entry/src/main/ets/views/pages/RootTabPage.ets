@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -48,6 +48,10 @@ import { NotificationPage } from './NotificationPage';
 import { ProfilePage } from './ProfilePage';
 import { SettingsPage } from './SettingsPage';
 import { DohSettingsPage } from './DohSettingsPage';
+import { PushSettingsPage } from './PushSettingsPage';
+import { NetworkSettingsPage } from './NetworkSettingsPage';
+import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
+import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { BookmarksPage } from './BookmarksPage';
@@ -637,24 +641,41 @@ export struct RootTabPage {
     } else if (name === AppRouteName.SETTINGS) {
       NavDestination() {
         SettingsPage({
-          currentUser: this.currentUser ?? this.getAnonymousUser(),
-          isLoggedIn: this.currentUser !== undefined,
           onBack: () => {
             this.popNavigation();
           },
           onOpenWeb: (url: string, title?: string) => {
             this.openWebPage(url, title);
           },
-          onOpenDoh: () => {
-            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
-          },
-          onActiveChallenge: () => {
-            // 主动过盾:直接打开交互式 CF 验证 sheet(绕过协调器静默阶段),过盾后刷新会话。
-            this.openChallengeSheet();
-          },
           onOpenFeedback: () => {
             // 标题留空:详情页拉到帖子后自会填真实标题,不必在此硬编码一份易过期的副本。
             this.openTopicDetailById(AppConstants.FEEDBACK_TOPIC_ID);
+          },
+          onOpenPush: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PUSH_SETTINGS, buildPushSettingsRouteParam('settings')));
+          },
+          onOpenNetwork: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.NETWORK_SETTINGS, buildNetworkSettingsRouteParam('settings')));
+          },
+          onOpenExperimental: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.LAB_SETTINGS, buildLabSettingsRouteParam('settings')));
+          },
+          onOpenDiagnostics: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DIAGNOSTICS_SETTINGS, buildDiagnosticsSettingsRouteParam('settings')));
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.PUSH_SETTINGS) {
+      NavDestination() {
+        PushSettingsPage({
+          currentUser: this.currentUser ?? this.getAnonymousUser(),
+          isLoggedIn: this.currentUser !== undefined,
+          onBack: () => {
+            this.popNavigation();
           },
           onEnablePush: () => {
             return this.pushCoordinator.enable();
@@ -671,13 +692,48 @@ export struct RootTabPage {
         })
       }
       .hideTitleBar(true)
-      // 从 DoH 配置页 pop 回来时本页重新可见,自增 AppStorage 计数,让设置页 @StorageProp 重读
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.NETWORK_SETTINGS) {
+      NavDestination() {
+        NetworkSettingsPage({
+          onBack: () => {
+            this.popNavigation();
+          },
+          onOpenDoh: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DOH_SETTINGS, buildDohSettingsRouteParam('settings')));
+          },
+          onActiveChallenge: () => {
+            // 主动过盾:直接打开交互式 CF 验证 sheet(绕过协调器静默阶段),过盾后刷新会话。
+            this.openChallengeSheet();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // 从 DoH 配置页 pop 回来时本页重新可见,自增 AppStorage 计数,让网络页 @StorageProp 重读
       // DoH 摘要(此刻本页已在前台,变更能可靠触发重渲染;单纯 @Prop 不会流入 NavDestination 子树)。
       .onShown(() => {
         bumpTick(SETTINGS_DOH_TICK);
       })
-      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
-      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.LAB_SETTINGS) {
+      NavDestination() {
+        ExperimentalSettingsPage({
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.DIAGNOSTICS_SETTINGS) {
+      NavDestination() {
+        DiagnosticsSettingsPage({
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
       .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.DOH_SETTINGS) {
       NavDestination() {
