@@ -6,6 +6,8 @@ import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/L
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
 import { common } from '@kit.AbilityKit';
+import { connection } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import window from '@ohos.window';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { ImmersiveWindow } from '../../common/utils/ImmersiveWindow';
@@ -73,6 +75,9 @@ import { SCRIM } from '../../common/theme/Palette';
 
 const LOG_TAG: string = '[ArkDO][Root]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
+// 网络恢复触发宿主重载的冷却窗口:地铁出隧道等场景网络会短时间内反复抖动/多次上报,
+// 冷却避免每次抖动都重载一次宿主(重载较重)。只在宿主此前确实加载失败时才会触发。
+const NET_RECOVERY_RELOAD_COOLDOWN_MS: number = 15000;
 // ===== 首页左滑跟手拉出个人中心 =====
 // 松手判定阈值:滑过屏宽这个比例即补完,否则回弹。
 const SWIPE_COMMIT_RATIO: number = 0.4;
@@ -156,6 +161,14 @@ export struct RootTabPage {
   // 网络层自愈闸:长时间后台回前台后宿主 webview 连接/DNS 可能僵死(status=0 且非 CF 盾),
   // 首次遇到时重载一次宿主拿新连接并重查;每段失败只自愈一次,成功后复位,避免重载死循环。
   private hasSelfHealedNetwork: boolean = false;
+  // 宿主 webview 是否处于「加载失败」态。isArkWebReady 在失败路径也会被置真(为解锁 UI),不可作此判据;
+  // 用这个独立闸精确标记:onLoadFailed 置真、真就绪(onReady)复位。仅此态下网络恢复才重载宿主。
+  private hostLoadFailed: boolean = false;
+  // 网络恢复重载的上一次触发时刻,配合 NET_RECOVERY_RELOAD_COOLDOWN_MS 做冷却去抖。
+  private lastNetRecoveryReloadTs: number = 0;
+  // 网络状态监听:冷启动即离线时,宿主首屏加载失败后无任何自动重连入口(自愈仅一次、下拉刷新在
+  // 桥未就绪时提前返回)。监听网络恢复,失败态下重载一次宿主,把 MessageBus 与全站数据一起救回来。
+  private netConnection?: connection.NetConnection = undefined;
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private handledChallengeVersion: number = ChallengeEventBus.getCurrentVersion();
   private unsubscribeChallengeRequired?: () => void = undefined;
@@ -240,10 +253,12 @@ export struct RootTabPage {
     if (PushTokenUpdateEventBus.takePending()) {
       this.pushCoordinator.reconcile(true);
     }
+    this.startNetworkRecoveryWatch();
   }
 
   aboutToDisappear(): void {
     this.notificationService.stop();
+    this.stopNetworkRecoveryWatch();
     this.challengeRecovery?.dispose();
     if (this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired();
@@ -1376,6 +1391,8 @@ export struct RootTabPage {
 
   private handleArkWebReady(): void {
     this.isArkWebReady = true;
+    // 宿主真就绪:清掉失败态,网络恢复监听回到静默(仅在下次真失败时才再介入)。
+    this.hostLoadFailed = false;
     // 宿主真就绪:自增信号驱动首页重拉列表。看门狗/失败路径已提前把 isArkWebReady 置真、烧掉了
     // false→true 跳变,单靠 @Watch(isArkWebReady) 无法在真就绪时唤醒列表(会卡在失败态直到手点重试);
     // 这个独立计数专门补上「真就绪 → 自愈列表」这条路径。
@@ -1398,6 +1415,8 @@ export struct RootTabPage {
     }
     Log.i(`${LOG_TAG} ArkWeb host load failed: unblock UI so user can reach DoH settings`);
     this.isArkWebReady = true;
+    // 标记失败态:此后网络恢复(netAvailable / netCapabilitiesChange)会触发一次宿主重载自愈。
+    this.hostLoadFailed = true;
     this.checkCurrentUser();
   }
 
@@ -1426,6 +1445,66 @@ export struct RootTabPage {
   private reloadHostForDoh(): void {
     this.bridge.markHostReloading();
     SessionEventBus.notifySessionChanged();
+  }
+
+  // 订阅网络状态。netAvailable=连上新网络(飞行模式关/切 Wi-Fi);
+  // netCapabilitiesChange=网络能力变化(出隧道后内网校验通过,信号一直在但数据恢复的场景靠它)。
+  // 两者都只在宿主处于失败态时才触发重载,故正常在线启动/切网不受影响。
+  private startNetworkRecoveryWatch(): void {
+    if (this.netConnection) {
+      return;
+    }
+    try {
+      const netCon: connection.NetConnection = connection.createNetConnection();
+      netCon.on('netAvailable', (_netHandle: connection.NetHandle) => {
+        this.handleNetworkRecovered('netAvailable');
+      });
+      netCon.on('netCapabilitiesChange', (_info: connection.NetCapabilityInfo) => {
+        this.handleNetworkRecovered('netCapabilitiesChange');
+      });
+      netCon.register((error: BusinessError) => {
+        if (error) {
+          Log.i(`${LOG_TAG} net connection register failed code=${error.code}`);
+        }
+      });
+      this.netConnection = netCon;
+    } catch (error) {
+      Log.i(`${LOG_TAG} net connection watch start failed error=${JSON.stringify(error)}`);
+    }
+  }
+
+  private stopNetworkRecoveryWatch(): void {
+    if (!this.netConnection) {
+      return;
+    }
+    const netCon: connection.NetConnection = this.netConnection;
+    this.netConnection = undefined;
+    try {
+      netCon.unregister((error: BusinessError) => {
+        if (error) {
+          Log.i(`${LOG_TAG} net connection unregister failed code=${error.code}`);
+        }
+      });
+    } catch (error) {
+      Log.i(`${LOG_TAG} net connection watch stop failed error=${JSON.stringify(error)}`);
+    }
+  }
+
+  // 网络恢复:仅当宿主此前加载失败(冷启动即离线是唯一无自动重连入口的场景)才重载一次宿主,
+  // 一并把 MessageBus 与全站数据救回来。冷却窗口内的重复上报忽略,避免网络抖动反复重载。
+  private handleNetworkRecovered(source: string): void {
+    if (!this.hostLoadFailed) {
+      return;
+    }
+    const now: number = Date.now();
+    if (now - this.lastNetRecoveryReloadTs < NET_RECOVERY_RELOAD_COOLDOWN_MS) {
+      return;
+    }
+    this.lastNetRecoveryReloadTs = now;
+    // 网络已回,允许启动会话检查那条自愈重载后续再次生效。
+    this.hasSelfHealedNetwork = false;
+    Log.i(`${LOG_TAG} network recovered (${source}), reload host to recover failed cold start`);
+    this.reloadHostForDoh();
   }
 
   private handleAccountClick(): void {
