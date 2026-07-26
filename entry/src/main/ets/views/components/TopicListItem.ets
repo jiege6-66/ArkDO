@@ -5,6 +5,8 @@ import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
 import {
   incomingHighlightRemainingMs,
+  incomingInsertOpacity,
+  incomingInsertTranslateY,
   incomingTopicHighlightBackground
 } from './HomeIncomingTopicsPrompt';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
@@ -33,6 +35,11 @@ export struct TopicListItem {
   contentHorizontalPadding: number = 0;
   // 首页增量置顶高亮使用统一截止时间。懒加载条目晚创建时只播放剩余时长，过期后不重播。
   @Prop @Watch('onIncomingHighlightChanged') incomingHighlightUntil: number = 0;
+  @Prop incomingInsertProgress: number = 1;
+  @Prop incomingInsertDistance: number = 0;
+  @Prop incomingInsertFadeIn: boolean = false;
+  // 仅新增行回传自身实测高度，父组件累加得到插入块总高，用作旧行整块下滑的距离。
+  onIncomingInsertMeasured: (topicId: number, height: number) => void = () => {};
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
   @State private incomingHighlightActive: boolean = false;
   private incomingHighlightTimerId: number = -1;
@@ -207,6 +214,14 @@ export struct TopicListItem {
         }
       })
     }
+    .translate({ y: incomingInsertTranslateY(this.incomingInsertProgress, this.incomingInsertDistance) })
+    .opacity(incomingInsertOpacity(this.incomingInsertProgress, this.incomingInsertFadeIn))
+    .onAreaChange((_oldValue: Area, newValue: Area) => {
+      // translate/opacity 不改 area，仅布局时触发一次；只有新增行需要把高度回传给父组件。
+      if (this.incomingInsertFadeIn) {
+        this.onIncomingInsertMeasured(this.topic.id, Number(newValue.height));
+      }
+    })
   }
 
   private hasUnreadBadge(): boolean {

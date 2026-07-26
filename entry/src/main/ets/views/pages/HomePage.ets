@@ -97,7 +97,9 @@ const INCOMING_HIGHLIGHT_MS: number = 1500;
 const INCOMING_PROMPT_HEIGHT: number = 44;
 const INCOMING_PROMPT_ENTER_MS: number = 240;
 const INCOMING_PROMPT_EXIT_MS: number = 180;
-const INCOMING_INSERT_MS: number = 280;
+const INCOMING_INSERT_MS: number = 360;
+// 单条增量行的兜底高度(含分割线)。真机测到实际高度前先用它算揭示距离，避免第一帧跳变。
+const INCOMING_INSERT_ROW_ESTIMATE: number = 96;
 
 // 下一帧回调。setTimeout(0) 只是"下一个宏任务",跟"上一帧已渲染"没有任何保证关系,
 // 用它串瞬移→动画会时灵时不灵;postFrameCallback 才是真正的帧边界。
@@ -160,8 +162,19 @@ export struct HomePage {
   @State private incomingHighlightDeadline: number = 0;
   @State private incomingPromptHeight: number = 0;
   @State private incomingPromptOpacity: number = 0;
+  @State private incomingInsertActive: boolean = false;
+  @State private incomingInsertProgress: number = 1;
+  @State private incomingInsertingTopicIds: number[] = [];
+  // 揭示距离 = 本次插入块的总高度。所有非新增行统一按它上移再滑回，方向与幅度都对齐真实布局。
+  @State private incomingInsertRevealDistance: number = 0;
   private incomingRequestEpoch: number = 0;
   private incomingHighlightEpoch: number = 0;
+  private incomingInsertEpoch: number = 0;
+  private incomingInsertTimerId: number = -1;
+  // 起播前累计新增行实测高度；起播后冻结，避免中途改距离造成跳变。
+  private incomingInsertMeasuredIds: number[] = [];
+  private incomingInsertMeasuredHeight: number = 0;
+  private incomingInsertPlayed: boolean = false;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
   private smartReachLeftHanded: boolean = false;
@@ -279,6 +292,11 @@ export struct HomePage {
   }
 
   aboutToDisappear(): void {
+    this.incomingInsertEpoch++;
+    if (this.incomingInsertTimerId >= 0) {
+      clearTimeout(this.incomingInsertTimerId);
+      this.incomingInsertTimerId = -1;
+    }
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
       this.unsubscribeSessionChanged = undefined;
@@ -547,6 +565,14 @@ export struct HomePage {
               parentCategory: CategoryIndex.findParent(this.categories, topic.categoryId),
               contentHorizontalPadding: 12,
               incomingHighlightUntil: this.incomingTopicHighlightDeadline(topic.id),
+              incomingInsertProgress: this.incomingInsertProgress,
+              incomingInsertDistance: this.incomingInsertActive &&
+                this.incomingInsertingTopicIds.indexOf(topic.id) < 0 ? this.incomingInsertRevealDistance : 0,
+              incomingInsertFadeIn: this.incomingInsertActive &&
+                this.incomingInsertingTopicIds.indexOf(topic.id) >= 0,
+              onIncomingInsertMeasured: (topicId: number, height: number) => {
+                this.handleIncomingInsertMeasured(topicId, height);
+              },
               onTopicClick: (selectedTopic: Topic) => {
                 // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
                 selectedTopic.unseen = false;
@@ -560,7 +586,7 @@ export struct HomePage {
             // bookmarked 重建，已读状态则继续走 @Observed 精准更新，不必重建整行。
           }, (topic: Topic) =>
             `${this.topicListVersion}_${topic.id}_${topic.bookmarked === true ? 1 : 0}_` +
-              `${this.incomingTopicHighlightDeadline(topic.id)}`)
+              `${this.incomingTopicRenderToken(topic.id)}`)
 
           if (this.topics.length > 0) {
             ListItem() {
@@ -588,6 +614,7 @@ export struct HomePage {
         .position({ x: 0, y: -immersiveTitleBarContentTopSpacer(this.sysTopInset) })
         .clip(false)
         .scrollBar(BarState.Off)
+        .enableScrollInteraction(!this.incomingInsertActive)
         .padding({ bottom: 0 })
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .onReachEnd(() => {
@@ -1018,18 +1045,35 @@ export struct HomePage {
     this.showToast('登录后可查看该版块');
   }
 
-  private resetAndReload(): void {
+  // 中和所有 incoming / highlight / insert 运行态并清空提示计数(bump 各 epoch、清定时器、
+  // 复位插入与高亮字段、清 incomingTopicsState)。提示条的收起方式由调用方决定：换源整列重建走
+  // 瞬时归零；下拉刷新 / 关闭实时开关走动画收起。供 resetAndReload / handleManualRefresh /
+  // onRealtimeTopicsEnabledChanged 三处共用。
+  private clearIncomingTopicsState(): void {
     this.incomingRequestEpoch++;
-    this.isLoadingIncoming = false;
     this.incomingHighlightEpoch++;
+    this.incomingInsertEpoch++;
+    if (this.incomingInsertTimerId >= 0) {
+      clearTimeout(this.incomingInsertTimerId);
+      this.incomingInsertTimerId = -1;
+    }
+    this.isLoadingIncoming = false;
+    this.pendingIncomingRefresh = false;
     this.incomingHighlightedTopicIds = [];
     this.incomingHighlightDeadline = 0;
+    this.incomingInsertActive = false;
+    this.incomingInsertProgress = 1;
+    this.incomingInsertingTopicIds = [];
+    this.incomingInsertRevealDistance = 0;
+    this.incomingTopicsState = clearHomeIncomingTopics(this.incomingTopicsState);
+  }
+
+  private resetAndReload(): void {
+    this.clearIncomingTopicsState();
     this.incomingPromptHeight = 0;
     this.incomingPromptOpacity = 0;
     this.topics = [];
     this.topicDataSource.reset([]);
-    this.incomingTopicsState = clearHomeIncomingTopics(this.incomingTopicsState);
-    this.pendingIncomingRefresh = false;
     this.currentPage = 0;
     this.hasMore = true;
     this.loadFailed = false;
@@ -1079,10 +1123,7 @@ export struct HomePage {
 
   private handleManualRefresh(): void {
     // 下拉刷新代表用户主动查看最新列表。先丢弃这一刻之前的提示；刷新期间的新消息会写入新状态。
-    this.incomingRequestEpoch++;
-    this.isLoadingIncoming = false;
-    this.pendingIncomingRefresh = false;
-    this.incomingTopicsState = clearHomeIncomingTopics(this.incomingTopicsState);
+    this.clearIncomingTopicsState();
     this.collapseIncomingTopicsPrompt();
     this.refreshLatestTopics();
   }
@@ -1267,36 +1308,107 @@ export struct HomePage {
     if (requestEpoch !== this.incomingRequestEpoch) {
       return;
     }
-    this.isLoadingIncoming = false;
 
     if (result.success && result.data) {
       const incomingTopics: Topic[] = result.data;
       if (incomingTopics.length === 0) {
+        this.isLoadingIncoming = false;
         Log.i(`${LOG_TAG} incoming topics fetch returned empty requested=${snapshot.topicIds.length}`);
         this.showToast('暂未获取到新话题，请稍后重试');
         this.runPendingSessionRefresh();
         return;
       }
-      this.startIncomingHighlight(incomingTopics);
-      this.getUIContext().animateTo({ duration: INCOMING_INSERT_MS, curve: Curve.EaseOut }, () => {
-        this.topicDataSource.prependOrReplace(incomingTopics);
-        this.topics = this.topicDataSource.getAll();
-        this.incomingTopicsState = removeIncomingTopicsSnapshot(this.incomingTopicsState, snapshot);
-        if (this.incomingTopicsPromptCount() === 0) {
-          this.incomingPromptHeight = 0;
-          this.incomingPromptOpacity = 0;
-        }
-      });
-      Log.i(`${LOG_TAG} incoming topics fetch completed requested=${snapshot.topicIds.length} ` +
-        `received=${incomingTopics.length} remaining=${this.incomingTopicsPromptCount()}`);
-      this.runPendingSessionRefresh();
+      this.stageIncomingTopicsInsert(snapshot, incomingTopics);
       return;
     }
 
+    this.isLoadingIncoming = false;
     Log.i(`${LOG_TAG} incoming topics fetch failed status=${result.statusCode} ` +
       `error=${result.error?.message ?? ''}`);
     this.showToast('加载新话题失败，请重试');
     this.runPendingSessionRefresh();
+  }
+
+  private stageIncomingTopicsInsert(snapshot: HomeIncomingTopicsState, incomingTopics: Topic[]): void {
+    const insertTopicIds: number[] = [];
+    for (let index: number = 0; index < incomingTopics.length; index++) {
+      if (insertTopicIds.indexOf(incomingTopics[index].id) < 0) {
+        insertTopicIds.push(incomingTopics[index].id);
+      }
+    }
+    const insertEpoch: number = ++this.incomingInsertEpoch;
+    this.incomingInsertingTopicIds = insertTopicIds;
+    this.incomingInsertMeasuredIds = [];
+    this.incomingInsertMeasuredHeight = 0;
+    this.incomingInsertPlayed = false;
+    // 兜底距离先按条数估算；下一帧起播前若测到真实高度会替换它，两种情况都不跳。
+    this.incomingInsertRevealDistance = insertTopicIds.length * INCOMING_INSERT_ROW_ESTIMATE;
+    this.incomingInsertActive = true;
+    this.incomingInsertProgress = 0;
+    this.topicDataSource.prependOrReplace(incomingTopics);
+    this.topics = this.topicDataSource.getAll();
+
+    // 先让“新布局 + 负偏移”完整落一帧，下一帧再收提示并归零偏移，方向才稳定为向下。
+    this.getUIContext().postFrameCallback(new NextFrameTask(() => {
+      if (insertEpoch !== this.incomingInsertEpoch) {
+        return;
+      }
+      this.playIncomingTopicsInsert(snapshot, incomingTopics, insertEpoch);
+    }));
+  }
+
+  private playIncomingTopicsInsert(
+    snapshot: HomeIncomingTopicsState,
+    incomingTopics: Topic[],
+    insertEpoch: number
+  ): void {
+    // 冻结揭示距离：起播后再来的测量回调不得改值，否则动画中途会瞬移。
+    this.incomingInsertPlayed = true;
+    this.getUIContext().animateTo({ duration: INCOMING_INSERT_MS, curve: Curve.EaseOut }, () => {
+      this.incomingInsertProgress = 1;
+      this.incomingTopicsState = removeIncomingTopicsSnapshot(this.incomingTopicsState, snapshot);
+      if (this.incomingTopicsPromptCount() === 0) {
+        this.incomingPromptHeight = 0;
+        this.incomingPromptOpacity = 0;
+      }
+    });
+    this.incomingInsertTimerId = setTimeout(() => {
+      if (insertEpoch !== this.incomingInsertEpoch) {
+        return;
+      }
+      this.incomingInsertTimerId = -1;
+      this.startIncomingHighlight(incomingTopics);
+      this.incomingInsertActive = false;
+      this.incomingInsertingTopicIds = [];
+      this.incomingInsertRevealDistance = 0;
+      this.isLoadingIncoming = false;
+      Log.i(`${LOG_TAG} incoming topics fetch completed requested=${snapshot.topicIds.length} ` +
+        `received=${incomingTopics.length} remaining=${this.incomingTopicsPromptCount()}`);
+      this.runPendingSessionRefresh();
+      this.runPendingIncomingRefresh();
+    }, INCOMING_INSERT_MS);
+  }
+
+  // 新增行 onAreaChange 上报自身高度。累计到全部到齐即用实测总高度覆盖兜底估算，让旧行整块下滑不留缝。
+  private handleIncomingInsertMeasured(topicId: number, height: number): void {
+    if (!this.incomingInsertActive || this.incomingInsertPlayed) {
+      return;
+    }
+    if (this.incomingInsertingTopicIds.indexOf(topicId) < 0) {
+      return;
+    }
+    if (this.incomingInsertMeasuredIds.indexOf(topicId) >= 0) {
+      return;
+    }
+    const measured: number = Number(height);
+    if (!(measured > 0)) {
+      return;
+    }
+    this.incomingInsertMeasuredIds.push(topicId);
+    this.incomingInsertMeasuredHeight += measured;
+    if (this.incomingInsertMeasuredIds.length >= this.incomingInsertingTopicIds.length) {
+      this.incomingInsertRevealDistance = this.incomingInsertMeasuredHeight;
+    }
   }
 
   private startIncomingHighlight(topics: Topic[]): void {
@@ -1324,6 +1436,13 @@ export struct HomePage {
 
   private incomingTopicHighlightDeadline(topicId: number): number {
     return this.incomingHighlightedTopicIds.indexOf(topicId) >= 0 ? this.incomingHighlightDeadline : 0;
+  }
+
+  private incomingTopicRenderToken(topicId: number): string {
+    if (this.incomingInsertingTopicIds.indexOf(topicId) >= 0) {
+      return `insert_${this.incomingInsertEpoch}`;
+    }
+    return `highlight_${this.incomingTopicHighlightDeadline(topicId)}`;
   }
 
   private handleTopicReadStateChanged(state: TopicReadState): void {
