@@ -1,144 +1,19 @@
-import { AppConstants } from '../../common/constants/AppConstants';
 import { TopicCategory } from '../../models/Topic';
-import { findClosingTag, findOpenTag, findTagEnd, getTagName, isBlockTag, isClosingTag, isHeadingTag,
-  isSelfClosingTag, shouldReadChildrenAsPlainText } from './html/HtmlLexer';
+import { findClosingTag, findOpenTag, findTagEnd, getTagName, isBlockTag, isClosingTag,
+  isHeadingTag } from './html/HtmlLexer';
 import { bestSrcFromTag, extractAttr, hasClass, hasClassContaining, parsePositiveNumber } from './html/HtmlAttrs';
+import { RichBlock, RichBlockType, RichInlineNode, RichInlineType, RichListItem, RichTableCell,
+  RichTableRow } from './RichContentTypes';
+import { hasVisibleInlines, parseInlines, trimLeadingEmptyText } from './InlineHtmlParser';
+import { cssVar, decodeHtmlEntities, extractCodeLanguage, extractElementInner, firstAnchorHref,
+  firstAnchorText, firstElementInner, firstElementInnerByClass, firstImgWithClass, firstOpenTagByClass,
+  firstTagMatch, hostFromUrl, htmlToPlainText, lastSvgWithId, resolveUrl,
+  stripTagsKeepingLines } from './HtmlContentUtils';
 
 // 行内小图(emoji/小图标)的尺寸上限,与渲染层 PostRichContent.SMALL_IMAGE_MAX 对齐:
 // 宽或高超过它的独立 <img>(或动图)视为整幅内容图,提升为 IMAGE 块,不再压成 18px 行内图。
 const INLINE_IMAGE_MAX: number = 48;
 
-// 站内 emoji 图片的相对路径前缀,resolveUrl 据此把它们挂 CDN 而非主站。
-const EMOJI_PATH_PREFIX: string = '/images/emoji/';
-
-export enum RichBlockType {
-  PARAGRAPH = 'paragraph',
-  HEADING = 'heading',
-  QUOTE = 'quote',
-  // Discourse 话题/帖子引用(<aside class="quote" data-topic data-post>,带 quote-title__text-content 头部):
-  // 头部含头像 + 话题标题链接 + 分类徽章,正文是被引用楼的截断预览。渲染成带头部的引用卡,右上角可展开拉全文。
-  TOPIC_QUOTE = 'topic_quote',
-  // Obsidian/Discourse callout(discourse-quote-callouts 主题组件):首段以 [!type]± 开头的
-  // blockquote → 彩色可折叠提示框。type 决定图标/主色,+ 默认展开、- 默认折叠、无后缀不可折叠。
-  CALLOUT = 'callout',
-  CODE = 'code',
-  IMAGE = 'image',
-  LIST = 'list',
-  DISCLOSURE = 'disclosure',
-  // discourse-spoiler-alert 块级剧透:<div class="spoiler">…</div>,揭示前整块遮蔽。
-  SPOILER = 'spoiler',
-  DIVIDER = 'divider',
-  POLL = 'poll',
-  ONEBOX = 'onebox',
-  // <audio>/<video>:原生播放器就地播放。src 为解析后的媒体 URL(和图片同源 /uploads/),
-  // 直接喂给 AVPlayer / Video 组件流式播放。
-  AUDIO = 'audio',
-  VIDEO = 'video',
-  // discourse-math 块级公式(<div class="math">):text 存裸 LaTeX(displayMode=true),
-  // 渲染层交离屏 KaTeX 引擎出图后居中显示。
-  MATH = 'math',
-  // Markdown 表格(<table>,Discourse 常裹一层 <div class="md-table">):抽成行/单元格结构,
-  // 渲染层用等宽列对齐 + 横向 Scroll,过宽时左右滑动而不撑破栏宽。
-  TABLE = 'table',
-  UNSUPPORTED = 'unsupported'
-}
-
-export enum RichInlineType {
-  TEXT = 'text',
-  LINK = 'link',
-  CODE = 'code',
-  IMAGE = 'image',
-  // discourse-math 行内公式(<span class="math">):text 存裸 LaTeX(displayMode=false),
-  // 渲染层出图后以 ImageSpan 基线内联,保证周围文字仍走原生 Text、字体字号与全帖一致。
-  MATH = 'math',
-  LINE_BREAK = 'line_break'
-}
-
-export interface RichInlineNode {
-  type: RichInlineType;
-  text: string;
-  href?: string;
-  src?: string;
-  alt?: string;
-  bold?: boolean;
-  italic?: boolean;
-  code?: boolean;
-  // 附件下载链接(Discourse <a class="attachment"> 或指向 /uploads/ 的链接):渲染时前置下载图标,点击触发原生下载。
-  attachment?: boolean;
-  // 行内剧透(<span class="spoiler">):揭示前渲染为涂抹条,点击后显示。
-  spoiler?: boolean;
-  // 段落分隔用的换行(仅 LINE_BREAK):由 mergeAdjacentParagraphs 在合并的相邻段落之间插入,
-  // 渲染成双换行空行营造段距。与 <br> 普通换行区分,后者仍是单换行。
-  paragraphBreak?: boolean;
-}
-
-export interface RichListItem {
-  inlines: RichInlineNode[];
-  // 列表项内含块级图(lightbox/大图)时改用 blocks:文字成段落、图片各自成块级 IMAGE,
-  // 避免大图退化成 18px 行内小图。纯文字项仍只用 inlines(blocks 缺省)。
-  blocks?: RichBlock[];
-}
-
-// TABLE 单元格:行内节点序列 + 是否表头(<th> 或位于 <thead> 内)。
-export interface RichTableCell {
-  inlines: RichInlineNode[];
-  header?: boolean;
-}
-
-export interface RichTableRow {
-  cells: RichTableCell[];
-  // 整行是否表头行(全部单元格来自 thead / 全为 th)。渲染表头行加底色与粗体。
-  header?: boolean;
-}
-
-export interface RichBlock {
-  type: RichBlockType;
-  inlines?: RichInlineNode[];
-  blocks?: RichBlock[];
-  items?: RichListItem[];
-  // TABLE 块:按出现顺序的行,每行含若干单元格。
-  tableRows?: RichTableRow[];
-  text?: string;
-  title?: string;
-  unsupportedKind?: string;
-  language?: string;
-  src?: string;
-  alt?: string;
-  width?: number;
-  height?: number;
-  href?: string;
-  // AUDIO/VIDEO 块:媒体 MIME(如 audio/mp4、video/mp4),来自 <source type>,供播放器与降级判断参考。
-  mediaType?: string;
-  ordered?: boolean;
-  level?: number;
-  // POLL 块:data-poll-name,用于在正文正确位置占位、并按名字关联 TopicPost.polls 的动态数据。
-  pollName?: string;
-  // ONEBOX(链接预览卡片)字段:域名/站点图标/描述/缩略图;title 复用上面的 title,跳转 URL 复用 href。
-  domain?: string;
-  faviconUrl?: string;
-  description?: string;
-  thumbnailUrl?: string;
-  // CALLOUT 块字段:calloutKind 归一后的类型(用于无标题时回退成类型名);calloutColor 主色(标题+图标);
-  // calloutIcon FontAwesome 图标 id(对应 rawfile/fa_icons);collapsible 是否可折叠;
-  // defaultExpanded 折叠态默认(+→true、-→false);titleInlines 标题段行内节点(可含粗体/链接);blocks 为正文子块。
-  calloutKind?: string;
-  calloutColor?: string;
-  calloutIcon?: string;
-  collapsible?: boolean;
-  defaultExpanded?: boolean;
-  titleInlines?: RichInlineNode[];
-  // TOPIC_QUOTE 头部数据:头像 URL / 作者用户名 / 话题标题 / 目标 topic 与楼号(供展开按 by_number 拉全文)/
-  // 分类徽章。折叠预览的 cooked 复用 text,话题链接复用 href。
-  quoteAvatarUrl?: string;
-  quoteAuthor?: string;
-  quoteTitle?: string;
-  quoteTopicId?: number;
-  quotePostNumber?: number;
-  quoteCategory?: TopicCategory;
-  // 同帖回复引用(title 只有「显示名:」无话题链接):跳转是在本帖内往上定位到那一楼 → 用 arrow-up;
-  // 跨帖引用(有话题链接)则是打开另一个帖子 → 用 chevron-right。
-  quoteIsReply?: boolean;
-}
 
 // callout 类型别名 → 归一类型(与 discourse-quote-callouts settings.yml 的 alias 一致)。
 const CALLOUT_ALIASES: Map<string, string> = ((): Map<string, string> => {
@@ -197,52 +72,6 @@ interface CalloutStyle {
 // 非字母(如 [!名称])不识别,原样退回普通引用。可选 +/- 折叠标记,后随可选一个空格。
 const CALLOUT_MARKER: RegExp = /^\s*\[!([a-zA-Z]+)\]([+-]?)\s?/;
 
-class InlineState {
-  bold: number = 0;
-  italic: number = 0;
-  code: number = 0;
-  hrefStack: string[] = [];
-  // 与 hrefStack 同步入栈:当前链接是否为附件下载链接。
-  attachmentStack: boolean[] = [];
-  // 每遇到一个 <span> 就入栈(是否带 spoiler class);</span> 出栈。
-  // 闭合标签不带 class,只能整体跟踪 span 嵌套才能正确配对。
-  spanSpoilerStack: boolean[] = [];
-
-  clone(): InlineState {
-    const state: InlineState = new InlineState();
-    state.bold = this.bold;
-    state.italic = this.italic;
-    state.code = this.code;
-    state.hrefStack = this.hrefStack.slice();
-    state.attachmentStack = this.attachmentStack.slice();
-    state.spanSpoilerStack = this.spanSpoilerStack.slice();
-    return state;
-  }
-
-  currentHref(): string {
-    if (this.hrefStack.length === 0) {
-      return '';
-    }
-    return this.hrefStack[this.hrefStack.length - 1];
-  }
-
-  currentAttachment(): boolean {
-    if (this.attachmentStack.length === 0) {
-      return false;
-    }
-    return this.attachmentStack[this.attachmentStack.length - 1];
-  }
-
-  currentSpoiler(): boolean {
-    for (let index: number = 0; index < this.spanSpoilerStack.length; index++) {
-      if (this.spanSpoilerStack[index]) {
-        return true;
-      }
-    }
-    return false;
-  }
-}
-
 interface SummaryInfo {
   title: string;
   contentHtml: string;
@@ -284,13 +113,13 @@ export class CookedHtmlParser {
   }
 
   static toPlainText(html: string): string {
-    return CookedHtmlParser.normalizeText(CookedHtmlParser.stripTagsKeepingLines(html));
+    return htmlToPlainText(html);
   }
 
   // 把一段(通常是单段落的)HTML 解析为行内节点(文字 + 行内 emoji 图片等),
   // 供 boost 气泡这类需要「文字与 emoji 混排」的短内容行内渲染。外层 <p>/<div> 会被忽略。
   static toInlineNodes(html: string): RichInlineNode[] {
-    return CookedHtmlParser.parseInlines(html ? html : '');
+    return parseInlines(html ? html : '');
   }
 
   private static parseBlocks(html: string): RichBlock[] {
@@ -299,9 +128,9 @@ export class CookedHtmlParser {
     let pendingInlineHtml: string = '';
 
     const flushPendingInline = (): void => {
-      const inlines: RichInlineNode[] = CookedHtmlParser.parseInlines(pendingInlineHtml);
+      const inlines: RichInlineNode[] = parseInlines(pendingInlineHtml);
       pendingInlineHtml = '';
-      if (CookedHtmlParser.hasVisibleInlines(inlines)) {
+      if (hasVisibleInlines(inlines)) {
         blocks.push({
           type: RichBlockType.PARAGRAPH,
           inlines
@@ -417,7 +246,7 @@ export class CookedHtmlParser {
       return [{
         type: RichBlockType.HEADING,
         level: Number(tagName.substring(1)),
-        inlines: CookedHtmlParser.parseInlines(innerHtml)
+        inlines: parseInlines(innerHtml)
       }];
     }
 
@@ -501,7 +330,7 @@ export class CookedHtmlParser {
     // discourse-math 块级公式:<div class="math">裸 LaTeX</div>。API 只给源码,排版交渲染层的
     // 离屏引擎;这里只抽出 LaTeX 存进 MATH 块的 text。须在 detectUnsupportedKind 之前拦截。
     if (hasClass(openTag, 'math')) {
-      const latex: string = CookedHtmlParser.toPlainText(innerHtml);
+      const latex: string = htmlToPlainText(innerHtml);
       return latex.length > 0 ? [{ type: RichBlockType.MATH, text: latex }] : [];
     }
 
@@ -523,13 +352,13 @@ export class CookedHtmlParser {
       if (imageBlocks.length > 0) {
         return imageBlocks;
       }
-      const text: string = CookedHtmlParser.toPlainText(innerHtml);
+      const text: string = htmlToPlainText(innerHtml);
       if (text.length > 0) {
         return CookedHtmlParser.mixedBlocks(innerHtml);
       }
     }
 
-    const fallbackText: string = CookedHtmlParser.toPlainText(innerHtml);
+    const fallbackText: string = htmlToPlainText(innerHtml);
     if (fallbackText.length === 0) {
       return [];
     }
@@ -540,30 +369,14 @@ export class CookedHtmlParser {
   }
 
   private static paragraphBlocks(html: string): RichBlock[] {
-    const inlines: RichInlineNode[] = CookedHtmlParser.parseInlines(html);
-    if (!CookedHtmlParser.hasVisibleInlines(inlines)) {
+    const inlines: RichInlineNode[] = parseInlines(html);
+    if (!hasVisibleInlines(inlines)) {
       return [];
     }
     return [{
       type: RichBlockType.PARAGRAPH,
       inlines
     }];
-  }
-
-  private static hasVisibleInlines(inlines: RichInlineNode[]): boolean {
-    for (let index: number = 0; index < inlines.length; index++) {
-      const token: RichInlineNode = inlines[index];
-      if (token.type === RichInlineType.IMAGE || token.type === RichInlineType.LINK) {
-        return true;
-      }
-      if (token.type === RichInlineType.LINE_BREAK) {
-        continue;
-      }
-      if (token.text.trim().length > 0) {
-        return true;
-      }
-    }
-    return false;
   }
 
   // 解析 Discourse 话题引用 <aside class="quote" data-topic data-post> 的头部与预览。
@@ -576,17 +389,17 @@ export class CookedHtmlParser {
     const postNumber: number = parsePositiveNumber(extractAttr(openTag, 'data-post'));
 
     // 头像:title 区里 class 含 avatar 的 <img>。
-    const avatarTag: string = CookedHtmlParser.firstImgWithClass(innerHtml, 'avatar');
+    const avatarTag: string = firstImgWithClass(innerHtml, 'avatar');
     const avatarUrl: string = avatarTag.length > 0
-      ? CookedHtmlParser.resolveUrl(extractAttr(avatarTag, 'src')) : '';
+      ? resolveUrl(extractAttr(avatarTag, 'src')) : '';
 
     // 标题 + 链接:优先取新式 quote-title__text-content;取不到再退回老式 <div class="title"> 的内部。
-    let titleContent: string = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'quote-title__text-content');
+    let titleContent: string = firstElementInnerByClass(innerHtml, 'quote-title__text-content');
     if (titleContent.length === 0) {
-      titleContent = CookedHtmlParser.firstElementInnerByClass(innerHtml, 'title');
+      titleContent = firstElementInnerByClass(innerHtml, 'title');
     }
     // 用户名(头像身份,兼作缺显示名时的兜底标题)。
-    const username: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(openTag, 'data-username'));
+    const username: string = decodeHtmlEntities(extractAttr(openTag, 'data-username'));
 
     // 标题文字取第一个 <a>(话题链接,class 无 badge)的内部;href 取该开标签的 href 属性。
     const titleAnchor: string = CookedHtmlParser.firstTopicTitleAnchor(titleContent);
@@ -596,26 +409,26 @@ export class CookedHtmlParser {
     let isReply: boolean = false;
     if (titleAnchor.length > 0) {
       // 跨话题引用:title 里带话题链接 → 标题取链接文字、href 取链接、分类取徽章。
-      title = CookedHtmlParser.decodeHtmlEntities(
-        CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInner(titleContent, 'a')));
-      href = CookedHtmlParser.resolveUrl(extractAttr(titleAnchor, 'href'));
+      title = decodeHtmlEntities(
+        htmlToPlainText(firstElementInner(titleContent, 'a')));
+      href = resolveUrl(extractAttr(titleAnchor, 'href'));
       // 分类徽章:badge-category span 上带 data-category-id + --category-badge-* 变量 + 名字 + 图标 svg。
       category = CookedHtmlParser.categoryFromBadge(titleContent);
     } else {
       isReply = true;
       // 同帖回复引用:title 只有「显示名:」无链接 → 用 aside 属性组卡。
       // 标题取 data-display-name(缺则退 data-username);跳转按 data-topic/data-post 自拼站内帖链接。
-      let displayName: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(openTag, 'data-display-name'));
+      let displayName: string = decodeHtmlEntities(extractAttr(openTag, 'data-display-name'));
       if (displayName.length === 0) {
         displayName = username;
       }
       title = displayName;
-      href = CookedHtmlParser.resolveUrl(`/t/topic/${topicId}/${postNumber > 0 ? postNumber : 1}`);
+      href = resolveUrl(`/t/topic/${topicId}/${postNumber > 0 ? postNumber : 1}`);
       category = undefined;
     }
 
     // 正文预览:第一个 <blockquote> 的内部 HTML(截断预览),交渲染层内嵌解析。
-    const preview: string = CookedHtmlParser.firstElementInner(innerHtml, 'blockquote');
+    const preview: string = firstElementInner(innerHtml, 'blockquote');
 
     const block: RichBlock = {
       type: RichBlockType.TOPIC_QUOTE,
@@ -671,23 +484,23 @@ export class CookedHtmlParser {
 
   // 从 badge-category__wrapper 里的 <span class="badge-category" ...> 抽出分类。缺 id/名字则返回 undefined。
   private static categoryFromBadge(titleContent: string): TopicCategory | undefined {
-    const badgeInner: string = CookedHtmlParser.firstElementInnerByClass(titleContent, 'badge-category__wrapper');
+    const badgeInner: string = firstElementInnerByClass(titleContent, 'badge-category__wrapper');
     if (badgeInner.length === 0) {
       return undefined;
     }
-    const spanOpen: string = CookedHtmlParser.firstOpenTagByClass(badgeInner, 'badge-category');
+    const spanOpen: string = firstOpenTagByClass(badgeInner, 'badge-category');
     const idText: string = extractAttr(spanOpen, 'data-category-id');
     const id: number = parsePositiveNumber(idText);
-    const name: string = CookedHtmlParser.decodeHtmlEntities(
-      CookedHtmlParser.toPlainText(CookedHtmlParser.firstElementInnerByClass(badgeInner, 'badge-category__name')));
+    const name: string = decodeHtmlEntities(
+      htmlToPlainText(firstElementInnerByClass(badgeInner, 'badge-category__name')));
     if (name.length === 0) {
       return undefined;
     }
     const style: string = extractAttr(spanOpen, 'style');
-    const color: string = CookedHtmlParser.cssVar(style, '--category-badge-color');
-    const textColor: string = CookedHtmlParser.cssVar(style, '--category-badge-text-color');
+    const color: string = cssVar(style, '--category-badge-color');
+    const textColor: string = cssVar(style, '--category-badge-text-color');
     // 图标:徽章内最内层 <svg id="xxx">(外层是 fa 包装 svg)。取 id 作图标名交 getCategoryIcon 归一。
-    const iconId: string = extractAttr(CookedHtmlParser.lastSvgWithId(badgeInner), 'id');
+    const iconId: string = extractAttr(lastSvgWithId(badgeInner), 'id');
 
     const category: TopicCategory = {
       id: id > 0 ? id : 0,
@@ -699,125 +512,6 @@ export class CookedHtmlParser {
       category.icon = iconId;
     }
     return category;
-  }
-
-  // 取 style 里某个 CSS 变量的值(如 --category-badge-color: #9cb6c4)。
-  private static cssVar(style: string, name: string): string {
-    const pattern: RegExp = new RegExp(`${name}\\s*:\\s*([^;]+)`, 'i');
-    const match: RegExpMatchArray | null = style.match(pattern);
-    return match ? match[1].trim() : '';
-  }
-
-  // 第一个 class 含指定关键字的 <img> 的完整标签。
-  private static firstImgWithClass(html: string, keyword: string): string {
-    const lower: string = html.toLowerCase();
-    let cursor: number = 0;
-    while (cursor < html.length) {
-      const start: number = lower.indexOf('<img', cursor);
-      if (start < 0) {
-        return '';
-      }
-      const end: number = findTagEnd(html, start);
-      if (end < 0) {
-        return '';
-      }
-      const tag: string = html.substring(start, end + 1);
-      if (hasClassContaining(tag, keyword)) {
-        return tag;
-      }
-      cursor = end + 1;
-    }
-    return '';
-  }
-
-  // 最靠后的带 id 的 <svg>(话题分类徽章图标外层是 fa 包装 svg,真正图标是内层 svg[id])。
-  private static lastSvgWithId(html: string): string {
-    const lower: string = html.toLowerCase();
-    let cursor: number = 0;
-    let found: string = '';
-    while (cursor < html.length) {
-      const start: number = lower.indexOf('<svg', cursor);
-      if (start < 0) {
-        break;
-      }
-      const end: number = findTagEnd(html, start);
-      if (end < 0) {
-        break;
-      }
-      const tag: string = html.substring(start, end + 1);
-      if (extractAttr(tag, 'id').length > 0) {
-        found = tag;
-      }
-      cursor = end + 1;
-    }
-    return found;
-  }
-
-  // 第一个 class 含 keyword 的元素的开标签(用于取其属性,如 badge-category span 的 style/data-*)。
-  private static firstOpenTagByClass(html: string, keyword: string): string {
-    const lower: string = html.toLowerCase();
-    let cursor: number = 0;
-    while (cursor < html.length) {
-      const start: number = lower.indexOf('<', cursor);
-      if (start < 0) {
-        return '';
-      }
-      const end: number = findTagEnd(html, start);
-      if (end < 0) {
-        return '';
-      }
-      const tag: string = html.substring(start, end + 1);
-      if (!isClosingTag(tag) && hasClassContaining(tag, keyword)) {
-        return tag;
-      }
-      cursor = end + 1;
-    }
-    return '';
-  }
-
-  // 第一个 class 含 keyword 的元素的内部 HTML。
-  private static firstElementInnerByClass(html: string, keyword: string): string {
-    const lower: string = html.toLowerCase();
-    let cursor: number = 0;
-    while (cursor < html.length) {
-      const start: number = lower.indexOf('<', cursor);
-      if (start < 0) {
-        return '';
-      }
-      const end: number = findTagEnd(html, start);
-      if (end < 0) {
-        return '';
-      }
-      const tag: string = html.substring(start, end + 1);
-      if (!isClosingTag(tag) && hasClassContaining(tag, keyword)) {
-        const name: string = getTagName(tag);
-        const closeStart: number = findClosingTag(html, end + 1, name);
-        if (closeStart < 0) {
-          return '';
-        }
-        return html.substring(end + 1, closeStart);
-      }
-      cursor = end + 1;
-    }
-    return '';
-  }
-
-  // 第一个指定标签名元素的内部 HTML。
-  private static firstElementInner(html: string, tagName: string): string {
-    const lower: string = html.toLowerCase();
-    const open: number = lower.indexOf(`<${tagName}`);
-    if (open < 0) {
-      return '';
-    }
-    const openEnd: number = findTagEnd(html, open);
-    if (openEnd < 0) {
-      return '';
-    }
-    const closeStart: number = findClosingTag(html, openEnd + 1, tagName);
-    if (closeStart < 0) {
-      return '';
-    }
-    return html.substring(openEnd + 1, closeStart);
   }
 
   private static unwrapNestedQuotes(blocks: RichBlock[]): RichBlock[] {
@@ -879,10 +573,10 @@ export class CookedHtmlParser {
       }
     }
 
-    const titleInlines: RichInlineNode[] = CookedHtmlParser.trimLeadingEmptyText(firstLineInlines);
+    const titleInlines: RichInlineNode[] = trimLeadingEmptyText(firstLineInlines);
 
     const contentBlocks: RichBlock[] = [];
-    if (overflowInlines.length > 0 && CookedHtmlParser.hasVisibleInlines(overflowInlines)) {
+    if (overflowInlines.length > 0 && hasVisibleInlines(overflowInlines)) {
       contentBlocks.push({
         type: RichBlockType.PARAGRAPH,
         inlines: overflowInlines
@@ -915,246 +609,6 @@ export class CookedHtmlParser {
     return { kind: rawType, color: CALLOUT_FALLBACK.color, icon: CALLOUT_FALLBACK.icon };
   }
 
-  // 丢掉标题前导的空白文本节点(标记剥离后可能残留 "" 或空格),并去掉首个文本节点的左侧空格。
-  private static trimLeadingEmptyText(inlines: RichInlineNode[]): RichInlineNode[] {
-    const out: RichInlineNode[] = inlines.slice();
-    while (out.length > 0 && out[0].type === RichInlineType.TEXT && out[0].text.trim().length === 0) {
-      out.shift();
-    }
-    if (out.length > 0 && out[0].type === RichInlineType.TEXT) {
-      out[0].text = out[0].text.replace(/^\s+/, '');
-    }
-    return out;
-  }
-
-  private static parseInlines(html: string): RichInlineNode[] {
-    const out: RichInlineNode[] = [];
-    const state: InlineState = new InlineState();
-    let buffer: string = '';
-    let index: number = 0;
-
-    const appendText = (raw: string): void => {
-      let text: string = CookedHtmlParser.decodeHtmlEntities(raw);
-      if (text.length === 0) {
-        return;
-      }
-      // HTML 语义:源码里的换行/缩进/连续空格是不可见排版空白,浏览器折叠成单个空格。此前解析器
-      // 原样保留,导致 <br> 后紧跟的源码换行(<br>\n2.1)多出一个真换行,<br> 行距凭空翻倍。
-      // 折叠这类空白(nbsp   不在其列,予以保留)。
-      text = text.replace(/[ \t\r\n\f]+/g, ' ');
-      // 段首及 <br>/段落换行之后的行首空白不可见,去掉,避免每行多一个前导空格。
-      const prevNode: RichInlineNode | undefined = out.length > 0 ? out[out.length - 1] : undefined;
-      if (!prevNode || prevNode.type === RichInlineType.LINE_BREAK) {
-        text = text.replace(/^ /, '');
-      }
-      if (text.length === 0) {
-        return;
-      }
-
-      const href: string = state.currentHref();
-      const type: RichInlineType = state.code > 0 ? RichInlineType.CODE : (href.length > 0 ? RichInlineType.LINK : RichInlineType.TEXT);
-      const attachment: boolean = type === RichInlineType.LINK && state.currentAttachment();
-      const spoiler: boolean = state.currentSpoiler();
-      const last: RichInlineNode | undefined = out.length > 0 ? out[out.length - 1] : undefined;
-      if (last &&
-        last.type === type &&
-        (last.href ? last.href : '') === href &&
-        !!last.attachment === attachment &&
-        !!last.spoiler === spoiler &&
-        !!last.bold === state.bold > 0 &&
-        !!last.italic === state.italic > 0 &&
-        !!last.code === state.code > 0) {
-        last.text = `${last.text}${text}`;
-        return;
-      }
-
-      const token: RichInlineNode = {
-        type,
-        text,
-        bold: state.bold > 0,
-        italic: state.italic > 0,
-        code: state.code > 0
-      };
-      if (href.length > 0) {
-        token.href = href;
-      }
-      if (attachment) {
-        token.attachment = true;
-      }
-      if (spoiler) {
-        token.spoiler = true;
-      }
-      out.push(token);
-    };
-
-    const flush = (): void => {
-      if (buffer.length === 0) {
-        return;
-      }
-      appendText(buffer);
-      buffer = '';
-    };
-
-    while (index < html.length) {
-      const tagStart: number = html.indexOf('<', index);
-      if (tagStart < 0) {
-        buffer = `${buffer}${html.substring(index)}`;
-        break;
-      }
-
-      if (tagStart > index) {
-        buffer = `${buffer}${html.substring(index, tagStart)}`;
-      }
-
-      const tagEnd: number = findTagEnd(html, tagStart);
-      if (tagEnd < 0) {
-        buffer = `${buffer}${html.substring(tagStart)}`;
-        break;
-      }
-
-      const tag: string = html.substring(tagStart, tagEnd + 1);
-      const tagName: string = getTagName(tag);
-      const closing: boolean = isClosingTag(tag);
-      const selfClosing: boolean = isSelfClosingTag(tag);
-
-      if (tagName === 'br') {
-        flush();
-        out.push({ type: RichInlineType.LINE_BREAK, text: '\n' });
-      } else if (tagName === 'strong' || tagName === 'b') {
-        flush();
-        state.bold = Math.max(0, state.bold + (closing ? -1 : 1));
-      } else if (tagName === 'em' || tagName === 'i') {
-        flush();
-        state.italic = Math.max(0, state.italic + (closing ? -1 : 1));
-      } else if (tagName === 'code') {
-        flush();
-        state.code = Math.max(0, state.code + (closing ? -1 : 1));
-      } else if (tagName === 'span') {
-        // discourse-math 行内公式:<span class="math">裸 LaTeX</span>。整体抽成一个 MATH token,
-        // 里面的 LaTeX 不再当纯文本泄进正文流(否则会显示 \frac{...} 之类源码)。
-        if (!closing && !selfClosing && hasClass(tag, 'math')) {
-          flush();
-          const mathClose: number = findClosingTag(html, tagEnd + 1, 'span');
-          if (mathClose > tagEnd) {
-            const latex: string = CookedHtmlParser.toPlainText(html.substring(tagEnd + 1, mathClose));
-            if (latex.length > 0) {
-              out.push({ type: RichInlineType.MATH, text: latex });
-            }
-            const mathCloseEnd: number = findTagEnd(html, mathClose);
-            index = mathCloseEnd >= 0 ? mathCloseEnd + 1 : mathClose;
-            continue;
-          }
-        }
-        flush();
-        if (closing) {
-          state.spanSpoilerStack.pop();
-        } else if (!selfClosing) {
-          state.spanSpoilerStack.push(hasClassContaining(tag, 'spoiler'));
-        }
-      } else if (tagName === 'a') {
-        flush();
-        if (closing) {
-          state.hrefStack.pop();
-          state.attachmentStack.pop();
-        } else {
-          const resolvedHref: string = CookedHtmlParser.resolveUrl(extractAttr(tag, 'href'));
-          state.hrefStack.push(resolvedHref);
-          // 附件下载链接:显式 class="attachment",或指向 /uploads/ 的站内链接。
-          const isAttachment: boolean = hasClass(tag, 'attachment') ||
-            /^https?:\/\/[^\/]*linux\.do\/uploads\//i.test(resolvedHref) ||
-            resolvedHref.indexOf('/uploads/') === 0;
-          state.attachmentStack.push(isAttachment);
-        }
-      } else if (tagName === 'img' && !closing) {
-        flush();
-        const src: string = CookedHtmlParser.resolveUrl(extractAttr(tag, 'src'));
-        const alt: string = CookedHtmlParser.decodeHtmlEntities(extractAttr(tag, 'alt'));
-        if (src.length > 0) {
-          const imageToken: RichInlineNode = {
-            type: RichInlineType.IMAGE,
-            text: alt.length > 0 ? alt : ' ',
-            src,
-            alt,
-            href: state.currentHref()
-          };
-          if (state.currentSpoiler()) {
-            imageToken.spoiler = true;
-          }
-          out.push(imageToken);
-        } else if (alt.length > 0) {
-          appendText(alt);
-        }
-      } else if (!selfClosing && !closing && shouldReadChildrenAsPlainText(tagName)) {
-        const closeStart: number = findClosingTag(html, tagEnd + 1, tagName);
-        if (closeStart > tagEnd) {
-          const inner: string = html.substring(tagEnd + 1, closeStart);
-          appendText(CookedHtmlParser.toPlainText(inner));
-          const closeEnd: number = findTagEnd(html, closeStart);
-          index = closeEnd >= 0 ? closeEnd + 1 : closeStart;
-          continue;
-        }
-      }
-
-      index = tagEnd + 1;
-    }
-
-    flush();
-    return CookedHtmlParser.compactInlines(out);
-  }
-
-  private static compactInlines(inlines: RichInlineNode[]): RichInlineNode[] {
-    const compacted: RichInlineNode[] = [];
-    for (let index: number = 0; index < inlines.length; index++) {
-      const token: RichInlineNode = inlines[index];
-      if (token.type !== RichInlineType.LINE_BREAK) {
-        compacted.push(token);
-        continue;
-      }
-
-      const last: RichInlineNode | undefined = compacted.length > 0 ? compacted[compacted.length - 1] : undefined;
-      if (last && last.type === RichInlineType.LINE_BREAK) {
-        continue;
-      }
-      compacted.push(token);
-    }
-    const filtered: RichInlineNode[] =
-      compacted.filter((token: RichInlineNode) => token.type !== RichInlineType.TEXT || token.text.length > 0);
-    return CookedHtmlParser.trimInlineEdges(filtered);
-  }
-
-  private static trimInlineEdges(inlines: RichInlineNode[]): RichInlineNode[] {
-    let start: number = 0;
-    let end: number = inlines.length;
-    while (start < end && CookedHtmlParser.isBlankInline(inlines[start])) {
-      start++;
-    }
-    while (end > start && CookedHtmlParser.isBlankInline(inlines[end - 1])) {
-      end--;
-    }
-    const trimmed: RichInlineNode[] = (start === 0 && end === inlines.length) ? inlines : inlines.slice(start, end);
-    if (trimmed.length === 0) {
-      return trimmed;
-    }
-    // 去掉首个文本的前导空白、末个文本的尾随空白（标签间换行/缩进噪声，
-    // 例如图片块之后紧跟的正文常带一个前导 '\n'）。
-    const first: RichInlineNode = trimmed[0];
-    if (first.type === RichInlineType.TEXT) {
-      first.text = first.text.replace(/^\s+/, '');
-    }
-    const last: RichInlineNode = trimmed[trimmed.length - 1];
-    if (last.type === RichInlineType.TEXT) {
-      last.text = last.text.replace(/\s+$/, '');
-    }
-    return trimmed;
-  }
-
-  private static isBlankInline(token: RichInlineNode): boolean {
-    if (token.type === RichInlineType.LINE_BREAK) {
-      return true;
-    }
-    return token.type === RichInlineType.TEXT && token.text.trim().length === 0;
-  }
-
   private static codeBlockFromPre(innerHtml: string): RichBlock {
     const codeOpenMatch: RegExpMatchArray | null = innerHtml.match(/<code\b[^>]*>/i);
     const codeOpenTag: string = codeOpenMatch ? codeOpenMatch[0] : '';
@@ -1169,8 +623,8 @@ export class CookedHtmlParser {
 
     return {
       type: RichBlockType.CODE,
-      text: CookedHtmlParser.decodeHtmlEntities(CookedHtmlParser.stripTagsKeepingLines(codeHtml)).trim(),
-      language: CookedHtmlParser.extractCodeLanguage(codeOpenTag)
+      text: decodeHtmlEntities(stripTagsKeepingLines(codeHtml)).trim(),
+      language: extractCodeLanguage(codeOpenTag)
     };
   }
 
@@ -1202,7 +656,7 @@ export class CookedHtmlParser {
         });
       } else {
         items.push({
-          inlines: CookedHtmlParser.parseInlines(itemHtml)
+          inlines: parseInlines(itemHtml)
         });
       }
       index = closeEnd >= 0 ? closeEnd + 1 : closeStart + 5;
@@ -1222,7 +676,7 @@ export class CookedHtmlParser {
     if (tagName === 'table') {
       tableInner = innerHtml;
     } else if (innerHtml.toLowerCase().indexOf('<table') >= 0) {
-      tableInner = CookedHtmlParser.extractElementInner(innerHtml, 'table');
+      tableInner = extractElementInner(innerHtml, 'table');
     }
     if (tableInner.length === 0) {
       return undefined;
@@ -1288,7 +742,7 @@ export class CookedHtmlParser {
       }
       const cellHtml: string = rowHtml.substring(openEnd + 1, closeStart);
       cells.push({
-        inlines: CookedHtmlParser.parseInlines(cellHtml),
+        inlines: parseInlines(cellHtml),
         header: isHeader
       });
       const closeEnd: number = findTagEnd(rowHtml, closeStart);
@@ -1298,7 +752,7 @@ export class CookedHtmlParser {
   }
 
   private static unsupportedBlock(kind: string, innerHtml: string): RichBlock {
-    const text: string = CookedHtmlParser.toPlainText(innerHtml);
+    const text: string = htmlToPlainText(innerHtml);
     return {
       type: RichBlockType.UNSUPPORTED,
       unsupportedKind: kind,
@@ -1320,34 +774,34 @@ export class CookedHtmlParser {
     const block: RichBlock = { type: RichBlockType.ONEBOX };
 
     // 头部 <header class="source">:站点图标 + 域名文字。缺失时退回整段查找。
-    const headerInner: string = CookedHtmlParser.extractElementInner(innerHtml, 'header');
+    const headerInner: string = extractElementInner(innerHtml, 'header');
     const headerHtml: string = headerInner.length > 0 ? headerInner : innerHtml;
-    const faviconTag: string = CookedHtmlParser.firstTagMatch(headerHtml, /<img\b[^>]*>/i);
+    const faviconTag: string = firstTagMatch(headerHtml, /<img\b[^>]*>/i);
     if (faviconTag.length > 0) {
-      const favSrc: string = CookedHtmlParser.resolveUrl(extractAttr(faviconTag, 'src'));
+      const favSrc: string = resolveUrl(extractAttr(faviconTag, 'src'));
       if (favSrc.length > 0) {
         block.faviconUrl = favSrc;
       }
     }
-    const domainText: string = CookedHtmlParser.firstAnchorText(headerHtml);
-    const sourceHref: string = CookedHtmlParser.firstAnchorHref(headerHtml);
+    const domainText: string = firstAnchorText(headerHtml);
+    const sourceHref: string = firstAnchorHref(headerHtml);
 
     // 正文 <article class="onebox-body">:标题(h3/h4)、描述(首个 p)、缩略图。
-    const bodyInner: string = CookedHtmlParser.extractElementInner(innerHtml, 'article');
+    const bodyInner: string = extractElementInner(innerHtml, 'article');
     const bodyHtml: string = bodyInner.length > 0 ? bodyInner : innerHtml;
 
-    let titleHtml: string = CookedHtmlParser.extractElementInner(bodyHtml, 'h3');
+    let titleHtml: string = extractElementInner(bodyHtml, 'h3');
     if (titleHtml.length === 0) {
-      titleHtml = CookedHtmlParser.extractElementInner(bodyHtml, 'h4');
+      titleHtml = extractElementInner(bodyHtml, 'h4');
     }
-    const title: string = CookedHtmlParser.toPlainText(titleHtml);
-    const titleHref: string = CookedHtmlParser.firstAnchorHref(titleHtml);
+    const title: string = htmlToPlainText(titleHtml);
+    const titleHref: string = firstAnchorHref(titleHtml);
 
-    const description: string = CookedHtmlParser.toPlainText(CookedHtmlParser.extractElementInner(bodyHtml, 'p'));
+    const description: string = htmlToPlainText(extractElementInner(bodyHtml, 'p'));
 
-    const thumbTag: string = CookedHtmlParser.firstTagMatch(bodyHtml, /<img\b[^>]*>/i);
+    const thumbTag: string = firstTagMatch(bodyHtml, /<img\b[^>]*>/i);
     if (thumbTag.length > 0) {
-      const thumbSrc: string = CookedHtmlParser.resolveUrl(extractAttr(thumbTag, 'src'));
+      const thumbSrc: string = resolveUrl(extractAttr(thumbTag, 'src'));
       if (thumbSrc.length > 0) {
         block.thumbnailUrl = thumbSrc;
       }
@@ -1357,7 +811,7 @@ export class CookedHtmlParser {
     if (href.length > 0) {
       block.href = href;
     }
-    const domain: string = domainText.length > 0 ? domainText : CookedHtmlParser.hostFromUrl(href);
+    const domain: string = domainText.length > 0 ? domainText : hostFromUrl(href);
     if (domain.length > 0) {
       block.domain = domain;
     }
@@ -1368,55 +822,6 @@ export class CookedHtmlParser {
       block.description = description;
     }
     return block;
-  }
-
-  // 取 html 中首个 <tagName ...>...</tagName> 的内层 HTML(标签名需按词边界匹配,避免 p 命中 picture)。
-  private static extractElementInner(html: string, tagName: string): string {
-    const openStart: number = findOpenTag(html, tagName, 0);
-    if (openStart < 0) {
-      return '';
-    }
-    const openEnd: number = findTagEnd(html, openStart);
-    if (openEnd < 0) {
-      return '';
-    }
-    const closeStart: number = findClosingTag(html, openEnd + 1, tagName);
-    if (closeStart < 0) {
-      return '';
-    }
-    return html.substring(openEnd + 1, closeStart);
-  }
-
-
-  private static firstTagMatch(html: string, pattern: RegExp): string {
-    const match: RegExpMatchArray | null = html.match(pattern);
-    return match ? match[0] : '';
-  }
-
-  private static firstAnchorHref(html: string): string {
-    const openTag: string = CookedHtmlParser.firstTagMatch(html, /<a\b[^>]*>/i);
-    if (openTag.length === 0) {
-      return '';
-    }
-    return CookedHtmlParser.resolveUrl(extractAttr(openTag, 'href'));
-  }
-
-  private static firstAnchorText(html: string): string {
-    const openTag: string = CookedHtmlParser.firstTagMatch(html, /<a\b[^>]*>/i);
-    if (openTag.length === 0) {
-      return '';
-    }
-    const start: number = html.indexOf(openTag) + openTag.length;
-    const closeStart: number = html.toLowerCase().indexOf('</a>', start);
-    if (closeStart < 0) {
-      return '';
-    }
-    return CookedHtmlParser.toPlainText(html.substring(start, closeStart));
-  }
-
-  private static hostFromUrl(url: string): string {
-    const match: RegExpMatchArray | null = url.match(/^https?:\/\/([^\/]+)/i);
-    return match ? match[1] : '';
   }
 
   private static extractSummary(innerHtml: string): SummaryInfo {
@@ -1441,7 +846,7 @@ export class CookedHtmlParser {
     const closeEnd: number = closeStart + '</summary>'.length;
     const summaryHtml: string = innerHtml.substring(openEnd, closeStart);
     return {
-      title: CookedHtmlParser.toPlainText(summaryHtml),
+      title: htmlToPlainText(summaryHtml),
       contentHtml: `${innerHtml.substring(0, openStart)}${innerHtml.substring(closeEnd)}`
     };
   }
@@ -1523,7 +928,7 @@ export class CookedHtmlParser {
     const withoutMeta: string = innerHtml
       .replace(/<div\b[^>]*class\s*=\s*["'][^"']*meta[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '')
       .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, '');
-    const residualText: string = CookedHtmlParser.toPlainText(withoutMeta.replace(/<img\b[^>]*>/gi, ''));
+    const residualText: string = htmlToPlainText(withoutMeta.replace(/<img\b[^>]*>/gi, ''));
     if (residualText.length > 0) {
       return [];
     }
@@ -1577,7 +982,7 @@ export class CookedHtmlParser {
         result.push(...CookedHtmlParser.paragraphBlocks(rest));
         break;
       }
-      if (CookedHtmlParser.toPlainText(unit.before).length > 0) {
+      if (htmlToPlainText(unit.before).length > 0) {
         result.push(...CookedHtmlParser.paragraphBlocks(unit.before));
       }
       result.push(...CookedHtmlParser.collectImageBlocks(unit.html));
@@ -1651,7 +1056,7 @@ export class CookedHtmlParser {
     // Discourse 的 src 是按 CSS 像素切的最小档(如 253×375),手机普遍 3x DPI,直接渲染必糊;
     // srcset 一般给到 2x(506×750),清晰度够且远小于原图(href,如 940×1388/132KB)——
     // 正文图最宽也就铺满屏宽,上原图纯属浪费流量与解码内存。
-    const src: string = CookedHtmlParser.resolveUrl(
+    const src: string = resolveUrl(
       bestSrcFromTag(tag));
     if (src.length === 0) {
       return undefined;
@@ -1660,12 +1065,12 @@ export class CookedHtmlParser {
     const block: RichBlock = {
       type: RichBlockType.IMAGE,
       src,
-      alt: CookedHtmlParser.decodeHtmlEntities(extractAttr(tag, 'alt')),
+      alt: decodeHtmlEntities(extractAttr(tag, 'alt')),
       width: parsePositiveNumber(extractAttr(tag, 'width')),
       height: parsePositiveNumber(extractAttr(tag, 'height'))
     };
 
-    const resolvedHref: string = CookedHtmlParser.resolveUrl(href);
+    const resolvedHref: string = resolveUrl(href);
     if (resolvedHref.length > 0) {
       block.href = resolvedHref;
     }
@@ -1713,7 +1118,7 @@ export class CookedHtmlParser {
         break;
       }
       const before: string = rest.substring(0, tagStart);
-      if (CookedHtmlParser.toPlainText(before).length > 0) {
+      if (htmlToPlainText(before).length > 0) {
         result.push(...CookedHtmlParser.paragraphBlocks(before));
       }
       result.push(mediaBlock);
@@ -1723,7 +1128,7 @@ export class CookedHtmlParser {
     if (!found) {
       return undefined;
     }
-    if (CookedHtmlParser.toPlainText(rest).length > 0) {
+    if (htmlToPlainText(rest).length > 0) {
       result.push(...CookedHtmlParser.paragraphBlocks(rest));
     }
     return result;
@@ -1742,7 +1147,7 @@ export class CookedHtmlParser {
     if (src.length === 0) {
       src = extractAttr(openTag, 'src');
     }
-    const resolvedSrc: string = CookedHtmlParser.resolveUrl(src);
+    const resolvedSrc: string = resolveUrl(src);
     if (resolvedSrc.length === 0) {
       return undefined;
     }
@@ -1760,90 +1165,6 @@ export class CookedHtmlParser {
     }
     return block;
   }
-
-  private static extractCodeLanguage(codeOpenTag: string): string {
-    const className: string = extractAttr(codeOpenTag, 'class');
-    const languageMatch: RegExpMatchArray | null = className.match(/(?:lang|language)-([a-zA-Z0-9_+-]+)/);
-    if (!languageMatch) {
-      return '';
-    }
-    return languageMatch[1];
-  }
-
-  private static stripTagsKeepingLines(html: string): string {
-    let text: string = html ? html : '';
-    text = text.replace(/<br\s*\/?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n');
-    text = text.replace(/<\/div>/gi, '\n');
-    text = text.replace(/<\/li>/gi, '\n');
-    text = text.replace(/<li\b[^>]*>/gi, '- ');
-    text = text.replace(/<[^>]+>/g, '');
-    return CookedHtmlParser.decodeHtmlEntities(text);
-  }
-
-  private static normalizeText(text: string): string {
-    return text
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/\n[ \t]+/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  private static decodeHtmlEntities(text: string): string {
-    return (text ? text : '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#x([0-9a-fA-F]+);/g, (_match: string, hex: string): string => {
-        const code: number = parseInt(hex, 16);
-        return isNaN(code) ? '' : String.fromCharCode(code);
-      })
-      .replace(/&#([0-9]+);/g, (_match: string, dec: string): string => {
-        const code: number = parseInt(dec, 10);
-        return isNaN(code) ? '' : String.fromCharCode(code);
-      });
-  }
-
-  private static resolveUrl(rawUrl: string): string {
-    const url: string = CookedHtmlParser.decodeHtmlEntities(rawUrl).trim();
-    if (url.length === 0 || url.startsWith('upload://')) {
-      return url;
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-    if (url.startsWith('//')) {
-      return `https:${url}`;
-    }
-    if (url.startsWith(EMOJI_PATH_PREFIX)) {
-      // 正文 cooked 里的 emoji 服务端已改写成 CDN 绝对地址,但 discourse-boosts 的 cooked 不走那套改写,
-      // 吐的是站内相对路径。拼 BASE_URL 会得到必然加载不出的主站直链,故这里挂 CDN(同一份文件)。
-      return `${AppConstants.STATIC_CDN_BASE}${url}`;
-    }
-    if (url.startsWith('/')) {
-      return `${AppConstants.BASE_URL}${url}`;
-    }
-    return url;
-  }
-
-  // 从 <img> 选出最清晰的可用地址:srcset 里倍率最大的一档,没有 srcset 则回退 src。
-  // srcset 形如 "url1, url2 1.5x, url3 2x"(首项无描述符即 1x)。逗号也可能出现在 URL 里,
-  // 故按「逗号 + 空白」切分而非裸逗号。宽度描述符(w)本项目未见,一并兼容:按数值取最大。
-
-
-
-
-
-
-
-
-
-
-
-
 
   private static hasBlockContent(block: RichBlock): boolean {
     if (block.type === RichBlockType.PARAGRAPH || block.type === RichBlockType.HEADING) {

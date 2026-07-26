@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
+import { CookedHtmlParser } from '../../services/content/CookedHtmlParser';
 import {
-  CookedHtmlParser,
   RichBlock,
   RichBlockType,
   RichInlineNode,
@@ -8,7 +8,7 @@ import {
   RichListItem,
   RichTableRow,
   RichTableCell
-} from '../../services/content/CookedHtmlParser';
+} from '../../services/content/RichContentTypes';
 import { ViewerImage } from './ImageViewer';
 import { AudioPlayer } from './AudioPlayer';
 import { VideoPlayer } from './VideoPlayer';

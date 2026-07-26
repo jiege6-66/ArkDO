@@ -8,12 +8,11 @@ import { DownloadEventBus } from '../content/DownloadEventBus';
 import { detectChallenge } from './ChallengeDetector';
 import { FileLogger } from '../logging/FileLogger';
 import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
-import { buildCsrfScript } from './webscript/CsrfScriptTemplate';
 import { buildMessageBusScript } from './webscript/MessageBusScriptTemplate';
+import { createFetchScript, createFormScript, createImageFetchScript, createPostJsonScript,
+  createPutScript, createUploadScript, REQUEST_ID_TOKEN } from './ArkWebFetchScriptFactory';
 import { MessageBusEventBus } from '../message/MessageBusEventBus';
 
-const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
-// 媒体下载兜底超时:委托始终不回调(如 URL 无效/挑战未过)时,自愈拒绝以免播放器永久转圈。
 const MEDIA_DOWNLOAD_TIMEOUT_MS: number = 120000;
 const BODY_LOG_CHUNK_SIZE: number = 3000;
 // 响应体转储上限:仅对挑战/错误/异常响应保留头部证据(判定是挑战页还是数据),截断以控制日志体积。
@@ -492,7 +491,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     await this.whenHostReady();
 
     try {
-      const rawResult: string = await this.executor.run(this.createFetchScript(requestPath));
+      const rawResult: string = await this.executor.run(createFetchScript(requestPath));
       logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
     } catch (error) {
@@ -521,7 +520,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
     await this.whenHostReady();
     try {
-      const rawResult: string = await this.executor.run(this.createImageFetchScript(target));
+      const rawResult: string = await this.executor.run(createImageFetchScript(target));
       const envelope: WebFetchEnvelope = JSON.parse(rawResult) as WebFetchEnvelope;
       const status: number = envelope.statusCode ? envelope.statusCode : 0;
       const body: string = envelope.body ? envelope.body : '';
@@ -556,7 +555,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createFormScript('POST', requestPath, body, referrer));
+      const rawResult: string = await this.executor.run(createFormScript('POST', requestPath, body, referrer));
       logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
     } catch (error) {
@@ -596,7 +595,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createPostJsonScript(requestPath, body, referrer));
+      const rawResult: string = await this.executor.run(createPostJsonScript(requestPath, body, referrer));
       logNetwork(`POST(json) ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
     } catch (error) {
@@ -638,7 +637,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createUploadScript(base64, fileName, mimeType, referrer));
+      const rawResult: string = await this.executor.run(createUploadScript(base64, fileName, mimeType, referrer));
       logNetwork(`UPLOAD ${requestPath} raw envelope received length=${rawResult.length}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
     } catch (error) {
@@ -678,7 +677,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createPutScript(requestPath, referrer));
+      const rawResult: string = await this.executor.run(createPutScript(requestPath, referrer));
       logNetwork(`PUT ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'PUT', options);
     } catch (error) {
@@ -728,7 +727,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
     try {
       const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(this.createFormScript(method, requestPath, body, referrer));
+      const rawResult: string = await this.executor.run(createFormScript(method, requestPath, body, referrer));
       logNetwork(`${method} ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, method, options);
     } catch (error) {
@@ -744,185 +743,6 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         }
       };
     }
-  }
-
-  private createFetchScript(path: string): string {
-    const encodedPath: string = JSON.stringify(path);
-
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL(${encodedPath}, window.location.origin);
-      fetch(requestUrl.toString(), {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: {
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      }).then((response) => {
-        response.text().then((body) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            cfMitigated: response.headers.get('cf-mitigated') || '',
-            body: body
-          }));
-        }).catch((error) => {
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: 0,
-            contentType: '',
-            body: '',
-            errorMessage: String(error)
-          }));
-        });
-      }).catch((error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0,
-          contentType: '',
-          body: '',
-          errorMessage: String(error)
-        }));
-      });
-      return requestId;
-    })();`;
-  }
-
-  // 二进制取图脚本:fetch 头像 → arrayBuffer → base64(分块 fromCharCode 避免大数组爆栈)。
-  // 支持跨源:CDN(cdn/s3.ldstatic.com)回 ACAO=linux.do 具体源且无 Allow-Credentials,故跨源必须
-  // credentials:'omit'(带 cookie 会被 CORS 拒),同源仍 include。cache:'default' 命中 webview HTTP 缓存。
-  private createImageFetchScript(target: string): string {
-    const encodedTarget: string = JSON.stringify(target);
-
-    return `(() => {
-      const requestId = '${REQUEST_ID_TOKEN}';
-      const requestUrl = new URL(${encodedTarget}, window.location.origin);
-      const sameOrigin = requestUrl.origin === window.location.origin;
-      const fail = (error) => {
-        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-          statusCode: 0, contentType: '', body: '', errorMessage: String(error)
-        }));
-      };
-      fetch(requestUrl.toString(), {
-        credentials: sameOrigin ? 'include' : 'omit',
-        cache: 'default',
-        headers: { 'Accept': 'image/*' }
-      }).then((response) => {
-        response.arrayBuffer().then((buf) => {
-          const bytes = new Uint8Array(buf);
-          let binary = '';
-          const chunk = 8192;
-          for (let i = 0; i < bytes.length; i += chunk) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-          }
-          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
-            statusCode: response.status,
-            contentType: response.headers.get('content-type') || '',
-            body: btoa(binary)
-          }));
-        }).catch(fail);
-      }).catch(fail);
-      return requestId;
-    })();`;
-  }
-
-  private createFormScript(method: string, path: string, body: string, referrer: string): string {
-    // 表单写请求(timings / 点赞 / 投票等)。X-SILENCE-LOGGER + Discourse-Background 是
-    // 后台静默请求的标记,照抓包对齐,勿删勿重排。
-    return buildCsrfScript({
-      requestIdToken: REQUEST_ID_TOKEN,
-      urlExpr: JSON.stringify(path),
-      methodExpr: JSON.stringify(method),
-      headerLines: [
-        "'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'",
-        "'Accept': '*/*'",
-        "'X-CSRF-Token': csrf",
-        "'X-Requested-With': 'XMLHttpRequest'",
-        "'X-SILENCE-LOGGER': 'true'",
-        "'Discourse-Background': 'true'",
-        "'Discourse-Present': 'true'",
-        "'Discourse-Logged-In': 'true'"
-      ],
-      prelude: '',
-      bodyExpr: JSON.stringify(body),
-      referrerExpr: JSON.stringify(referrer)
-    });
-  }
-
-  private createPostJsonScript(path: string, body: string, referrer: string): string {
-    // 发表评论/回复:POST /posts,application/json。
-    // 这是用户主动发起的前台请求,故不带 X-SILENCE-LOGGER / Discourse-Background。
-    return buildCsrfScript({
-      requestIdToken: REQUEST_ID_TOKEN,
-      urlExpr: JSON.stringify(path),
-      methodExpr: "'POST'",
-      headerLines: [
-        "'Content-Type': 'application/json'",
-        "'Accept': '*/*'",
-        "'X-CSRF-Token': csrf",
-        "'X-Requested-With': 'XMLHttpRequest'",
-        "'Discourse-Present': 'true'",
-        "'Discourse-Logged-In': 'true'"
-      ],
-      prelude: '',
-      bodyExpr: JSON.stringify(body),
-      referrerExpr: JSON.stringify(referrer)
-    });
-  }
-
-  private createUploadScript(base64: string, fileName: string, mimeType: string, referrer: string): string {
-    const encodedBase64: string = JSON.stringify(base64);
-    const encodedFileName: string = JSON.stringify(fileName);
-    const encodedMimeType: string = JSON.stringify(mimeType);
-    // 图片上传:base64 → Uint8Array → Blob → FormData。
-    // 刻意不设 Content-Type——FormData 要由浏览器自己写 multipart boundary,手设会破坏分隔符。
-    return buildCsrfScript({
-      requestIdToken: REQUEST_ID_TOKEN,
-      urlExpr: "'/uploads.json'",
-      methodExpr: "'POST'",
-      headerLines: [
-        "'Accept': '*/*'",
-        "'X-CSRF-Token': csrf",
-        "'X-Requested-With': 'XMLHttpRequest'",
-        "'Discourse-Present': 'true'",
-        "'Discourse-Logged-In': 'true'"
-      ],
-      prelude: `        const binary = atob(${encodedBase64});
-        const len = binary.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) { bytes[i] = binary.charCodeAt(i); }
-        const blob = new Blob([bytes], { type: ${encodedMimeType} });
-        const fd = new FormData();
-        fd.append('upload_type', 'composer');
-        fd.append('relativePath', 'null');
-        fd.append('name', ${encodedFileName});
-        fd.append('type', ${encodedMimeType});
-        fd.append('file', blob, ${encodedFileName});
-`,
-      bodyExpr: 'fd',
-      referrerExpr: JSON.stringify(referrer)
-    });
-  }
-
-  private createPutScript(path: string, referrer: string): string {
-    // 空 body 的 PUT(书签等)。不带 body,故 headers 收尾无逗号。
-    return buildCsrfScript({
-      requestIdToken: REQUEST_ID_TOKEN,
-      urlExpr: JSON.stringify(path),
-      methodExpr: "'PUT'",
-      headerLines: [
-        "'Accept': '*/*'",
-        "'X-CSRF-Token': csrf",
-        "'X-Requested-With': 'XMLHttpRequest'",
-        "'X-SILENCE-LOGGER': 'true'",
-        "'Discourse-Background': 'true'",
-        "'Discourse-Present': 'true'",
-        "'Discourse-Logged-In': 'true'"
-      ],
-      prelude: '',
-      bodyExpr: '',
-      referrerExpr: JSON.stringify(referrer)
-    });
   }
 
   private ensureWebviewExecutor(controller: webview.WebviewController): WebviewJsonExecutor {

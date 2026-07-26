@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { CookedHtmlParser, RichBlock, RichBlockType, RichInlineNode, RichInlineType, RichTableRow } from '../main/ets/services/content/CookedHtmlParser';
+import { CookedHtmlParser } from '../main/ets/services/content/CookedHtmlParser';
+import { RichBlock, RichBlockType, RichInlineNode, RichInlineType, RichTableRow } from '../main/ets/services/content/RichContentTypes';
 
 export default function cookedHtmlParserTest() {
   describe('cookedHtmlParserTest', () => {
