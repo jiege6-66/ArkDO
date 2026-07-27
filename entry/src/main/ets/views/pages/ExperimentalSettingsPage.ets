@@ -125,7 +125,7 @@ export struct ExperimentalSettingsPage {
           .fontSize(15)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
-        Text('首页实时接收新话题/更新提示，需保持后台联网')
+        Text('首页实时接收新话题/更新提示')
           .fontSize(12)
           .fontColor($r('app.color.text_faint'))
           .width('100%')

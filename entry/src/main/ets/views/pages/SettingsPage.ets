@@ -162,7 +162,7 @@ export struct SettingsPage {
           this.onOpenPush();
         })
         this.HairlineInset()
-        this.SettingCell($r('sys.symbol.security_shield'), '网络与连接', '', () => {
+        this.SettingCell($r('sys.symbol.wifi'), '网络与连接', '', () => {
           this.onOpenNetwork();
         })
         this.HairlineInset()
