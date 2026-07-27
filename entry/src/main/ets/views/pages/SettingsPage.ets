@@ -649,14 +649,18 @@ export struct SettingsPage {
     try {
       const info: bundleManager.BundleInfo =
         bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      this.appVersion = info.versionName;
+      this.appVersion = this.formatAppVersion(info);
     } catch (err) {
       Log.i(`${LOG_TAG} read app version failed`);
     }
   }
 
   private getVersionLabel(): string {
-    return this.appVersion.length > 0 ? `v${this.appVersion}` : '';
+    return this.appVersion.length > 0 ? this.appVersion : '';
+  }
+
+  private formatAppVersion(info: bundleManager.BundleInfo): string {
+    return `v${info.versionName} (Build ${info.versionCode})`;
   }
 }
 
@@ -672,7 +676,7 @@ struct AboutDialog {
     try {
       const info: bundleManager.BundleInfo =
         bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      this.version = info.versionName;
+      this.version = `v${info.versionName} (Build ${info.versionCode})`;
     } catch (err) {
       Log.i(`${LOG_TAG} about dialog read version failed`);
     }
@@ -690,7 +694,7 @@ struct AboutDialog {
         .fontColor($r('app.color.text_secondary'))
         .margin({ top: 8 })
 
-      Text(this.version.length > 0 ? `版本 v${this.version}` : '版本 —')
+      Text(this.version.length > 0 ? `版本 ${this.version}` : '版本 —')
         .fontSize(13)
         .fontColor($r('app.color.text_faint'))
         .margin({ top: 14 })
