@@ -367,8 +367,9 @@ export struct RootTabPage {
     })
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       // CF 交互式挑战需要尽量完整的视口(半屏+圆角+露底会被 Turnstile 视作可疑),且过盾中途
-      // 不该被误滑关,故 CHALLENGE 用满高全屏、去拖动条;登录 sheet 维持 90% 底部弹层。
-      height: this.activeSheet === RootSheet.CHALLENGE ? '100%' : '90%',
+      // 不该被误滑关,故 CHALLENGE 用满高全屏、去拖动条。登录 sheet 同样用满高,给登录网页
+      // (CF Turnstile / 第三方 SSO 跳转)尽量完整的视口。
+      height: '100%',
       dragBar: this.activeSheet !== RootSheet.CHALLENGE,
       // CF 验证弹窗自带「关闭」按钮,隐藏原生右上角 X 避免出现两个关闭入口;其余 sheet 保留原生 X。
       showClose: this.activeSheet !== RootSheet.CHALLENGE,
