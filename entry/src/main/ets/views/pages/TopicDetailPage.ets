@@ -52,6 +52,11 @@ import {
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 import {
+  buildImmersiveFloatingActionButtonModifier,
+  IMMERSIVE_ACTION_BAR_BLUR_DISABLED
+} from '../../common/ui/ImmersiveActionBarStyle';
+import { FAB_GLASS_ENABLED_STORAGE_KEY } from '../../common/ui/FabGlassPrefs';
+import {
   SMART_REACH_ANIMATION_DURATION,
   SMART_REACH_LEFT_HAND_STORAGE_KEY,
   smartReachBottomAlignRules
@@ -87,6 +92,8 @@ export struct TopicDetailPage {
   @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
   private smartReachLeftHanded: boolean = false;
+  // 「悬浮按钮玻璃效果」开关(设置页-外观):开⇒模糊材质背板;关⇒当前透明样式。默认关。
+  @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
   @State private replyFabAlignRules: AlignRuleOption = smartReachBottomAlignRules(false);
   @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
@@ -663,9 +670,12 @@ export struct TopicDetailPage {
     // 窗口常驻全屏布局后不再有临时切换,按钮锚点全程稳定,无需再绑全屏标志防"闪回"。
     if (this.detail && !this.showComposer) {
       RelativeContainer() {
+        // 玻璃材质与光边都做在 primaryButton 上(见 replyFabButton 的 buttonModifier),外层 ActionBar 只
+        // 承载位置/阴影/交互,背景模糊始终 DISABLE,避免与按钮材质叠成双层磨砂。
         HdsActionBar({
           primaryButton: this.replyFabButton(),
-          actionBarStyle: this.replyFabStyle()
+          actionBarStyle: this.replyFabStyle(),
+          blurStrategy: IMMERSIVE_ACTION_BAR_BLUR_DISABLED
         })
           .id('smartReachReplyFab')
           .alignRules(this.replyFabAlignRules)
@@ -1341,8 +1351,10 @@ export struct TopicDetailPage {
   private replyFabButton(): ActionBarButton {
     return new ActionBarButton({
       width: LengthMetrics.vp(52),
-      // 与首页 FAB 统一:不再叠加模糊材质背板,仅由 HDS 官方按钮承载位置、阴影与交互。
+      // 背景恒透明:玻璃态的磨砂底由 buttonModifier 里的 backgroundBlurStyle 组件材质提供,与首页 FAB 统一。
       backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
+      // 始终挂载 modifier(内部按开关施加/复位),避免关闭时材质/描边残留。
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(this.fabGlassEnabled),
       iconSize: LengthMetrics.vp(22),
       // 品牌蓝仅用于图标，仍能明确表达“回复”这个主操作。
       iconFillColor: ColorMetrics.resourceColor(REPLY_BLUE),
@@ -1355,6 +1367,7 @@ export struct TopicDetailPage {
   }
 
   private replyFabStyle(): ActionBarStyle {
+    // 外层容器恒透明、不加背景模糊(磨砂交给按钮层的组件材质)。
     return new ActionBarStyle({
       height: LengthMetrics.vp(52),
       backgroundBlurStyle: BlurStyle.NONE,

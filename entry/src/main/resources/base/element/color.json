@@ -18,11 +18,11 @@
     },
     {
       "name": "hds_floating_action_bg",
-      "value": "#B3F2F3F5"
+      "value": "#33F2F3F5"
     },
     {
       "name": "hds_floating_action_highlight",
-      "value": "#66FFFFFF"
+      "value": "#59FFFFFF"
     },
     {
       "name": "immersive_input_bar_bg",

@@ -22,6 +22,7 @@ import { loadPushRelayConfigFromRawContent, PUSH_RELAY_CONFIG_RAWFILE } from '..
 import { pushService } from '@kit.PushKit';
 import { HoldingHandManager } from '../common/utils/HoldingHandManager';
 import { RealtimeTopicsPrefs } from '../services/realtime/RealtimeTopicsPrefs';
+import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
 
 const DOMAIN = 0x0000;
 
@@ -45,6 +46,9 @@ export default class EntryAbility extends UIAbility {
     // 「实时更新话题」开关：读盘并种入 AppStorage 镜像，须早于宿主 webview 与首页挂载，
     // 保证首个 onPageEnd 的注入决策拿到正确值(默认关⇒不注入长轮询)。
     RealtimeTopicsPrefs.load(this.context);
+    // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，
+    // 保证首帧 FAB 就按正确样式渲染(默认关⇒当前透明样式)。
+    FabGlassPrefs.load(this.context);
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
     // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。

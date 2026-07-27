@@ -2,6 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { bundleManager } from '@kit.AbilityKit';
 import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
+import { FAB_GLASS_ENABLED_STORAGE_KEY, FabGlassPrefs } from '../../common/ui/FabGlassPrefs';
 import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
 import { SitePrefs } from '../../services/site/SitePrefs';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -38,6 +39,8 @@ export struct SettingsPage {
   onOpenExperimental: () => void = () => {};
   onOpenDiagnostics: () => void = () => {};
   @StorageLink(THEME_MODE_STORAGE_KEY) themeMode: ThemeMode = ThemeMode.SYSTEM;
+  // 「悬浮按钮玻璃效果」开关:镜像 AppStorage,onChange 落盘后两处 FAB 即时响应。默认关。
+  @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
   @State private appVersion: string = '';
   // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
   @State private enabledFeeds: string[] = [];
@@ -148,6 +151,8 @@ export struct SettingsPage {
       // 卡片:外观(高频,内联)
       Column() {
         this.AppearanceCell()
+        this.HairlineInset()
+        this.FabGlassRow()
       }
       .cardStyle()
 
@@ -217,6 +222,38 @@ export struct SettingsPage {
         }
       }
     ])
+  }
+
+  // 悬浮按钮玻璃效果:开⇒首页/详情页右下角 FAB 恢复模糊材质背板;关⇒当前透明样式。默认关。
+  @Builder
+  private FabGlassRow() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.circle_dashed'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('悬浮按钮玻璃效果')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('首页与详情页右下角按钮显示毛玻璃背景')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 14 })
+
+      Toggle({ type: ToggleType.Switch, isOn: this.fabGlassEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.setFabGlassEnabled(isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
   }
 
   @Builder
@@ -463,6 +500,11 @@ export struct SettingsPage {
       return '深色';
     }
     return '跟随系统';
+  }
+
+  // 玻璃效果开关:写盘 + 同步 AppStorage 镜像,首页/详情页 FAB 经 @StorageProp 即时响应,无需重启。
+  private setFabGlassEnabled(enabled: boolean): void {
+    FabGlassPrefs.setEnabled(getContext(this), enabled);
   }
 
   // ==================== 首页内容入口 ====================
