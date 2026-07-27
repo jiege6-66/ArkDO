@@ -22,6 +22,8 @@ import {
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
+import { LoginGate } from '../../services/session/LoginGate';
+import { DraftEventBus } from '../../services/draft/DraftEventBus';
 
 const LOG_TAG: string = '[ArkDO][DraftsPage]';
 const PAGE_PADDING: number = 16;
@@ -55,6 +57,7 @@ export struct DraftsPage {
   @State private hasMore: boolean = true;
   @State private loadFailed: boolean = false;
   @State private message: string = '';
+  @State private deletingDraftKey: string = '';
   private service?: DraftService = undefined;
   private pageOffset: number = 0;
   private loading: boolean = false;
@@ -227,7 +230,7 @@ export struct DraftsPage {
   @Builder
   private DraftRow(item: Draft) {
     Column() {
-      // 类型标签 + 相对时间
+      // 类型标签 + 相对时间 + 删除入口。删除放在元信息行末尾,不挤占标题与正文。
       Row() {
         Text(this.actionLabel(item.action))
           .fontSize(11)
@@ -242,6 +245,28 @@ export struct DraftsPage {
           .layoutWeight(1)
           .margin({ left: 8 })
           .maxLines(1)
+
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          if (this.deletingDraftKey === item.draftKey) {
+            LoadingProgress()
+              .width(18)
+              .height(18)
+              .color($r('app.color.ld_danger'))
+          } else {
+            SymbolGlyph($r('sys.symbol.trash'))
+              .fontSize(17)
+              .fontColor([$r('app.color.ld_danger')])
+          }
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor(Color.Transparent)
+        .enabled(this.deletingDraftKey.length === 0)
+        .hitTestBehavior(HitTestMode.Block)
+        .accessibilityText('删除草稿')
+        .onClick(() => {
+          this.confirmDelete(item);
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -288,8 +313,79 @@ export struct DraftsPage {
     return '草稿';
   }
 
+  private confirmDelete(item: Draft): void {
+    if (this.deletingDraftKey.length > 0) {
+      return;
+    }
+    this.getUIContext().showAlertDialog({
+      title: '删除草稿',
+      message: `确定要删除「${item.displayTitle}」吗？删除后无法恢复。`,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: $r('app.color.ld_danger'),
+        action: () => {
+          this.performDelete(item);
+        }
+      }
+    });
+  }
+
+  private async performDelete(item: Draft): Promise<void> {
+    if (!this.service || this.deletingDraftKey.length > 0) {
+      return;
+    }
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
+
+    this.deletingDraftKey = item.draftKey;
+    let result: NetworkResult<boolean> | undefined = undefined;
+    try {
+      result = await this.service.deleteDraft(item.draftKey, item.sequence);
+    } catch (error) {
+      Log.i(`${LOG_TAG} delete threw key=${item.draftKey}`);
+    } finally {
+      this.deletingDraftKey = '';
+    }
+
+    if (result === undefined || !result.success) {
+      const errorMessage: string = result?.error?.message ? result.error.message : '删除失败，请稍后再试';
+      promptToast(this.getUIContext(), errorMessage);
+      Log.i(`${LOG_TAG} delete failed key=${item.draftKey} status=${result?.statusCode ?? 0}`);
+      return;
+    }
+
+    const remaining: Draft[] = [];
+    let removed: boolean = false;
+    for (let index: number = 0; index < this.drafts.length; index++) {
+      const current: Draft = this.drafts[index];
+      if (current.draftKey === item.draftKey && current.sequence === item.sequence) {
+        removed = true;
+      } else {
+        remaining.push(current);
+      }
+    }
+    if (removed) {
+      this.drafts = remaining;
+      // 服务端删除后后续数据会前移一位；同步 offset，避免加载下一页时跳过一条。
+      this.pageOffset = Math.max(0, this.pageOffset - 1);
+      DraftEventBus.notifyDeleted(item.draftKey);
+    }
+    promptToast(this.getUIContext(), '草稿已删除');
+  }
+
   // 点击分流:新主题草稿→原生续写浮层;回帖草稿→进对应主题;私信草稿无原生编辑器,兜底跳 Web。
   private openDraft(item: Draft): void {
+    if (this.deletingDraftKey === item.draftKey) {
+      return;
+    }
     if (item.action === DraftAction.NEW_TOPIC) {
       this.openComposerForDraft(item);
       return;

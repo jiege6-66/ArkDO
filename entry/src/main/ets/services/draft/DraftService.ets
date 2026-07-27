@@ -64,6 +64,10 @@ interface DiscourseDraftSaveResponse {
   draft_sequence?: number;
 }
 
+interface DiscourseDraftDeleteResponse {
+  success?: string;
+}
+
 // 一页拉多少条草稿。/drafts.json 支持 ?offset=&limit=,无游标,靠本页条数判是否到底。
 const DRAFTS_PAGE_LIMIT: number = 30;
 
@@ -199,14 +203,22 @@ export class DraftService {
   async deleteDraft(draftKey: string, sequence: number): Promise<NetworkResult<boolean>> {
     const path: string = `/drafts/${encodeURIComponent(draftKey)}.json`;
     const body: string = `draft_key=${encodeURIComponent(draftKey)}&sequence=${sequence}`;
-    const response: NetworkResult<string> = await this.bridge.deleteForm(path, body);
+    const response: NetworkResult<string> = await this.bridge.deleteForm(path, body, {
+      referrer: `${AppConstants.BASE_URL}/my/activity/drafts`
+    });
     if (!response.success) {
-      return {
-        success: false,
-        statusCode: response.statusCode,
-        challengeState: response.challengeState,
-        error: response.error
-      };
+      return forwardFailure<boolean>(response);
+    }
+    if (response.data === undefined) {
+      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 删除草稿响应为空。');
+    }
+    try {
+      const payload: DiscourseDraftDeleteResponse = JSON.parse(response.data) as DiscourseDraftDeleteResponse;
+      if (payload.success !== 'OK') {
+        return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 未确认草稿已删除。');
+      }
+    } catch (error) {
+      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 删除草稿响应不是有效 JSON。');
     }
     return {
       success: true,

@@ -34,6 +34,7 @@ import {
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
+import { PROFILE_DRAFT_COUNT_KEY } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -50,6 +51,7 @@ const USER_META_HEIGHT: number = 26;
 export struct ProfilePage {
   // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
+  @StorageProp(PROFILE_DRAFT_COUNT_KEY) private draftCount: number = 0;
   bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   @Prop @Watch('handleArkWebReadyChanged') isArkWebReady: boolean = false;
   // 登录态由 RootTabPage 统一维护(会话事件 + 前台轮询),本页只接收,不再自己查
@@ -300,11 +302,7 @@ export struct ProfilePage {
             this.onOpenActivity(this.getUsername(), '1', '我的点赞');
           }
         })
-        this.QuickEntryNativeBadged($r('sys.symbol.square_and_pencil'), '我的草稿', this.getDraftCount(), () => {
-          if (this.getUsername().length > 0) {
-            this.onOpenDrafts(this.getUsername());
-          }
-        })
+        this.DraftQuickEntry()
       }
       .padding({ top: CARD_PADDING, bottom: 14 })
       .cardStyle()
@@ -461,12 +459,13 @@ export struct ProfilePage {
     })
   }
 
-  // 带角标 + 走原生回调的快捷入口(草稿:已原生化,但要保留草稿数角标)。
+  // 草稿角标直接读取组件 @StorageProp。不要把 count 作为 @Builder 普通参数传入：Navigation 复用页面
+  // 实例时该参数会保留旧快照，只有销毁页面再进入才更新。
   @Builder
-  private QuickEntryNativeBadged(symbol: Resource, label: string, badgeCount: number, onEntryClick: () => void) {
+  private DraftQuickEntry() {
     Column() {
       Badge({
-        count: badgeCount,
+        count: this.draftCount,
         maxCount: 99,
         position: BadgePosition.RightTop,
         style: {
@@ -477,18 +476,20 @@ export struct ProfilePage {
           borderWidth: 0
         }
       }) {
-        SymbolGlyph(symbol)
+        SymbolGlyph($r('sys.symbol.square_and_pencil'))
           .fontSize(24)
           .fontColor([$r('app.color.text_primary')])
       }
-      Text(label)
+      Text('我的草稿')
         .fontSize(12)
         .fontColor($r('app.color.text_primary'))
         .margin({ top: 7 })
     }
     .layoutWeight(1)
     .onClick(() => {
-      onEntryClick();
+      if (this.getUsername().length > 0) {
+        this.onOpenDrafts(this.getUsername());
+      }
     })
   }
 
@@ -899,11 +900,6 @@ export struct ProfilePage {
   private getRepliesLinkLabel(): string {
     const count: number | undefined = this.summaryStats?.postCount;
     return count !== undefined ? `我的回复 ${formatCount(count)} ›` : '我的回复 ›';
-  }
-
-  private getDraftCount(): number {
-    const count: number | undefined = this.accountUser.draftCount;
-    return count !== undefined ? count : 0;
   }
 
   private getAnonymousSubtitle(): string {

@@ -35,6 +35,8 @@ export const COMPOSER_OVERLAY_BACK_TICK_KEY: string = 'composerOverlayBackTick';
 export const DRAFTS_COMPOSER_VISIBLE_KEY: string = 'draftsComposerVisible';
 export const DRAFTS_COMPOSER_BACK_TICK_KEY: string = 'draftsComposerBackTick';
 export const DRAFTS_REFRESH_TICK_KEY: string = 'draftsRefreshTick';
+// 「我的」页草稿角标。单独绑定 AppStorage，避免页面藏在 Navigation 栈中时 @Prop 对象停留在旧快照。
+export const PROFILE_DRAFT_COUNT_KEY: string = 'profileDraftCount';
 
 // 站点列表变更信号(站点管理页改动后通知首页抽屉重读)。
 export const SITES_TICK: string = 'sites_tick';

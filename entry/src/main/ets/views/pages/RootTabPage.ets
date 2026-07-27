@@ -67,7 +67,9 @@ import { SolvedPostsPage } from './SolvedPostsPage';
 import { TopicDetailPage } from './TopicDetailPage';
 import { bumpTick, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY, DRAFTS_COMPOSER_BACK_TICK_KEY,
   DRAFTS_COMPOSER_VISIBLE_KEY, DRAFTS_REFRESH_TICK_KEY, IMAGE_VIEWER_BACK_TICK_KEY, IMAGE_VIEWER_VISIBLE_KEY,
-  SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SETTINGS_DOH_TICK, SITES_TICK } from '../../common/constants/StorageKeys';
+  PROFILE_DRAFT_COUNT_KEY, SEARCH_OVERLAY_BACK_TICK_KEY, SEARCH_OVERLAY_VISIBLE_KEY, SETTINGS_DOH_TICK,
+  SITES_TICK } from '../../common/constants/StorageKeys';
+import { DraftEventBus } from '../../services/draft/DraftEventBus';
 import { WebViewPage } from './WebViewPage';
 import { showToast as promptToast } from '../../common/utils/Toast';
 import { MATH_HOST_ACTIVE_KEY } from '../../services/content/MathRenderService';
@@ -175,6 +177,7 @@ export struct RootTabPage {
   private unsubscribeChallengeRequired?: () => void = undefined;
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeDownload?: () => void = undefined;
+  private unsubscribeDraftDeleted?: () => void = undefined;
   private unsubscribeRequireLogin?: () => void = undefined;
   private unsubscribeManualChallenge?: () => void = undefined;
   private unsubscribePushNavigation?: () => void = undefined;
@@ -221,6 +224,11 @@ export struct RootTabPage {
     if (!this.unsubscribeDownload) {
       this.unsubscribeDownload = DownloadEventBus.subscribe((result: DownloadResult) => {
         this.handleDownloadResult(result);
+      });
+    }
+    if (!this.unsubscribeDraftDeleted) {
+      this.unsubscribeDraftDeleted = DraftEventBus.subscribeDeleted((draftKey: string) => {
+        this.handleDraftDeleted(draftKey);
       });
     }
     // 深层页面/楼层动作在未登录时点写操作,经 LoginGate 请求登录,统一在此弹出登录页。
@@ -272,6 +280,10 @@ export struct RootTabPage {
     if (this.unsubscribeDownload) {
       this.unsubscribeDownload();
       this.unsubscribeDownload = undefined;
+    }
+    if (this.unsubscribeDraftDeleted) {
+      this.unsubscribeDraftDeleted();
+      this.unsubscribeDraftDeleted = undefined;
     }
     if (this.unsubscribeRequireLogin) {
       this.unsubscribeRequireLogin();
@@ -1550,6 +1562,16 @@ export struct RootTabPage {
     };
   }
 
+  // 删除接口已确认成功，直接更新唯一的共享角标数；会话接口可能短暂返回删除前的缓存值，
+  // 因此这里不立即重查 /session/current.json。
+  private handleDraftDeleted(draftKey: string): void {
+    const storedCount: number | undefined = AppStorage.get<number>(PROFILE_DRAFT_COUNT_KEY);
+    const draftCount: number = storedCount !== undefined ? storedCount : (this.currentUser?.draftCount ?? 0);
+    const nextDraftCount: number = Math.max(0, draftCount - 1);
+    AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY, nextDraftCount);
+    Log.i(`${LOG_TAG} draft count updated key=${draftKey} ${draftCount}->${nextDraftCount}`);
+  }
+
   private async checkCurrentUser(): Promise<void> {
     if (!this.isArkWebReady) {
       return;
@@ -1579,6 +1601,8 @@ export struct RootTabPage {
       // 连接恢复,复位自愈闸,允许下一段网络故障再自愈一次。
       this.hasSelfHealedNetwork = false;
       this.currentUser = result.data;
+      AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY,
+        this.currentUser?.draftCount !== undefined ? this.currentUser.draftCount : 0);
       // 同步全局登录态镜像:供深层页面/楼层动作的写操作闸门(LoginGate)读取。
       LoginGate.setLoggedIn(this.currentUser !== undefined);
       Log.i(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);

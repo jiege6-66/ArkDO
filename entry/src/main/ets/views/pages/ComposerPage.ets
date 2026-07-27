@@ -23,6 +23,7 @@ import { FaIconDefinition, FaIconView } from '../components/FaIcon';
 import { TagSuggestion, TopicService } from '../../services/topic/TopicService';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { DraftService, SaveTopicDraftInput } from '../../services/draft/DraftService';
+import { DraftEventBus } from '../../services/draft/DraftEventBus';
 import { DraftTagRef } from '../../models/Draft';
 import { PostRichContent } from '../components/PostRichContent';
 import { applyAction, EditState, MdAction } from '../../utils/markdownInsert';
@@ -158,6 +159,8 @@ export struct ComposerPage {
   private draftDirty: boolean = false;
   // 一次只允许一个保存在途,避免并发把 sequence 写乱。
   private draftSaving: boolean = false;
+  // 只有成功保存过或由草稿列表续写带入的草稿，删除成功后才应递减角标。
+  private draftPersisted: boolean = false;
   // 发表成功后置真:阻止收尾的补存把已删的草稿又写回来。
   private draftPublished: boolean = false;
 
@@ -222,6 +225,7 @@ export struct ComposerPage {
       this.selectedTags = this.initialTags.slice();
       this.draftKey = this.initialDraftKey;
       this.draftSequence = this.initialDraftSequence;
+      this.draftPersisted = this.initialDraftKey.length > 0;
       if (this.categoryId >= 0) {
         this.refreshSelectedCategoryVisual();
       }
@@ -391,6 +395,7 @@ export struct ComposerPage {
     if (result.success && result.data !== undefined) {
       // 服务端回的序号是下次该带的,存回去,否则下次保存会因序号过期被拒。
       this.draftSequence = result.data;
+      this.draftPersisted = true;
       Log.i(`${LOG_TAG} draft saved key=${this.draftKey} seq=${this.draftSequence}`);
     } else {
       // 存失败不打扰用户(草稿是兜底能力),标回脏,下次输入或关闭时再试。
@@ -409,8 +414,12 @@ export struct ComposerPage {
     if (!this.draftService || this.draftKey.length === 0) {
       return;
     }
-    await this.draftService.deleteDraft(this.draftKey, this.draftSequence);
-    Log.i(`${LOG_TAG} draft deleted after publish key=${this.draftKey}`);
+    const result: NetworkResult<boolean> = await this.draftService.deleteDraft(this.draftKey, this.draftSequence);
+    if (result.success && this.draftPersisted) {
+      this.draftPersisted = false;
+      DraftEventBus.notifyDeleted(this.draftKey);
+      Log.i(`${LOG_TAG} draft deleted after publish key=${this.draftKey}`);
+    }
   }
 
   // 打开标签选择器:清空搜索词,立刻拉一遍热门标签(q 为空)。

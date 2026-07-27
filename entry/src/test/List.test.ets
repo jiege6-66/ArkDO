@@ -37,6 +37,7 @@ import homeIncomingTopicsPromptTest from './HomeIncomingTopicsPrompt.test';
 import homeIncomingTopicsControllerTest from './HomeIncomingTopicsController.test';
 import messageBusScriptTemplateTest from './MessageBusScriptTemplate.test';
 import messageBusEventBusTest from './MessageBusEventBus.test';
+import draftServiceTest from './DraftService.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -77,4 +78,5 @@ export default function testsuite() {
   homeIncomingTopicsControllerTest();
   messageBusScriptTemplateTest();
   messageBusEventBusTest();
+  draftServiceTest();
 }

@@ -19,6 +19,7 @@ import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
 import { DraftService } from '../../services/draft/DraftService';
+import { DraftEventBus } from '../../services/draft/DraftEventBus';
 import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
 import { ChallengeShortcutPrefs } from '../../services/challenge/ChallengeShortcutPrefs';
 import { BookmarkToggleResult, PostActions } from '../../services/topic/PostActions';
@@ -191,6 +192,8 @@ export struct TopicDetailPage {
   private replyDraftSequence: number = 0;
   private replyDraftTimer: number = -1;
   private replyDraftSaving: boolean = false;
+  // 快速发表时可能还没落过服务端草稿；仅实际存在时删除并递减角标。
+  private replyDraftPersisted: boolean = false;
   // 输入框占位文字:回复话题「回复当前话题」/回复某楼「回复<昵称>」/发 boost「发一个 boost…」。
   @State private composerPlaceholder: string = '回复当前话题';
   // boost 输入目标楼 id:0 = 当前浮层是普通回复;>0 = 当前浮层是给该楼发 boost。
@@ -891,6 +894,7 @@ export struct TopicDetailPage {
     if (result.success && result.data !== undefined) {
       // 服务端回的是下次该带的序号,不存回去下次会因序号过期被拒。
       this.replyDraftSequence = result.data;
+      this.replyDraftPersisted = true;
     }
   }
 
@@ -899,7 +903,13 @@ export struct TopicDetailPage {
     if (!this.detail) {
       return;
     }
-    await new DraftService(this.bridge).deleteDraft(`topic_${this.detail.id}`, this.replyDraftSequence);
+    const draftKey: string = `topic_${this.detail.id}`;
+    const result: NetworkResult<boolean> =
+      await new DraftService(this.bridge).deleteDraft(draftKey, this.replyDraftSequence);
+    if (result.success && this.replyDraftPersisted) {
+      this.replyDraftPersisted = false;
+      DraftEventBus.notifyDeleted(draftKey);
+    }
     this.replyDraftSequence = 0;
   }
 
@@ -916,7 +926,10 @@ export struct TopicDetailPage {
       return;
     }
     const sequence: number = this.param.draftSequence ?? 0;
-    await new DraftService(this.bridge).deleteDraft(key, sequence);
+    const result: NetworkResult<boolean> = await new DraftService(this.bridge).deleteDraft(key, sequence);
+    if (result.success) {
+      DraftEventBus.notifyDeleted(key);
+    }
   }
 
   // 草稿续写:详情加载完后自动弹回复框(仅当路由带了草稿正文,且本次进入还没弹过)。
@@ -930,6 +943,7 @@ export struct TopicDetailPage {
     this.pendingReplyText = draftReply;
     // 沿用草稿原序号继续自动存,不然首次保存会因序号过期被拒。
     this.replyDraftSequence = this.param.draftSequence ?? 0;
+    this.replyDraftPersisted = this.detail !== undefined && this.param.draftKey === `topic_${this.detail.id}`;
     this.openFullComposer(draftReply, 0);
   }
 
