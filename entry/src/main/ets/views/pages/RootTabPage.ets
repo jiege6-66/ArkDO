@@ -37,6 +37,7 @@ import { DohManager, DohResolveMode } from '../../services/network/DohManager';
 import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
+import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { ArkWebHost } from '../components/ArkWebHost';
 import { MathRenderHost } from '../components/MathRenderHost';
 import { ImageViewer, ViewerImage } from '../components/ImageViewer';
@@ -1591,6 +1592,9 @@ export struct RootTabPage {
         // 登录态已落定:此刻才拿得到 userId,兑现该账号此前开过的推送订阅(保活/自愈)。
         // 内部按账号去重,不会每轮轮询都跑。
         this.pushCoordinator.reconcile(false);
+        // 会话检查刚成功 = 刚发过请求,内存里几乎必是服务端最新轮换的 `_t`;顺手落盘一次,
+        // 堵住「前台长时间停留、宿主一直没重载」时磁盘 `_t` 落后于内存的窗口。与退后台保存互补。
+        WebSessionManager.saveCookies('sessionCheck');
       } else {
         this.notificationService.stop();
         // 登出/换号:清掉自愈基准,让下一个账号登录时重新兑现自己的订阅。

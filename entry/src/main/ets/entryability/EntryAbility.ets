@@ -10,6 +10,7 @@ import { ImmersiveWindow } from '../common/utils/ImmersiveWindow';
 import { DohManager } from '../services/network/DohManager';
 import { FileLogger } from '../services/logging/FileLogger';
 import { AppStateEventBus } from '../services/session/AppStateEventBus';
+import { WebSessionManager } from '../services/web/WebSessionManager';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
 import { LINUXDO_EMOJIS_RAWFILE, loadEmojiUrlsFromRawContent } from '../views/components/EmojiUrlRegistry';
@@ -119,6 +120,10 @@ export default class EntryAbility extends UIAbility {
     HoldingHandManager.pause();
     // 退后台可能随即被系统回收,把缓冲日志强制落盘,避免丢最后一段。
     FileLogger.flush();
+    // Discourse 的 `_t` 认证 cookie 每活跃约 10 分钟就被服务端轮换一次,新值先落在 Chromium
+    // 内存 cookie 仓;若进程在后台被回收前未落盘,冷启动会从磁盘恢复过期旧 `_t` → 掉登录。
+    // 退后台是被回收前最后可确定执行代码的时机,在此 flush 一次,保证磁盘快照=最新 `_t`。
+    WebSessionManager.saveCookies('onBackground');
   }
 
   // 全局未捕获异常:崩溃堆栈写入日志并立即刷盘,导出日志里保留闪退现场。
