@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { EmojiPreviewHtml } from '../main/ets/services/content/EmojiPreviewHtml';
+import { CookedHtmlParser } from '../main/ets/services/content/CookedHtmlParser';
+import { RichInlineNode, RichInlineType } from '../main/ets/services/content/RichContentTypes';
 
 function resolveTestEmoji(name: string): string | undefined {
   if (name === 'heart') {
@@ -44,6 +46,17 @@ export default function emojiPreviewHtmlTest() {
       expect(html).assertEqual(
         '<p><img class="emoji" src="https://cdn.example/pinata.png" alt=":piñata:" title=":piñata:" width="20" height="20"></p>'
       );
+    });
+
+    it('rendersBoostTextAndShortcodeAsInlineTextAndImage', 0, () => {
+      const html: string = EmojiPreviewHtml.render('<p>我核对一下:heart:</p>', resolveTestEmoji);
+      const inlines: RichInlineNode[] = CookedHtmlParser.toInlineNodes(html);
+
+      expect(inlines.length).assertEqual(2);
+      expect(inlines[0].type).assertEqual(RichInlineType.TEXT);
+      expect(inlines[0].text).assertEqual('我核对一下');
+      expect(inlines[1].type).assertEqual(RichInlineType.IMAGE);
+      expect(inlines[1].src).assertEqual('https://cdn.example/heart.png');
     });
   });
 }

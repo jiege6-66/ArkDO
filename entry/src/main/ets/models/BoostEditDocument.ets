@@ -88,6 +88,11 @@ export class BoostEditDocument {
     return BoostEditDocument.logicalLength(BoostEditDocument.parse(raw.trim(), isKnownEmoji));
   }
 
+  static needsSpaceBeforeEmoji(tokens: BoostEditToken[]): boolean {
+    const raw: string = BoostEditDocument.serialize(tokens);
+    return raw.length > 0 && raw.trimEnd().length === raw.length;
+  }
+
   private static appendText(tokens: BoostEditToken[], value: string): void {
     if (value.length === 0) {
       return;

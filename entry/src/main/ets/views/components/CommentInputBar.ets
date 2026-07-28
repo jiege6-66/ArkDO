@@ -81,6 +81,8 @@ export struct CommentInputBar {
   // 表情富文本输入：选择的表情直接渲染成图片 Span，并按一个字符计数。
   // 当前普通回复与 Boost 都开启；保留开关方便其它纯文本调用方复用。
   richEmojiMode: boolean = false;
+  // 官方 Boost 从表情选择器插入表情时，会在已有文字与短码之间加一个空格。
+  spaceBeforeSelectedEmoji: boolean = false;
   // 返回 true 表示提交成功（浮层随即清空并关闭）；false 表示失败（保留内容供重试）。
   onSubmit: (text: string, typingMs: number, composerMs: number) => Promise<boolean> =
     (text: string, typingMs: number, composerMs: number) => Promise.resolve(false);
@@ -406,6 +408,10 @@ export struct CommentInputBar {
     const end: number = Math.max(selection[0], selection[1]);
     const total: number = this.richContentLength();
     const candidate: BoostEditToken[] = this.richTokensFromRange(0, start);
+    const needsSpace: boolean = this.spaceBeforeSelectedEmoji && BoostEditDocument.needsSpaceBeforeEmoji(candidate);
+    if (needsSpace) {
+      candidate.push({ type: BoostTokenType.TEXT, value: ' ' });
+    }
     candidate.push({ type: BoostTokenType.EMOJI, value: emoji.name });
     const tail: BoostEditToken[] = this.richTokensFromRange(end, total);
     for (let index: number = 0; index < tail.length; index++) {
@@ -418,8 +424,21 @@ export struct CommentInputBar {
     if (end > start) {
       this.richController.deleteSpans({ start: start, end: end });
     }
+    let emojiOffset: number = start;
+    if (needsSpace) {
+      this.richController.addTextSpan(' ', {
+        offset: start,
+        style: {
+          fontSize: 16,
+          fontColor: $r('app.color.text_primary'),
+          lineHeight: COMMENT_INPUT_LINE_HEIGHT,
+          halfLeading: COMMENT_INPUT_HALF_LEADING
+        }
+      });
+      emojiOffset++;
+    }
     this.richController.addImageSpan(emoji.url, {
-      offset: start,
+      offset: emojiOffset,
       imageStyle: {
         size: [COMMENT_INPUT_EMOJI_SIZE, COMMENT_INPUT_EMOJI_SIZE],
         verticalAlign: ImageSpanAlignment.CENTER,
@@ -432,9 +451,10 @@ export struct CommentInputBar {
         }
       }
     });
-    this.richController.setCaretOffset(start + 1);
-    this.selectionStart = start + 1;
-    this.selectionEnd = start + 1;
+    const caret: number = emojiOffset + 1;
+    this.richController.setCaretOffset(caret);
+    this.selectionStart = caret;
+    this.selectionEnd = caret;
     this.syncBoostText();
   }
 

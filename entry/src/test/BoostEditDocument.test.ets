@@ -37,5 +37,18 @@ export default function boostEditDocumentTest() {
         { type: BoostTokenType.TEXT, value: '  ' }
       ])).assertEqual(3);
     });
+
+    it('addsSeparatorBeforePickerEmojiOnlyAfterNonWhitespaceContent', 0, () => {
+      expect(BoostEditDocument.needsSpaceBeforeEmoji([])).assertFalse();
+      expect(BoostEditDocument.needsSpaceBeforeEmoji([
+        { type: BoostTokenType.TEXT, value: '我核对一下' }
+      ])).assertTrue();
+      expect(BoostEditDocument.needsSpaceBeforeEmoji([
+        { type: BoostTokenType.TEXT, value: '我核对一下 ' }
+      ])).assertFalse();
+      expect(BoostEditDocument.needsSpaceBeforeEmoji([
+        { type: BoostTokenType.EMOJI, value: 'heart' }
+      ])).assertTrue();
+    });
   });
 }

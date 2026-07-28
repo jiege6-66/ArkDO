@@ -3,6 +3,7 @@ import { curves } from '@kit.ArkUI';
 import { AcceptedAnswer, Poll, PollVoteResult, PostBoost, PostReaction, SharedIssueResult, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../../services/content/CookedHtmlParser';
+import { EmojiPreviewHtml } from '../../services/content/EmojiPreviewHtml';
 import { RichInlineNode, RichInlineType } from '../../services/content/RichContentTypes';
 import { RelativeTime } from '../../common/utils/RelativeTime';
 import { ReactionMutation } from '../../services/topic/ReactionMutation';
@@ -957,7 +958,9 @@ export struct TopicPostItem {
 
   // 把 boost 的 cooked HTML 解析成行内节点(文字 + emoji 图片),供气泡内 Text 混排渲染。
   private boostInlines(boost: PostBoost): RichInlineNode[] {
-    return CookedHtmlParser.toInlineNodes(boost.cookedHtml);
+    // discourse-boosts 的 cooked 有时仍保留 :emoji_name: 短码，先补成与正文一致的 emoji 图片标签。
+    const renderedHtml: string = EmojiPreviewHtml.render(boost.cookedHtml, getEmojiUrl);
+    return CookedHtmlParser.toInlineNodes(renderedHtml);
   }
 
   private hasBoosts(): boolean {

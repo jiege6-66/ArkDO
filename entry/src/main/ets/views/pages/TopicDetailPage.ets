@@ -733,6 +733,7 @@ export struct TopicDetailPage {
         // 普通回复与 Boost 都在底部输入条直接显示表情图片 Span，并按一个字符计数。
         // 展开后的全屏编辑器仍接收序列化短码，继续使用现有 TextArea Markdown 编辑模式。
         richEmojiMode: true,
+        spaceBeforeSelectedEmoji: this.boostTargetPostId > 0,
         // 带回上次未发出的内容。boost 与回复各自独立;boost 还要再按楼区分。
         initialText: this.boostTargetPostId > 0
           ? (this.pendingBoostByPostId.get(this.boostTargetPostId) ?? '')
