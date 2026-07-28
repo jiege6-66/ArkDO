@@ -982,7 +982,8 @@ export class TopicService {
       canCreateSharedIssue: sourceTopic.can_create_shared_issue === true,
       userCreatedSharedIssue: sourceTopic.user_created_shared_issue === true,
       sharedIssueCount: typeof sourceTopic.shared_issue_count === 'number' ? sourceTopic.shared_issue_count : 0,
-      pendingPosts: this.mapPendingPosts(sourceTopic.pending_posts)
+      pendingPosts: this.mapPendingPosts(sourceTopic.pending_posts),
+      messageBusLastId: typeof sourceTopic.message_bus_last_id === 'number' ? sourceTopic.message_bus_last_id : undefined
     };
   }
 

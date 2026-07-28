@@ -163,6 +163,9 @@ export interface TopicDetail {
   // 当前用户在本主题下待审核的回复(topic.json 顶层 pending_posts)。对齐官方:只在楼层全部加载完
   // 之后、列表最底部铺卡片,不占楼号也不进 post_stream。仅本人可见,故作者信息取当前登录用户。
   pendingPosts?: PendingPost[];
+  // MessageBus 订阅起点游标(topic.json 顶层 message_bus_last_id)。详情页订阅 /topic/<id> 时
+  // 以此为起点,闭合加载与订阅之间的窗口;缺失则订阅时回落 -1(只收新)。
+  messageBusLastId?: number;
 }
 
 // 待审帖快照。raw 是 Markdown 原文(服务端不下发 cooked),按纯文本直出——待审内容基本都是刚发的短回复。

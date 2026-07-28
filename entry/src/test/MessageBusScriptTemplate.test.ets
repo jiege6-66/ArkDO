@@ -99,5 +99,19 @@ export default function messageBusScriptTemplateTest() {
       expect(script).assertContain('pollConfig.currentUserId > 0');
       expect(script).assertContain("state.channels['/notification/' + pollConfig.currentUserId] = -1");
     });
+
+    it('exposesDynamicChannelSubscriptionApi', 0, () => {
+      const script: string = buildMessageBusScript();
+
+      // 详情页动态订阅 /topic/<id> 的运行时增删入口 + 持久集合。
+      expect(script).assertContain('window.__arkdoMessageBusAddChannel');
+      expect(script).assertContain('window.__arkdoMessageBusRemoveChannel');
+      expect(script).assertContain('window.__arkdoMessageBusChannels = window.__arkdoMessageBusChannels || {}');
+      // start() 并入持久集合并暴露活跃 state，供运行时增删。
+      expect(script).assertContain('state.channels[name] = extraChannels[name]');
+      expect(script).assertContain('window.__arkdoMessageBusActiveState = state');
+      // 动态频道游标随 poll 推进同步进持久集合，循环重启后从最新位置续订。
+      expect(script).assertContain('window.__arkdoMessageBusChannels[message.channel] = message.message_id');
+    });
   });
 }

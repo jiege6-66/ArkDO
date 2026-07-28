@@ -13,6 +13,11 @@ export interface MessageBusData {
   all_unread_notifications_count?: number;
   unread_notifications?: number;
   unread_high_priority_notifications?: number;
+  // /topic/<id> 频道 payload（post.rb publish_change_to_clients!:229-239，已核源码）。
+  // id=帖子 id；post_number=楼号；type=动作类型（新楼为 'created'，还有 revised/deleted 等）。
+  id?: number;
+  post_number?: number;
+  type?: string;
 }
 
 export interface MessageBusEvent {
@@ -54,6 +59,19 @@ export function extractMessageBusTopicId(event: MessageBusEvent | undefined): nu
     return undefined;
   }
   return Math.floor(topicId);
+}
+
+// 从 /topic/<id> 频道事件里取"新建帖子"的 post id：仅 type==='created' 且 data.id 为正整数时返回。
+// 其它动作类型（revised/deleted/...）与无 type 的整帖刷新消息一律返回 undefined（P2 MVP 只做新楼）。
+export function extractCreatedPostId(event: MessageBusEvent | undefined): number | undefined {
+  if (!event || event.type !== 'message' || !event.data || event.data.type !== 'created') {
+    return undefined;
+  }
+  const postId: number | undefined = event.data.id;
+  if (postId === undefined || !Number.isFinite(postId) || postId <= 0) {
+    return undefined;
+  }
+  return Math.floor(postId);
 }
 
 export class MessageBusEventBus {

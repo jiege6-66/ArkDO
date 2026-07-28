@@ -76,6 +76,9 @@ export interface DiscourseTopicDetail {
   shared_issue_count?: number;
   // 当前用户在本主题下被扣进审核队列、尚未过审的回复(TopicPendingPostSerializer 只给这三个字段)。
   pending_posts?: DiscoursePendingPost[];
+  // MessageBus 订阅起点游标(TopicViewSerializer 顶层 message_bus_last_id):
+  // 订阅 /topic/<id> 时以此为起点,闭合"加载与订阅之间"的窗口;缺失则回落 -1(只收新)。
+  message_bus_last_id?: number;
 }
 
 // 待审帖:序列化器不带作者信息——按定义只有本人看得到自己的待审帖,作者即当前用户。

@@ -439,6 +439,48 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  // 详情页动态订阅 /topic/<id>：注入到运行中的长轮询脚本（复用单例循环，不另起）。
+  // position=打开帖子时的 message_bus_last_id（-1=只收新）。脚本已注入则即时加频道；
+  // 未注入(loop 未跑)则兜底写持久集合 __arkdoMessageBusChannels，待下次 startMessageBus 并入。
+  subscribeTopicChannel(topicId: number, position: number): void {
+    if (!this.controller) {
+      logNetwork('MessageBus subscribeTopic skipped: controller not ready');
+      return;
+    }
+    const channel: string = JSON.stringify(`/topic/${topicId}`);
+    const pos: number = Number.isFinite(position) ? Math.floor(position) : -1;
+    const script: string =
+      `if (window.__arkdoMessageBusAddChannel) { window.__arkdoMessageBusAddChannel(${channel}, ${pos}); } ` +
+      `else { window.__arkdoMessageBusChannels = window.__arkdoMessageBusChannels || {}; ` +
+      `if (!(${channel} in window.__arkdoMessageBusChannels)) { window.__arkdoMessageBusChannels[${channel}] = ${pos}; } }`;
+    try {
+      this.controller.runJavaScript(script).catch(() => {
+        logNetwork('MessageBus subscribeTopic injection failed');
+      });
+    } catch (error) {
+      logNetwork('MessageBus subscribeTopic injection failed');
+    }
+  }
+
+  // 离开详情页时退订 /topic/<id>：删频道，下一轮 poll 不再携带它。
+  unsubscribeTopicChannel(topicId: number): void {
+    if (!this.controller) {
+      logNetwork('MessageBus unsubscribeTopic skipped: controller not ready');
+      return;
+    }
+    const channel: string = JSON.stringify(`/topic/${topicId}`);
+    const script: string =
+      `if (window.__arkdoMessageBusRemoveChannel) { window.__arkdoMessageBusRemoveChannel(${channel}); } ` +
+      `else if (window.__arkdoMessageBusChannels) { delete window.__arkdoMessageBusChannels[${channel}]; }`;
+    try {
+      this.controller.runJavaScript(script).catch(() => {
+        logNetwork('MessageBus unsubscribeTopic injection failed');
+      });
+    } catch (error) {
+      logNetwork('MessageBus unsubscribeTopic injection failed');
+    }
+  }
+
   private whenHostReady(): Promise<void> {
     if (!this.reloading) {
       return Promise.resolve();

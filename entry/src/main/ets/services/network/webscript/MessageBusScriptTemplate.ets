@@ -4,6 +4,27 @@ export function buildMessageBusScript(): string {
   return `(() => {
       // 注入即代表"要运行"：清掉可能残留的停止请求，让本次循环正常起跑。
       window.__arkdoMessageBusStopRequested = false;
+      // 详情页等临时频道：持久集合(跨同文档内的循环重启存活) + 运行时增删入口。
+      // ArkTS 侧经桥调用这两个函数动态订阅/退订 /topic/<id>。定义在 start 外，每次注入都(重)定义。
+      window.__arkdoMessageBusChannels = window.__arkdoMessageBusChannels || {};
+      window.__arkdoMessageBusAddChannel = (name, position) => {
+        const pos = (typeof position === 'number') ? position : -1;
+        // 已存在则不覆盖游标：避免重订阅(循环重启补订)把已推进的游标重置回起点。
+        if (!Object.prototype.hasOwnProperty.call(window.__arkdoMessageBusChannels, name)) {
+          window.__arkdoMessageBusChannels[name] = pos;
+        }
+        const active = window.__arkdoMessageBusActiveState;
+        if (active && !Object.prototype.hasOwnProperty.call(active.channels, name)) {
+          active.channels[name] = window.__arkdoMessageBusChannels[name];
+        }
+      };
+      window.__arkdoMessageBusRemoveChannel = (name) => {
+        delete window.__arkdoMessageBusChannels[name];
+        const active = window.__arkdoMessageBusActiveState;
+        if (active) {
+          delete active.channels[name];
+        }
+      };
       const emit = (event) => {
         try {
           window.ArkDOBridge.onBusEvent(JSON.stringify(event));
@@ -150,6 +171,12 @@ export function buildMessageBusScript(): string {
         if (pollConfig.currentUserId > 0) {
           state.channels['/notification/' + pollConfig.currentUserId] = -1;
         }
+        // 并入详情页等动态订阅的持久频道（循环重启后仍生效）；再暴露 state 供运行时增删。
+        const extraChannels = window.__arkdoMessageBusChannels || {};
+        Object.keys(extraChannels).forEach((name) => {
+          state.channels[name] = extraChannels[name];
+        });
+        window.__arkdoMessageBusActiveState = state;
         emit({
           type: 'status',
           stage: 'config-ready',
@@ -261,6 +288,11 @@ export function buildMessageBusScript(): string {
                 }
                 if (Object.prototype.hasOwnProperty.call(state.channels, message.channel)) {
                   state.channels[message.channel] = message.message_id;
+                  // 持久集合里的动态频道游标同步推进，循环重启后从最新位置续订，避免重放或漏收。
+                  if (window.__arkdoMessageBusChannels &&
+                    Object.prototype.hasOwnProperty.call(window.__arkdoMessageBusChannels, message.channel)) {
+                    window.__arkdoMessageBusChannels[message.channel] = message.message_id;
+                  }
                 }
                 emit({
                   type: 'message',
@@ -275,9 +307,10 @@ export function buildMessageBusScript(): string {
             }
           }
           // 退出循环时复位启动标志，允许重新起跑；但仅当自己仍是最新代次——被更新的循环取代时
-          // 不能清掉接替者的运行标志。
+          // 不能清掉接替者的运行标志，也不能清掉接替者暴露的 activeState。
           if (generation === window.__arkdoMessageBusGeneration) {
             window.__arkdoMessageBusStarted = false;
+            window.__arkdoMessageBusActiveState = undefined;
           }
         };
 

@@ -18,6 +18,8 @@ import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { TopicReadController } from '../../services/reading/TopicReadController';
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
+import { extractCreatedPostId, MessageBusEvent, MessageBusEventBus } from '../../services/message/MessageBusEventBus';
+import { REALTIME_POSTS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimePostsPrefs';
 import { DraftService } from '../../services/draft/DraftService';
 import { DraftEventBus } from '../../services/draft/DraftEventBus';
 import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
@@ -84,6 +86,8 @@ const BOOST_MAX_CHARS: number = 16;
 const REPLY_DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
 // 末尾加载行已有 54vp；再补这段空白与底部安全区，让最后一楼操作区完全越过 52vp 悬浮回复按钮。
 const POST_LIST_BOTTOM_SPACER: number = 28;
+// 实时新楼(MessageBus /topic created)去抖窗口:合并 ~400ms 内连着来的多条 created,一次批量拉。
+const INCOMING_POST_DEBOUNCE_MS: number = 400;
 
 @Component
 export struct TopicDetailPage {
@@ -241,6 +245,17 @@ export struct TopicDetailPage {
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeLoginState?: () => void = undefined;
+  // 实时新楼(MessageBus /topic/<id> 的 created 事件)。总线退订句柄 + 频道订阅在 detail 就位后发起。
+  private unsubscribeMessageBus?: () => void = undefined;
+  // created 只带 post id，无 cooked：收集待拉 id，去抖后一次 loadMorePosts 批量拉。
+  private pendingCreatedPostIds: number[] = [];
+  private createdFetchTimer: number = -1;
+  // "N 条新回复"提示条：用户不在列表底部时累计，点按跳到首条新楼；在底部则直接追加不计数。
+  @State private incomingNewPostCount: number = 0;
+  private incomingFirstNewPostNumber: number = 0;
+  // 「帖子实时更新」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
+  @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
+  private realtimePostsEnabled: boolean = false;
   // 已读追踪控制器:计时上报、已读水位、错峰翻已读、离开时回传列表页,全部由它托管。
   // 用闭包读取 detail 与数据源当前楼层数组(分页后数组会变,不能捕获快照)。
   private readController: TopicReadController = new TopicReadController(
@@ -278,6 +293,14 @@ export struct TopicDetailPage {
 
     this.readController.attach();
 
+    // 实时新楼：订阅全局 MessageBus 总线（按 channel 过滤本帖）。频道订阅本身在 detail 就位后
+    // (loadTopicDetail 成功)才发起——那时才有 topicId 与 message_bus_last_id。
+    if (!this.unsubscribeMessageBus) {
+      this.unsubscribeMessageBus = MessageBusEventBus.subscribe((event: MessageBusEvent) => {
+        this.handleMessageBusEvent(event);
+      });
+    }
+
     if (this.isArkWebReady && !this.detail) {
       this.loadSiteMetadataIfNeeded();
       this.loadTopicDetail();
@@ -310,6 +333,19 @@ export struct TopicDetailPage {
     if (this.unsubscribeLoginState) {
       this.unsubscribeLoginState();
       this.unsubscribeLoginState = undefined;
+    }
+
+    // 退订实时新楼：总线退订 + 从长轮询循环里删掉本帖频道 + 清掉去抖计时器。
+    if (this.unsubscribeMessageBus) {
+      this.unsubscribeMessageBus();
+      this.unsubscribeMessageBus = undefined;
+    }
+    if (this.detail) {
+      this.bridge.unsubscribeTopicChannel(this.detail.id);
+    }
+    if (this.createdFetchTimer !== -1) {
+      clearTimeout(this.createdFetchTimer);
+      this.createdFetchTimer = -1;
     }
 
     if (this.flashClearTimerId >= 0) {
@@ -512,6 +548,8 @@ export struct TopicDetailPage {
       if (!this.hasMorePosts) {
         this.atListEnd = true;
         this.currentPostNumber = this.getHighestPostNumber();
+        // 滚到底即已看到新楼：清掉"N 条新回复"提示条。
+        this.clearIncomingBanner();
       }
     })
   }
@@ -718,6 +756,32 @@ export struct TopicDetailPage {
       .shadow({ radius: 6, color: SHADOW_SOFT, offsetX: 0, offsetY: 1 })
       .position({ x: '50%', y: 72 })
       .markAnchor({ x: '50%', y: 0 })
+      .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
+    }
+
+    // 实时新楼提示条：用户不在底部时新楼到达累计，点按跳到首条新楼。悬浮在底部中央、不参与布局，
+    // 与向上加载胶囊同一套"悬浮小胶囊"长相。在底部时不显示(那时直接追加并滚动揭示)。
+    if (this.incomingNewPostCount > 0 && !this.showComposer) {
+      Row() {
+        Text('↓')
+          .fontSize(13)
+          .fontColor($r('app.color.brand'))
+          .margin({ right: 6 })
+        Text(`${this.incomingNewPostCount} 条新回复`)
+          .fontSize(13)
+          .fontColor($r('app.color.brand'))
+      }
+      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      .backgroundColor($r('app.color.surface_card'))
+      .borderRadius(16)
+      .shadow({ radius: 8, color: SHADOW_SOFT, offsetX: 0, offsetY: 2 })
+      // 垂直中心与右下角悬浮回复按钮对齐：按中心锚定到底边，再上移(FAB 底距 + FAB 半高 26)。
+      .position({ x: '50%', y: '100%' })
+      .markAnchor({ x: '50%', y: '50%' })
+      .offset({ y: -(floatingActionBottomMargin(this.sysBottomInset) + 26) })
+      .onClick(() => {
+        this.openIncomingPosts();
+      })
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
@@ -1057,6 +1121,120 @@ export struct TopicDetailPage {
     const reason: string = result.error ? result.error.message : 'Boost 发送失败，请稍后重试。';
     this.showComposerToast(reason, 2000);
     return false;
+  }
+
+  // ===== 实时新楼(MessageBus /topic/<id> 的 created 事件) =====
+
+  // detail 就位后向长轮询循环订阅本帖频道；循环重启(config-ready)时也会重新订阅。
+  private subscribeTopicChannel(): void {
+    if (!this.detail || !this.realtimePostsEnabled) {
+      return;
+    }
+    const position: number = this.detail.messageBusLastId !== undefined ? this.detail.messageBusLastId : -1;
+    this.bridge.subscribeTopicChannel(this.detail.id, position);
+  }
+
+  // 「帖子实时更新」开关运行中翻转：开⇒订阅本帖频道；关⇒退订并清掉待处理与提示条。
+  private onRealtimePostsToggled(): void {
+    if (this.realtimePostsEnabled) {
+      this.subscribeTopicChannel();
+    } else if (this.detail) {
+      this.bridge.unsubscribeTopicChannel(this.detail.id);
+      this.pendingCreatedPostIds = [];
+      if (this.createdFetchTimer !== -1) {
+        clearTimeout(this.createdFetchTimer);
+        this.createdFetchTimer = -1;
+      }
+      this.clearIncomingBanner();
+    }
+  }
+
+  // 总线事件入口。只处理本帖 /topic/<id> 上的 created(MVP)；循环重启时补订阅。
+  private handleMessageBusEvent(event: MessageBusEvent): void {
+    // 循环重启(host 重载/前后台切换)后 state 重建，补订本帖频道(subscribeTopicChannel 自身按开关守卫)。
+    if (event.type === 'status' && event.stage === 'config-ready') {
+      this.subscribeTopicChannel();
+      return;
+    }
+    if (!this.realtimePostsEnabled || event.type !== 'message' || this.detail === undefined) {
+      return;
+    }
+    if (event.channel !== `/topic/${this.detail.id}`) {
+      return;
+    }
+    // 只在"已加载到话题结尾"时接新楼：否则新楼在已加载窗口之外，原地追加会造成楼号跳断。
+    // hasMorePosts 时忽略(与无实时时行为一致，用户翻到末页/重进即可见)。
+    if (this.hasMorePosts) {
+      return;
+    }
+    const postId: number | undefined = extractCreatedPostId(event);
+    if (postId === undefined) {
+      return; // 非 created(revised/deleted/无 type 整帖刷新等)MVP 不处理
+    }
+    // 已加载 / 已在待拉队列的跳过(含用户自己刚发、已本地追加的楼)。
+    if (PostStreamPager.findById(this.dataSource.getAll(), postId) !== undefined ||
+      this.pendingCreatedPostIds.indexOf(postId) >= 0) {
+      return;
+    }
+    this.pendingCreatedPostIds.push(postId);
+    if (this.createdFetchTimer !== -1) {
+      return; // 去抖：已排定一次批量拉，合并本次
+    }
+    this.createdFetchTimer = setTimeout(() => {
+      this.createdFetchTimer = -1;
+      this.flushCreatedPosts();
+    }, INCOMING_POST_DEBOUNCE_MS);
+  }
+
+  // 去抖到点：批量拉收集到的新楼，追加到列表尾；在底部则滚动揭示，否则累计提示条。
+  private async flushCreatedPosts(): Promise<void> {
+    const topicId: number | undefined = this.detail?.id;
+    const ids: number[] = this.pendingCreatedPostIds.filter((id: number) =>
+      PostStreamPager.findById(this.dataSource.getAll(), id) === undefined);
+    this.pendingCreatedPostIds = [];
+    if (topicId === undefined || ids.length === 0 || this.hasMorePosts) {
+      return;
+    }
+    const result: NetworkResult<TopicPost[]> = await new TopicService(this.bridge).loadMorePosts(topicId, ids);
+    // 拉取期间可能发生换窗(rewindowToPost 跳到中段)：此时 hasMorePosts 变真，末尾追加会造成楼号跳断，
+    // 或 detail/topic 已切换——一律放弃本次追加。
+    if (!result.success || !result.data || result.data.length === 0 ||
+      !this.detail || this.detail.id !== topicId || this.hasMorePosts) {
+      return;
+    }
+    const before: number = this.dataSource.totalCount();
+    const added: number = this.dataSource.appendPosts(result.data);
+    if (added <= 0) {
+      return; // 全被去重(期间已由其它路径插入)
+    }
+    this.postCount = this.dataSource.totalCount();
+    const firstNewPostNumber: number = this.dataSource.getData(before).postNumber;
+    Log.i(`${LOG_TAG} realtime created topicId=${topicId} ids=${ids.length} added=${added} atEnd=${this.atListEnd}`);
+    if (this.atListEnd) {
+      // 在底部：直接滚到底揭示新楼，不累计提示条。
+      this.scroller.scrollEdge(Edge.Bottom);
+      this.clearIncomingBanner();
+    } else {
+      // 不在底部：累计提示条，记住首条新楼楼号供点按跳转。
+      if (this.incomingNewPostCount === 0) {
+        this.incomingFirstNewPostNumber = firstNewPostNumber;
+      }
+      this.incomingNewPostCount += added;
+    }
+  }
+
+  private clearIncomingBanner(): void {
+    this.incomingNewPostCount = 0;
+    this.incomingFirstNewPostNumber = 0;
+  }
+
+  // 点"N 条新回复"提示条：跳到首条新楼(已在列表中，走 jumpToPostNumber 的已加载滚动+落地高亮分支)。
+  private openIncomingPosts(): void {
+    const target: number = this.incomingFirstNewPostNumber;
+    this.clearIncomingBanner();
+    if (target > 0) {
+      this.jumpToPostNumber(target);
+    }
   }
 
   // 按 postNumber 滚动定位到对应楼层。List index 0 是 TopicSummary,楼层从 index 1 起 → 目标 index = 楼序 + 1。
@@ -1516,6 +1694,8 @@ export struct TopicDetailPage {
       }
       Log.i(`${LOG_TAG} load detail success topicId=${result.data.id} posts=${result.data.posts.length} stream=${result.data.stream ? result.data.stream.length : 0}`);
       this.startReadingTrackerIfNeeded();
+      // detail 就位：订阅 /topic/<id> 实时新楼（起点游标取 message_bus_last_id，缺失回落 -1）。
+      this.subscribeTopicChannel();
       return;
     }
 

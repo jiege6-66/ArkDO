@@ -1,5 +1,6 @@
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { RealtimeTopicsPrefs } from '../../services/realtime/RealtimeTopicsPrefs';
+import { RealtimePostsPrefs } from '../../services/realtime/RealtimePostsPrefs';
 import { HoldingHandManager } from '../../common/utils/HoldingHandManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
@@ -20,12 +21,15 @@ export struct ExperimentalSettingsPage {
   onBack: () => void = () => {};
   // 实时更新话题开关(默认关),进页时从 preferences 载入。
   @State private realtimeTopicsEnabled: boolean = false;
+  // 帖子实时更新开关(默认关),进页时从 preferences 载入。
+  @State private realtimePostsEnabled: boolean = false;
   // 智感握姿开关(默认关),进页时从 HoldingHandManager 读取。
   @State private smartReachEnabled: boolean = false;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     this.realtimeTopicsEnabled = RealtimeTopicsPrefs.isEnabled();
+    this.realtimePostsEnabled = RealtimePostsPrefs.isEnabled();
     this.smartReachEnabled = HoldingHandManager.isEnabled();
   }
 
@@ -60,6 +64,8 @@ export struct ExperimentalSettingsPage {
 
         Column() {
           this.RealtimeTopicsCell()
+          this.HairlineInset()
+          this.RealtimePostsCell()
           this.HairlineInset()
           this.SmartReachCell()
         }
@@ -140,6 +146,38 @@ export struct ExperimentalSettingsPage {
         .onChange((isOn: boolean) => {
           this.realtimeTopicsEnabled = isOn;
           RealtimeTopicsPrefs.setEnabled(getContext(this), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+  }
+
+  @Builder
+  private RealtimePostsCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.message'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('帖子实时更新')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('打开帖子后实时接收他人的新回复')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.realtimePostsEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.realtimePostsEnabled = isOn;
+          RealtimePostsPrefs.setEnabled(getContext(this), isOn);
         })
     }
     .width('100%')
