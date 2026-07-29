@@ -66,20 +66,25 @@ export struct CfChallengePage {
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
 
+        // 关闭键放右上角、做成圆形图标键,与 ComposerPage 的 sheet 头部一致。
+        // 顶部不额外补状态栏内边距:本页由 bindSheet 承载,sheet 已把内容避开状态栏,
+        // 再加一层会让头部凭空高出一截。
         Row() {
-          Button('关闭')
-            .fontSize(15)
-            .fontColor($r('app.color.brand'))
-            .backgroundColor($r('app.color.fill_subtle'))
-            .height(36)
-            .padding({ left: 16, right: 16 })
-            .borderRadius(18)
-            .onClick(() => {
-              this.onClose();
-            })
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            SymbolGlyph($r('sys.symbol.xmark'))
+              .fontSize(16)
+              .fontColor([$r('app.color.text_secondary')])
+              .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+          }
+          .width(36)
+          .height(36)
+          .backgroundColor($r('app.color.fill_subtle'))
+          .onClick(() => {
+            this.onClose();
+          })
         }
         .width('100%')
-        .justifyContent(FlexAlign.Start)
+        .justifyContent(FlexAlign.End)
       }
       .width('100%')
       .height(60)
