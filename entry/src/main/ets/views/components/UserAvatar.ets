@@ -3,6 +3,7 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { ANIMATED_AVATAR_ENABLED_STORAGE_KEY } from '../../services/avatar/AnimatedAvatarPrefs';
 
 @Component
 export struct UserAvatar {
@@ -18,9 +19,23 @@ export struct UserAvatar {
   // 图片型 flair(gif/png,跨源 CDN)同头像走桥取 PixelMap;图标型 flair(FA 名)不用。
   // flair 角标只在稍大的头像上显示,避免 20px 的回复/boost 小头像被角标糊住。
   private readonly flairMinAvatarSize: number = 32;
+  // 「动态头像」开关(实验性功能,默认关)。关⇒头像与图片型 flair 一律取首帧渲染成静态;
+  // 开⇒CDN 上的图交给原生 Image 直载,是动图就自动播放。运行中翻转由 @Watch 重取当前候选。
+  @StorageProp(ANIMATED_AVATAR_ENABLED_STORAGE_KEY) @Watch('onAnimatedAvatarToggled')
+  private animatedAvatarEnabled: boolean = false;
+  // 关闭动图时图片型 flair 解出的单帧 PixelMap。之所以不是"直接不显示角标":
+  // 开关一翻角标就消失的话,分不清观感变化是"动图停了"还是"少了一批组件",对照就不干净了。
+  @State private flairPixelMap: image.PixelMap | undefined = undefined;
+
+  // 开关运行中翻转:重走一遍候选准备。开⇒原生分支直接生效(无需加载);关⇒补取首帧 PixelMap。
+  private onAnimatedAvatarToggled(): void {
+    this.prepareCurrentCandidate();
+    this.prepareFlairIfNeeded();
+  }
 
   aboutToAppear(): void {
     this.prepareCurrentCandidate();
+    this.prepareFlairIfNeeded();
   }
 
   build() {
@@ -75,7 +90,7 @@ export struct UserAvatar {
   @Builder
   FlairBadge() {
     Stack() {
-      if (this.isImageFlair()) {
+      if (this.isImageFlair() && this.animatedAvatarEnabled) {
         // 跨源 CDN 图(cdn3/s3.ldstatic.com,非被封的 linux.do 主站),原生 Image 直载且自动播 gif。
         // 有底色的多是透明 PNG(如信任等级):Contain + 内缩让底色露成圆环;无底色是整幅图:Cover 铺满方块。
         Image(this.flairImageUrl())
@@ -85,6 +100,17 @@ export struct UserAvatar {
           .padding(this.hasFlairBg() ? Math.round(this.flairBadgeSize() * 0.16) : 0)
           .borderRadius(this.flairBadgeRadius())
           .draggable(false)
+      } else if (this.isImageFlair()) {
+        // 关掉动图:同一张图取首帧渲染,几何与上面的原生分支保持一致,开关翻转只改"动不动"。
+        if (this.flairPixelMap) {
+          Image(this.flairPixelMap)
+            .width('100%')
+            .height('100%')
+            .objectFit(this.hasFlairBg() ? ImageFit.Contain : ImageFit.Cover)
+            .padding(this.hasFlairBg() ? Math.round(this.flairBadgeSize() * 0.16) : 0)
+            .borderRadius(this.flairBadgeRadius())
+            .draggable(false)
+        }
       } else {
         FaIconView({
           icon: this.flairFaIcon(),
@@ -106,10 +132,37 @@ export struct UserAvatar {
   // 主站被封头像经 host webview 过盾取字节解码成 PixelMap。
   private prepareCurrentCandidate(): void {
     const url: string = this.currentAvatarUrl();
-    if (url.length === 0 || this.isNativeHost(url)) {
+    // 判据与 build 分支同源(问 useNativeImage 而不是直接问 isNativeHost):否则关掉动图开关后,
+    // build 走 PixelMap 分支、这里却因为"是 CDN 域名"而不去加载,头像会永远停在首字母。
+    if (url.length === 0 || this.useNativeImage()) {
       return;
     }
     this.loadViaBridge(url);
+  }
+
+  // 关闭动图时把图片型 flair 也解成单帧;开启时不需要(原生 Image 直载)。
+  private prepareFlairIfNeeded(): void {
+    if (this.animatedAvatarEnabled || !this.hasFlair() || !this.isImageFlair()) {
+      return;
+    }
+    this.loadFlairViaBridge(this.flairImageUrl());
+  }
+
+  private async loadFlairViaBridge(url: string): Promise<void> {
+    if (url.length === 0) {
+      return;
+    }
+    const cache: AvatarImageCache = AvatarImageCache.getInstance();
+    const cached: image.PixelMap | undefined = cache.getCached(url);
+    if (cached) {
+      this.flairPixelMap = cached;
+      return;
+    }
+    // 取不到就保持 undefined:角标不显示总比显示一个破图好,且 flair 是锦上添花。
+    const pixelMap: image.PixelMap | undefined = await cache.load(url);
+    if (pixelMap) {
+      this.flairPixelMap = pixelMap;
+    }
   }
 
   // 当前候选取不到 → 退到下一候选(动图失败退静态);无更多候选则保持首字母占位。
@@ -216,8 +269,13 @@ export struct UserAvatar {
     return this.avatarSize / 2;
   }
 
-  // 当前候选是否走原生 Image:候选 URL 在未被封的 CDN(ldstatic.com)上。
+  // 当前候选是否走原生 Image:候选 URL 在未被封的 CDN(ldstatic.com)上,且允许播动图。
+  // 关掉「动态头像」时一律不走原生 Image——原生 Image 遇到动图内容就会自动播,没有属性能冻住它;
+  // 唯一能得到静态图的办法是取字节后 createPixelMap() 拿首帧(PixelMap 天然只有一帧)。
   private useNativeImage(): boolean {
+    if (!this.animatedAvatarEnabled) {
+      return false;
+    }
     const url: string = this.currentAvatarUrl();
     return url.length > 0 && this.isNativeHost(url);
   }
@@ -240,7 +298,10 @@ export struct UserAvatar {
   private avatarCandidates(): string[] {
     const candidates: string[] = [];
     const animatedAvatar: string | undefined = this.user?.animatedAvatar;
-    if (animatedAvatar && animatedAvatar.length > 0) {
+    // 关掉动图时跳过 animated_avatar 候选,直接用静态 avatar_template。
+    // (注:linux.do 的 avatar_template 本身也常是动图内容,所以只跳过这个候选并不够,
+    //  还得靠 useNativeImage 强制走 PixelMap 首帧路径,两者缺一不可。)
+    if (this.animatedAvatarEnabled && animatedAvatar && animatedAvatar.length > 0) {
       candidates.push(this.resolveAvatarUrl(animatedAvatar));
     }
     const avatarTemplate: string | undefined = this.user?.avatarTemplate;

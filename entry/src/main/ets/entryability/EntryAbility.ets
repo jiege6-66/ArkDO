@@ -25,6 +25,7 @@ import { HoldingHandManager } from '../common/utils/HoldingHandManager';
 import { RealtimeTopicsPrefs } from '../services/realtime/RealtimeTopicsPrefs';
 import { RealtimePostsPrefs } from '../services/realtime/RealtimePostsPrefs';
 import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
+import { AnimatedAvatarPrefs } from '../services/avatar/AnimatedAvatarPrefs';
 
 const DOMAIN = 0x0000;
 
@@ -53,6 +54,9 @@ export default class EntryAbility extends UIAbility {
     // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，
     // 保证首帧 FAB 就按正确样式渲染(默认关⇒当前透明样式)。
     FabGlassPrefs.load(this.context);
+    // 「动态头像」开关：读盘并种入 AppStorage 镜像，须早于任何列表挂载——UserAvatar 在
+    // aboutToAppear 就要据此决定走原生 Image(可播动图)还是走桥取首帧(静态)。
+    AnimatedAvatarPrefs.load(this.context);
     // setHttpDns 只有在 Web 引擎初始化之后才生效(引擎网络服务需先就绪),故须先显式
     // initializeWebEngine 再下发 DoH;且早于任何页面,确保宿主 webview 首次解析
     // linux.do 就走 DoH,规避被污染的系统 DNS。否则请求会以 useHttpDns:0 走系统 DNS 超时。
