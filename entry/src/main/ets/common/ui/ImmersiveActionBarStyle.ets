@@ -18,32 +18,37 @@ class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
       .borderWidth(0.5)
       .borderColor($r('app.color.hds_floating_action_highlight'));
     if (this.blurEnabled) {
-      // 玻璃态:用 backgroundEffect 而非 COMPONENT_* 组件材质——后者模糊强度与不透明度绑死,越糊越白越不透,
-      // 做不到「强磨砂 + 通透」。backgroundEffect 把两者拆开:radius 控制磨砂强度、color 的 alpha 控制透不透,
-      // 于是可以「大半径出强磨砂 + 低 alpha 底色保持看得穿」。adaptiveColor AVERAGE 让遮罩色随背后内容走,
-      // 边线与磨砂都会带上环境色。半径 28 偏强;想更/更不磨砂改这个数,想更/更不透明改 hds_floating_action_bg 的 alpha。
+      // 用 backgroundEffect 而非 COMPONENT_* 组件材质:后者模糊强度与不透明度绑死,越糊越白越不透,
+      // 做不到「强磨砂 + 通透」。backgroundEffect 把两者拆开:radius 控制磨砂强度、color 的 alpha 控制
+      // 透不透,于是可以「大半径出强磨砂 + 低 alpha 底色保持看得穿」。想更/更不磨砂改 radius,
+      // 想更/更不透明改 hds_floating_action_bg 的 alpha。saturation 略提饱和,让透出来的底色不发灰。
+      //
+      // 蒙版色用静态 color,不用 adaptiveColor: AdaptiveColor.AVERAGE。AVERAGE 会让蒙版色跟着背后
+      // 内容走(观感更"活"),代价是每帧都要额外采样背景算一次均色。这个 FAB 在首页与详情页常驻可见,
+      // 转场期间背景每帧都在变、结果无法复用,曾是掉帧的来源之一。观感差异在 52vp 的小按钮上很有限,
+      // 不值得为它付这笔每帧开销。
       const glassEffect: BackgroundEffectOptions = {
         radius: 28,
         color: $r('app.color.hds_floating_action_bg'),
-        adaptiveColor: AdaptiveColor.AVERAGE
+        saturation: 1.2
       };
       instance.backgroundEffect(glassEffect);
     } else {
-      // 关态:去掉磨砂底(半径归零),仅保留上面的半透明描边。显式复位,避免 modifier 属性残留导致半玻璃错态。
+      // 关态:磨砂半径归零,仅保留上面的半透明描边。显式复位而不是"不设置"——
+      // modifier 每次 build 都是新实例,不显式写回 0 有可能残留上一次的磨砂,出现半玻璃错态。
       const resetEffect: BackgroundEffectOptions = { radius: 0 };
       instance.backgroundEffect(resetEffect);
-      instance.backdropBlur(0);
     }
   }
 }
 
-// HdsActionBar 不提供 HdsNavigation 的 systemMaterialEffect 参数。外层 ActionBar 保留自己的
-// 交互与布局，真正可见的 primaryButton 则由上面的 modifier 直接执行 backdropBlur；
-// 两处统一维护，避免首页和详情页逐渐出现视觉差异。
+// HdsActionBar 不提供 HdsNavigation 的 systemMaterialEffect 参数。外层 ActionBar 只承载位置/阴影/交互,
+// 真正可见的磨砂做在 primaryButton 的 modifier 上,两处统一维护,避免首页与详情页逐渐出现视觉差异。
 export const IMMERSIVE_ACTION_BAR_BLUR_STRATEGY: BlurStrategy = BlurStrategy.ENABLE;
 
-// 玻璃效果关闭时用:显式关掉 ActionBar 的材质模糊(配合按钮层的透明背景),
-// 让开/关两态共用同一个 HdsActionBar 调用点,仅切 blurStrategy,避免 if/else 双实例导致的重复 id。
+// FAB 用这个:外层恒不加背景模糊(磨砂交给按钮层的 modifier),避免与按钮材质叠成双层。
+// 开/关两态共用同一个 HdsActionBar 调用点、只切 blurStrategy,而不是写 if/else 两个实例——
+// 后者会产生重复 id。
 export const IMMERSIVE_ACTION_BAR_BLUR_DISABLED: BlurStrategy = BlurStrategy.DISABLE;
 
 export function buildImmersiveFloatingActionButtonModifier(enabled: boolean): ButtonModifier {
