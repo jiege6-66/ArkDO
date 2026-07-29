@@ -2,6 +2,7 @@
 // 执行的 fetch 脚本。纯字符串生成,不持有状态;脚本内用 REQUEST_ID_TOKEN 占位,由执行器在运行前
 // 替换成真实 requestId。写请求统一走 buildCsrfScript(带 CSRF 令牌与 Discourse 头)。
 import { buildCsrfScript } from './webscript/CsrfScriptTemplate';
+import { HttpHeaderEntry } from './NetworkTypes';
 
 // 脚本里的 requestId 占位符:执行器 run() 时用真实 id 替换(见 ArkWebNetworkBridge 的 WebviewJsonExecutor)。
 export const REQUEST_ID_TOKEN: string = '__ARKDO_REQUEST_ID__';
@@ -44,6 +45,57 @@ export function createFetchScript(path: string): string {
           errorMessage: String(error)
         }));
       });
+      return requestId;
+    })();`;
+}
+
+// 带自定义头 + Referer 的 GET 脚本(credit.linux.do 等副站点用)。
+// 与 createFetchScript 的差别只有两处:允许调用方追加请求头,允许指定 Referer——
+// credit 的接口要求 x-requested-with: XMLHttpRequest(后端据此走 JSON 分支)且 referer 指向站内页面,
+// 缺任一都可能被后端或 CF 拒。仍走 credentials:'include',cookie 由 webview 的 cookie 仓自动带上。
+export function createHeaderedFetchScript(path: string, headers: HttpHeaderEntry[], referrer: string): string {
+  const encodedPath: string = JSON.stringify(path);
+  const encodedReferrer: string = JSON.stringify(referrer);
+  const extraHeaderLines: string = headers
+    .map((header: HttpHeaderEntry): string => `          ${JSON.stringify(header.name)}: ${JSON.stringify(header.value)}`)
+    .join(',\n');
+  const extraHeaderBlock: string = extraHeaderLines.length > 0 ? `,\n${extraHeaderLines}` : '';
+
+  return `(() => {
+      const requestId = '${REQUEST_ID_TOKEN}';
+      const requestUrl = new URL(${encodedPath}, window.location.origin);
+      const fail = (error) => {
+        window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+          statusCode: 0,
+          contentType: '',
+          body: '',
+          errorMessage: String(error)
+        }));
+      };
+      const fetchOptions = {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'${extraHeaderBlock}
+        }
+      };
+      const _ref = ${encodedReferrer};
+      if (_ref) {
+        fetchOptions.referrer = _ref;
+        fetchOptions.referrerPolicy = 'strict-origin-when-cross-origin';
+      }
+      fetch(requestUrl.toString(), fetchOptions).then((response) => {
+        response.text().then((body) => {
+          window.ArkDOBridge.onJsonResult(requestId, JSON.stringify({
+            statusCode: response.status,
+            contentType: response.headers.get('content-type') || '',
+            cfMitigated: response.headers.get('cf-mitigated') || '',
+            body: body
+          }));
+        }).catch(fail);
+      }).catch(fail);
       return requestId;
     })();`;
 }

@@ -25,6 +25,12 @@ export interface NetworkResult<T> {
   error?: NetworkError;
 }
 
+// 注入式 fetch 的附加请求头。名与值都会被 JSON.stringify 后嵌进脚本字面量,调用方给原始字符串即可。
+export interface HttpHeaderEntry {
+  name: string;
+  value: string;
+}
+
 export interface JsonRequestOptions {
   notifyChallenge?: boolean;
   // POST 专用:把请求的 Referer 设成同源的某个页面(如帖子页),让请求更像浏览器真实发出的。

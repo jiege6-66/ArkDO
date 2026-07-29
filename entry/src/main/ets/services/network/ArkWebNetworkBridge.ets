@@ -7,9 +7,9 @@ import { ChallengeEventBus } from '../challenge/ChallengeEventBus';
 import { DownloadEventBus } from '../content/DownloadEventBus';
 import { detectChallenge } from './ChallengeDetector';
 import { FileLogger } from '../logging/FileLogger';
-import { ChallengeState, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
+import { ChallengeState, HttpHeaderEntry, JsonNetworkClient, JsonRequestOptions, NetworkErrorCode, NetworkResult } from './NetworkTypes';
 import { buildMessageBusScript } from './webscript/MessageBusScriptTemplate';
-import { createFetchScript, createFormScript, createImageFetchScript, createPostJsonScript,
+import { createFetchScript, createFormScript, createHeaderedFetchScript, createImageFetchScript, createPostJsonScript,
   createPutScript, createUploadScript, REQUEST_ID_TOKEN } from './ArkWebFetchScriptFactory';
 import { MessageBusEventBus } from '../message/MessageBusEventBus';
 
@@ -538,6 +538,51 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
     } catch (error) {
       logNetwork(`GET ${requestPath} failed before response envelope`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 请求失败。',
+          requiresChallenge: false
+        }
+      };
+    }
+  }
+
+  /**
+   * 带自定义头 + Referer 的 GET。与 getJson 同一条链路(注入 fetch → 信封 → 挑战判定),只是允许
+   * 调用方补请求头与 Referer。给挂在副站点文档上的桥实例用(credit.linux.do 的接口要求
+   * x-requested-with 与站内 referer);主站请求继续走 getJson,不受影响。
+   */
+  async getJsonWithHeaders(path: string, headers: HttpHeaderEntry[], referrer: string,
+    options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`GET(headered) ${requestPath} start headerCount=${headers.length}`);
+
+    if (!this.executor) {
+      logNetwork(`GET(headered) ${requestPath} skipped: ArkWeb host is not ready`);
+      return {
+        success: false,
+        statusCode: 0,
+        challengeState: ChallengeState.NONE,
+        error: {
+          code: NetworkErrorCode.NETWORK_FAILURE,
+          message: 'ArkWeb 宿主尚未就绪。',
+          requiresChallenge: false
+        }
+      };
+    }
+
+    await this.whenHostReady();
+
+    try {
+      const rawResult: string = await this.executor.run(createHeaderedFetchScript(requestPath, headers, referrer));
+      logNetwork(`GET(headered) ${requestPath} raw envelope received length=${rawResult.length}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
+    } catch (error) {
+      logNetwork(`GET(headered) ${requestPath} failed before response envelope`);
       return {
         success: false,
         statusCode: 0,

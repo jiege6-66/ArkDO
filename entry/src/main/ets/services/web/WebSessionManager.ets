@@ -52,8 +52,18 @@ export class WebSessionManager {
   }
 
   static getCookiePresenceSnapshot(cookieName: string): CookiePresenceSnapshot {
+    return WebSessionManager.getCookiePresenceSnapshotForUrl(AppConstants.BASE_URL, cookieName);
+  }
+
+  // 指定站点的 cookie 存在性。cookie 仓按域隔离,副站点(credit.linux.do 等)的会话 cookie
+  // 在 BASE_URL 下取不到,必须用它自己的 URL 查——否则会把「已登录副站点」误判成未登录。
+  static hasCookieForUrl(url: string, cookieName: string): boolean {
+    return WebSessionManager.getCookiePresenceSnapshotForUrl(url, cookieName).hasCookie;
+  }
+
+  static getCookiePresenceSnapshotForUrl(url: string, cookieName: string): CookiePresenceSnapshot {
     try {
-      const cookieHeader: string = webview.WebCookieManager.fetchCookieSync(AppConstants.BASE_URL, false);
+      const cookieHeader: string = webview.WebCookieManager.fetchCookieSync(url, false);
       return {
         hasCookie: WebSessionManager.containsCookie(cookieHeader, cookieName),
         headerLength: cookieHeader.length

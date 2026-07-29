@@ -22,7 +22,9 @@ export enum AppRouteName {
   // 他被采纳为解决方案的回复列表,入口是他人主页统计格里的「解决方案」。
   SOLVED = 'solved',
   // 双栏(平板横屏)下右详情栏的空占位:未选帖子时垫在栈底,让右栏不空白。仅宽屏使用。
-  PLACEHOLDER = 'placeholder'
+  PLACEHOLDER = 'placeholder',
+  // LINUX DO Credit 页(credit.linux.do):余额与最近 7 天获取记录,入口在个人中心。
+  LDC_CREDIT = 'ldcCredit'
 }
 
 export interface TopicDetailRouteParam {
@@ -335,6 +337,26 @@ export function isWebRouteParam(param: Object | undefined): boolean {
   const candidate: WebRouteParam = param as WebRouteParam;
   return typeof candidate.url === 'string' && candidate.url.length > 0 &&
     (candidate.title === undefined || typeof candidate.title === 'string');
+}
+
+// LINUX DO Credit 页参数:数据全从 credit.linux.do 现取,无需带用户名。
+// startLogin=true 表示从个人中心的「去登录」进来,落地即拉起 credit 的 LinuxDO OAuth 登录。
+export interface LdcCreditRouteParam {
+  startLogin: boolean;
+}
+
+export function buildLdcCreditRouteParam(startLogin: boolean): LdcCreditRouteParam {
+  return {
+    startLogin: startLogin
+  };
+}
+
+export function isLdcCreditRouteParam(param: Object | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+  const candidate: LdcCreditRouteParam = param as LdcCreditRouteParam;
+  return typeof candidate.startLogin === 'boolean';
 }
 
 export function isTopicDetailRouteParam(param: Object | undefined): boolean {

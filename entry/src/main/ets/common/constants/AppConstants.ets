@@ -10,6 +10,16 @@ export class AppConstants {
   static readonly HOST_BOOTSTRAP_URL: string = 'https://linux.do/session/csrf.json';
   // connect.linux.do:跨域(与 BASE_URL 不同源),经 SSO 复用 linux.do 会话自动登录。等级进度页专用。
   static readonly CONNECT_URL: string = 'https://connect.linux.do/';
+  // credit.linux.do(LINUX DO Credit):同样跨域,且同样在 CF 后面。它的 API 只能由「credit 同源文档」内的
+  // fetch 发起——host webview 是 linux.do 源,跨源 fetch 会被 CORS 挡(该站不回 ACAO)。
+  static readonly CREDIT_BASE_URL: string = 'https://credit.linux.do';
+  // credit 桥的引导页:与 HOST_BOOTSTRAP_URL 同思路——只为拿一个 credit.linux.do 同源文档
+  // (定 origin、带 cookie、供注入 fetch),故直接加载最轻的 JSON 接口而非 /home 那套 SPA。
+  static readonly CREDIT_BOOTSTRAP_URL: string = 'https://credit.linux.do/api/v1/oauth/user-info';
+  // credit 站内页:既是登录落地页,也是各 API 请求要求的 Referer(抓包对齐,后端会看)。
+  static readonly CREDIT_HOME_URL: string = 'https://credit.linux.do/home';
+  // credit.linux.do 的登录态凭证(经 LinuxDO OAuth 换取)。只判存在性,值一律不落代码、不落日志。
+  static readonly CREDIT_SESSION_COOKIE: string = 'linux_do_credit_session_id';
   static readonly LOGIN_PATH: string = '/login';
   static readonly LOGIN_URL: string = 'https://linux.do/login';
   static readonly CHALLENGE_PATH: string = '/challenge';

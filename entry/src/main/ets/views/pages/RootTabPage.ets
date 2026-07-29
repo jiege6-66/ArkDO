@@ -57,6 +57,8 @@ import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
+import { LdcCreditPage } from './LdcCreditPage';
+import { isLdcCreditRouteParam, LdcCreditRouteParam } from '../../navigation/AppRoutes';
 import { BookmarksPage } from './BookmarksPage';
 import { DraftsPage } from './DraftsPage';
 import { ActivityListPage } from './ActivityListPage';
@@ -148,6 +150,8 @@ export struct RootTabPage {
     () => this.bridge);
   private navPathStack: NavPathStack = new NavPathStack();
   private levelProgressScroller: Scroller = new Scroller();
+  // LINUX DO Credit 页的滚动容器:HDS 宿主标题栏必须绑定页面滚动容器才能联动,故在此持有并注入。
+  private ldcCreditScroller: Scroller = new Scroller();
   // 手势激活闸:仅此为 true 时 customNavContentTransition 才接管 PROFILE 的 push;
   // 点头像那条路照走系统默认转场,互不干扰。
   @State private profileSwipeActive: boolean = false;
@@ -984,6 +988,20 @@ export struct RootTabPage {
         .backgroundColor($r('app.color.page_bg'))
       }
       .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.LDC_CREDIT && isLdcCreditRouteParam(param)) {
+      NavDestination() {
+        LdcCreditPage({
+          startLogin: (param as LdcCreditRouteParam).startLogin,
+          scroller: this.ldcCreditScroller,
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
+      // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
       .backgroundColor($r('app.color.page_bg'))
     } else {
       NavDestination() {

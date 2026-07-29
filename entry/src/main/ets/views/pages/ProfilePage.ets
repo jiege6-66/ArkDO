@@ -13,9 +13,16 @@ import {
   UserSummary,
   UserSummaryStats
 } from '../../models/UserProfile';
+import { AppRouteName, buildLdcCreditRouteParam } from '../../navigation/AppRoutes';
+import { LdcUserInfo } from '../../models/LdcCredit';
 import { AuthService } from '../../services/auth/AuthService';
+import { LdcCreditEventBus } from '../../services/credit/LdcCreditEventBus';
+import { LdcCreditService } from '../../services/credit/LdcCreditService';
+import { LdcCreditSession } from '../../services/credit/LdcCreditSession';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
+import { LdcCreditWebHost } from '../components/LdcCreditWebHost';
+import { formatLdcAmount } from '../../common/utils/LdcFormat';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileCache } from '../../services/user/UserProfileCache';
@@ -46,6 +53,15 @@ const LOG_TAG: string = '[ArkDO][Profile]';
 const STATS_AREA_HEIGHT: number = 126;
 // 用户卡 meta 行(加入天数/最近发帖/浏览量)固定高度,同理防跳动。
 const USER_META_HEIGHT: number = 26;
+
+// LDC 入口行的取数状态。credit.linux.do 的会话与 linux.do 各自独立:linux.do 已登录不代表
+// credit 也登录,故 ANON 是常态而非异常,要给出「去登录」而不是错误提示。
+enum LdcEntryPhase {
+  LOADING = 0,
+  READY = 1,
+  ANON = 2,
+  ERROR = 3
+}
 
 @Component
 export struct ProfilePage {
@@ -89,13 +105,35 @@ export struct ProfilePage {
   @State private recentActivity: UserActivityItem[] = [];
   @State private categories: TopicCategory[] = [];
   @State private isLoggingOut: boolean = false;
+  // LINUX DO Credit 入口行的状态。
+  @State private ldcPhase: LdcEntryPhase = LdcEntryPhase.LOADING;
+  @State private ldcInfo?: LdcUserInfo = undefined;
+  // credit 宿主的挂载开关:只在真要取数的那一小段时间挂上,取完即卸,不让个人中心常驻一个 webview。
+  @State private ldcHostActive: boolean = false;
   private scroller: Scroller = new Scroller();
   // 已加载资料的用户名:切换账号后重新加载,同账号重进不重复拉取。
   private loadedProfileUsername: string = '';
   private categoryIndex: CategoryIndex = new CategoryIndex();
+  // credit.linux.do 专用的桥:必须挂在 credit 同源文档上,不能复用 linux.do 的 host bridge
+  // (跨源 fetch 会被 CORS 挡)。
+  private ldcBridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
+  private unsubscribeLdcChanged?: () => void = undefined;
 
   aboutToAppear(): void {
     this.handleAccountChanged();
+    // 详情页取到新余额后广播,本页压在它下面不会重新 appear,靠这条订阅刷新入口行的数字。
+    if (!this.unsubscribeLdcChanged) {
+      this.unsubscribeLdcChanged = LdcCreditEventBus.subscribe(() => {
+        this.applyLdcCache();
+      });
+    }
+  }
+
+  aboutToDisappear(): void {
+    if (this.unsubscribeLdcChanged) {
+      this.unsubscribeLdcChanged();
+      this.unsubscribeLdcChanged = undefined;
+    }
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -109,6 +147,21 @@ export struct ProfilePage {
 
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
+      // credit 同源宿主:压在最底层、近透明且不吃触摸,被上层内容完全遮挡;满视口是为了给 CF
+      // 挑战 JS 一个真实浏览器环境(1×1 会被判机器人)。余额取到即卸载,不常驻。
+      if (this.ldcHostActive) {
+        LdcCreditWebHost({
+          bridge: this.ldcBridge,
+          interactive: false,
+          navTarget: '',
+          onReady: () => {
+            this.loadLdcBalance();
+          },
+          onLoadFailed: () => {
+            this.settleLdcFailure();
+          }
+        })
+      }
       this.ProfileScrollableContent()
       this.ProfileTitleBarOverlay()
     }
@@ -307,6 +360,9 @@ export struct ProfilePage {
       .padding({ top: CARD_PADDING, bottom: 14 })
       .cardStyle()
 
+      // 卡片 2.5:LINUX DO Credit(credit.linux.do)
+      this.LdcEntryCard()
+
       // 卡片 3:徽章
       Column() {
         this.SectionHead(badgeHeadLabel(this.profileDetail?.badgeCount), '全部 ›', () => {
@@ -439,6 +495,64 @@ export struct ProfilePage {
         .margin({ top: 2 })
     }
     .layoutWeight(1)
+  }
+
+  // LINUX DO Credit 入口:左侧图标 + 标题,右侧按状态给出余额 / 「去登录」/ 转圈 / 「重试」。
+  // 整行可点:已登录 credit 进详情页看最近记录,未登录则进详情页并直接拉起 credit 登录。
+  @Builder
+  private LdcEntryCard() {
+    Row() {
+      // 与设置页的列表行同款:20 号系统符号 + 14 间距,不另造药丸/色块。
+      // 金币符号本身已表达「余额」,配色沿用徽章金,和右侧的数字各司其职。
+      SymbolGlyph($r('sys.symbol.coins'))
+        .fontSize(20)
+        .fontColor([$r('app.color.ld_gold')])
+        .renderingStrategy(SymbolRenderingStrategy.SINGLE)
+
+      Column() {
+        Text('LINUX DO Credit')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text(this.getLdcSubtitle())
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 14 })
+
+      if (this.ldcPhase === LdcEntryPhase.LOADING && !this.ldcInfo) {
+        LoadingProgress()
+          .width(16)
+          .height(16)
+          .color($r('app.color.ld_accent'))
+      } else if (this.ldcInfo) {
+        Text(formatLdcAmount(this.ldcInfo.availableBalance))
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+      } else {
+        Text(this.ldcPhase === LdcEntryPhase.ANON ? '去登录' : '重试')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.ld_accent'))
+      }
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(14)
+        .fontColor([$r('app.color.text_faint')])
+        .margin({ left: 6 })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 14 })
+    .alignItems(VerticalAlign.Center)
+    .cardStyle()
+    .onClick(() => {
+      this.openLdcPage();
+    })
   }
 
   // 无角标、走自定义点击的快捷入口(书签/点赞等已原生化的入口)。love=true 时图标用点赞粉。
@@ -766,6 +880,96 @@ export struct ProfilePage {
     }
   }
 
+  // ==================== LINUX DO Credit ====================
+
+  // 入口行的取数入口。三条捷径按代价从小到大:未登录 credit 直接给「去登录」(连 webview 都不起);
+  // 缓存新鲜就用缓存;都不满足才挂宿主真发一次请求。
+  private refreshLdcEntry(): void {
+    this.ldcInfo = LdcCreditSession.getCachedInfo();
+
+    if (!LdcCreditSession.hasSession()) {
+      LdcCreditSession.clearCache();
+      this.ldcInfo = undefined;
+      this.ldcPhase = LdcEntryPhase.ANON;
+      this.ldcHostActive = false;
+      return;
+    }
+
+    if (LdcCreditSession.isCacheFresh() && this.ldcInfo) {
+      this.ldcPhase = LdcEntryPhase.READY;
+      return;
+    }
+
+    this.ldcPhase = LdcEntryPhase.LOADING;
+    this.ldcHostActive = true;
+  }
+
+  private resetLdcEntry(): void {
+    this.ldcPhase = LdcEntryPhase.LOADING;
+    this.ldcInfo = undefined;
+    this.ldcHostActive = false;
+  }
+
+  // 详情页刷新过余额后经事件总线叫醒本页,直接读缓存对齐,不再自己发请求。
+  private applyLdcCache(): void {
+    const cached: LdcUserInfo | undefined = LdcCreditSession.getCachedInfo();
+    this.ldcInfo = cached;
+    this.ldcPhase = cached ? LdcEntryPhase.READY : LdcEntryPhase.ANON;
+  }
+
+  private async loadLdcBalance(): Promise<void> {
+    const result: NetworkResult<LdcUserInfo> = await new LdcCreditService(this.ldcBridge).getUserInfo();
+    // 请求已落地,宿主的使命完成:立刻卸载,不让个人中心常驻一个 credit webview。
+    this.ldcHostActive = false;
+    if (result.success && result.data) {
+      this.ldcInfo = result.data;
+      this.ldcPhase = LdcEntryPhase.READY;
+      LdcCreditSession.setCachedInfo(result.data);
+      Log.i(`${LOG_TAG} ldc balance loaded`);
+      return;
+    }
+
+    // 401 = credit 会话过期(cookie 还在但已失效),回落到「去登录」而非报错。
+    if (result.statusCode === 401) {
+      LdcCreditSession.clearCache();
+      this.ldcInfo = undefined;
+      this.ldcPhase = LdcEntryPhase.ANON;
+      return;
+    }
+
+    Log.i(`${LOG_TAG} ldc balance load failed status=${result.statusCode}`);
+    this.settleLdcFailure();
+  }
+
+  private settleLdcFailure(): void {
+    this.ldcHostActive = false;
+    // 有缓存就继续显示旧余额(标注不上新总比整行变成「重试」好);没有才让整行退化成可重试态。
+    this.ldcPhase = this.ldcInfo ? LdcEntryPhase.READY : LdcEntryPhase.ERROR;
+  }
+
+  private getLdcSubtitle(): string {
+    if (this.ldcPhase === LdcEntryPhase.ANON) {
+      return '使用 LINUX DO 账号登录后查看';
+    }
+    if (this.ldcPhase === LdcEntryPhase.ERROR) {
+      return '暂时无法获取余额';
+    }
+    return '查看最近 7 天获取记录';
+  }
+
+  // 进 LDC 详情页。未登录 credit 时带上 startLogin,让详情页落地即拉起登录,省一次点击。
+  // 这里自取 NavPathStack 而不是让 RootTabPage 注入回调:本页的 NavDestination 分支正被别的改动
+  // 占用,少动一处少一次冲突。
+  private openLdcPage(): void {
+    const info: NavigationInfo | undefined = this.queryNavigationInfo();
+    if (!info) {
+      Log.i(`${LOG_TAG} ldc navigation unavailable`);
+      return;
+    }
+    const startLogin: boolean = this.ldcPhase === LdcEntryPhase.ANON;
+    info.pathStack.pushPath(new NavPathInfo(AppRouteName.LDC_CREDIT, buildLdcCreditRouteParam(startLogin)));
+  }
+
   // ==================== 退出登录 ====================
 
   private confirmLogout(): void {
@@ -829,9 +1033,11 @@ export struct ProfilePage {
   private handleAccountChanged(): void {
     if (this.isLoggedIn && this.accountUser.username.length > 0) {
       this.loadProfileData(this.accountUser.username);
+      this.refreshLdcEntry();
       return;
     }
     this.resetProfileData();
+    this.resetLdcEntry();
   }
 
   private handleArkWebReadyChanged(): void {
