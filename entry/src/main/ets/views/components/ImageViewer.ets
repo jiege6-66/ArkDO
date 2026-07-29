@@ -1,7 +1,11 @@
 import { ImagePreview, PreviewDirection } from '@rv/image-preview';
 import { componentUtils } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { ON_DARK_FG } from '../../common/theme/Palette';
+import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
+import { ImageShareService } from '../../services/content/ImageShareService';
+import { showToast } from '../../common/utils/Toast';
 
 /**
  * 一张待浏览的图片：url 为首选（原图 href，高清），优化图作为兜底。
@@ -46,6 +50,10 @@ const FADE_SCALE: number = 0.94;
 const HERO_MIN_VISIBLE_RATIO: number = 0.25;
 // 预览根容器 id：hero 起飞前靠它量一次视口尺寸（= 整窗），算落位矩形。
 const VIEWER_ROOT_ID: string = 'arkdo-image-viewer-root';
+// 顶栏按钮尺寸（左上关闭 / 右上分享共用）
+const TOP_BUTTON_SIZE: number = 40;
+// 分享面板上给这张图的标题
+const SHARE_TITLE: string = '分享图片';
 
 /**
  * 全屏图片浏览器：Swiper 管多图翻页，每页用三方库 @rv/image-preview 的 ImagePreview
@@ -88,6 +96,8 @@ export struct ImageViewer {
   @Local contentScale: number = 1;
   // 黑底不透明度：打开时 0→1，关闭时 →0（拖动消隐另算，见 backdropColor）
   @Local backdropAlpha: number = 1;
+  // 分享进行中（下载 + 拉面板）：按钮换转圈并拒绝重复点击。
+  @Local sharing: boolean = false;
   private pinchBase: number = 1;
   // 视口尺寸（vp）：hero 落位矩形 = 整窗，onAppear 量一次，旋转时随 onAreaChange 更新。
   private viewW: number = 0;
@@ -229,16 +239,44 @@ export struct ImageViewer {
       Text('✕')
         .fontSize(20)
         .fontColor(ON_DARK_FG)
-        .width(40)
-        .height(40)
+        .width(TOP_BUTTON_SIZE)
+        .height(TOP_BUTTON_SIZE)
         .textAlign(TextAlign.Center)
-        .borderRadius(20)
+        .borderRadius(TOP_BUTTON_SIZE / 2)
         .backgroundColor('#00000066')
         .margin({ top: this.topInset + 12, left: 12 })
         .opacity(this.contentOpacity)
         .onClick(() => {
           this.requestClose();
         })
+
+      // 分享按钮：与关闭按钮同一条顶栏,靠右。外层 Row 只是把它推到右边,
+      // hitTestBehavior 设 Transparent,让顶栏空白处的点击照旧落到下面的图上（= 关闭）。
+      Row() {
+        Stack() {
+          if (this.sharing) {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color(ON_DARK_FG)
+          } else {
+            FaIconView({ icon: this.faIcon('share-nodes'), color: ON_DARK_FG, iconSize: 18 })
+          }
+        }
+        .width(TOP_BUTTON_SIZE)
+        .height(TOP_BUTTON_SIZE)
+        .borderRadius(TOP_BUTTON_SIZE / 2)
+        .backgroundColor('#00000066')
+        .onClick(() => {
+          this.shareCurrent();
+        })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.End)
+      .padding({ right: 12 })
+      .margin({ top: this.topInset + 12 })
+      .opacity(this.contentOpacity)
+      .hitTestBehavior(HitTestMode.Transparent)
 
       // hero 图层：坐标为窗口坐标（本组件是根 Stack 直挂的全窗浮层，原点即窗口原点）。
       // y 恒加上 dragOffsetY——关闭动画里 dragOffsetY 与 heroRect 一起收敛，
@@ -388,6 +426,41 @@ export struct ImageViewer {
       this.contentScale = FADE_SCALE;
       this.backdropAlpha = 0;
     });
+  }
+
+  /**
+   * 分享当前这张图：先下到沙箱再交系统分享面板——面板认 uri 不认 https 链接,
+   * 直接塞链接只会被当成一条文本分享出去。分享的是高清原图（原图失败过就是回退后的那张,
+   * 与屏上所见一致）。下载期间按钮转圈,预览层不关闭,分享完仍停在原图上。
+   */
+  private shareCurrent(): void {
+    if (this.sharing || this.closing) {
+      return;
+    }
+    const url: string = this.resolveUrl(this.currentIndex);
+    if (url.length === 0) {
+      return;
+    }
+    const context: common.UIAbilityContext | undefined =
+      this.getUIContext().getHostContext() as common.UIAbilityContext | undefined;
+    if (context === undefined) {
+      return;
+    }
+    this.sharing = true;
+    ImageShareService.share(context, url, SHARE_TITLE).then((ok: boolean) => {
+      this.sharing = false;
+      if (!ok) {
+        showToast(this.getUIContext(), '分享失败,请稍后重试');
+      }
+    }).catch(() => {
+      this.sharing = false;
+      showToast(this.getUIContext(), '分享失败,请稍后重试');
+    });
+  }
+
+  private faIcon(name: string): FaIconDefinition {
+    const def: FaIconDefinition | undefined = getFaIcon(name);
+    return def ? def : { id: name, rawfilePath: '' };
   }
 
   // 量视口（= 整窗）：hero 的落位矩形。onAreaChange 也会写，这里保证入场时一定有值。
