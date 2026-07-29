@@ -88,8 +88,11 @@ const REPLY_DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
 const POST_LIST_BOTTOM_SPACER: number = 28;
 // 实时新楼(MessageBus /topic created)去抖窗口:合并 ~400ms 内连着来的多条 created,一次批量拉。
 const INCOMING_POST_DEBOUNCE_MS: number = 400;
+// 离开详情页后延迟这么久再去长轮询循环里删掉本帖频道。该操作要经 ArkWeb 桥 runJavaScript,
+// 压在 pop 那一帧上会掉帧;推迟到转场动画结束之后再做。与 TopicReadController 的 DETACH_DEFER_MS 同理。
+const CHANNEL_UNSUBSCRIBE_DEFER_MS: number = 600;
 
-@Component
+@Component({ freezeWhenInactive: true })
 export struct TopicDetailPage {
   // 窗口常驻全屏布局:主内容列自行避让状态栏(padding 在带背景的列上,背景填满状态栏条);
   // 评论浮层/遮罩留在根 Stack 层不加避让,天然盖满整屏。
@@ -317,7 +320,7 @@ export struct TopicDetailPage {
   }
 
   aboutToDisappear(): void {
-    // 先把当前已读状态回传列表页(消蓝点、更新真实剩余未读数),再结算停止计时、清理订阅。
+    // 停表 + 清定时器/订阅;已读回传与最后一次 timings 上报由它自己推迟到转场之后(见 TopicReadController)。
     this.readController.detach();
 
     if (this.unsubscribeSessionChanged) {
@@ -336,12 +339,18 @@ export struct TopicDetailPage {
     }
 
     // 退订实时新楼：总线退订 + 从长轮询循环里删掉本帖频道 + 清掉去抖计时器。
+    // 总线退订必须同步做(留着会让已销毁的页面继续收事件);删频道那步要经 ArkWeb 桥 runJavaScript,
+    // 与已读上报同理推迟到转场之后——期间最多多收几条本帖消息,而总线已退订,不会有人处理。
     if (this.unsubscribeMessageBus) {
       this.unsubscribeMessageBus();
       this.unsubscribeMessageBus = undefined;
     }
     if (this.detail) {
-      this.bridge.unsubscribeTopicChannel(this.detail.id);
+      const topicId: number = this.detail.id;
+      const bridge: ArkWebNetworkBridge = this.bridge;
+      setTimeout(() => {
+        bridge.unsubscribeTopicChannel(topicId);
+      }, CHANNEL_UNSUBSCRIBE_DEFER_MS);
     }
     if (this.createdFetchTimer !== -1) {
       clearTimeout(this.createdFetchTimer);

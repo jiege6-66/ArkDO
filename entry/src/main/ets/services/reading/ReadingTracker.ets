@@ -63,6 +63,9 @@ export class ReadingTracker {
   // paused:前台恢复/后台暂停的开关,决定 tick 循环是否在跑。
   private running: boolean = false;
   private paused: boolean = false;
+  // 收尾期间的发送闸:置真时 sendNextConsolidatedTiming 只入队不发。
+  // 供 stopTiming()/flushPending() 两段式收尾使用,见 stopTiming 的注释。
+  private deferSends: boolean = false;
 
   start(topicId: number, reportFn: ReportTimingsFn, onRead: MarkReadFn, onReporting?: ReportingStateFn): void {
     if (this.running) {
@@ -86,12 +89,19 @@ export class ReadingTracker {
     Log.i(`${LOG_TAG} start topicId=${topicId}`);
   }
 
-  stop(): void {
+  // 离开页面的收尾拆成两段,让调用方能把"发请求"那一半挪出页面转场动画的那一帧:
+  //   stopTiming()  —— 必须同步做。立刻停表并结算最后一次计时,否则用户已经离开、时间还在累加,
+  //                    阅读时长会被算多。期间 deferSends 置真,结算产生的批次只入队不发。
+  //   flushPending() —— 纯网络收尾。每批都要拼一段 JS 脚本经 ArkWeb 桥 runJavaScript 发出,
+  //                    压在 pop 那一帧上会掉帧;晚几百毫秒发对语义没有任何影响。
+  // 返回值:本次是否真的从"运行中"停下来。false 表示压根没在跑,调用方不必再调 flushPending()。
+  stopTiming(): boolean {
     if (!this.running) {
-      return;
+      return false;
     }
     this.running = false;
     this.paused = false;
+    this.deferSends = true;
     // 结算:若还在跑,最后累加一次并清定时器;否则(后台暂停态)只做 flush。
     if (this.intervalId >= 0) {
       this.tick();
@@ -99,10 +109,24 @@ export class ReadingTracker {
       this.intervalId = -1;
     }
     this.flush();
-    // 把队列里剩余的批次(含正好碰上 inProgress/退避而没发出的最后一批)强制发出去,避免丢读。
+    return true;
+  }
+
+  // 把队列里剩余的批次(含正好碰上 inProgress/退避而没发出的、以及 stopTiming 结算入队的那批)
+  // 强制发出去,避免丢读。必须在 stopTiming() 返回 true 之后调用。
+  flushPending(): void {
+    this.deferSends = false;
     this.drainRemaining();
     Log.i(`${LOG_TAG} stop topicId=${this.topicId}`);
     this.reset();
+  }
+
+  // 同步收尾:两段一次做完。供不在转场路径上的调用方使用(如 start 的重入保护)。
+  stop(): void {
+    if (!this.stopTiming()) {
+      return;
+    }
+    this.flushPending();
   }
 
   private startInterval(): void {
@@ -186,6 +210,7 @@ export class ReadingTracker {
     this.blockSendingTill = 0;
     this.lastReportAt = now;
     this.seenBlinking.clear();
+    this.deferSends = false;
   }
 
   private tick(): void {
@@ -285,6 +310,11 @@ export class ReadingTracker {
   private sendNextConsolidatedTiming(): void {
     const reportFn: ReportTimingsFn | undefined = this.reportFn;
     if (this.consolidated.length === 0 || this.inProgress || !reportFn) {
+      return;
+    }
+    // 收尾阶段(stopTiming 与 flushPending 之间):只入队不发,把发送让给 flushPending()。
+    // 此时页面正在销毁/转场,而且成功回调里的 onRead 会去改已经不存在的楼层组件状态。
+    if (this.deferSends) {
       return;
     }
     if (this.blockSendingTill > Date.now()) {

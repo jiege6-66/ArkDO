@@ -1,12 +1,17 @@
 import { Log } from '../logging/Log';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { AppStateEventBus } from '../session/AppStateEventBus';
-import { TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
+import { TopicReadState, TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
 import { ReadingTracker, ReportTimingsFn } from './ReadingTracker';
 import { LoginGate } from '../session/LoginGate';
 
 // 相邻楼层错峰翻已读的间隔:让蓝点淡出动画自上而下依次开始,对齐官网的级联观感。
 const READ_STAGGER_STEP_MS: number = 80;
+// 离开详情页后,延迟这么久再做"回传已读状态 + 最后一次 timings 上报"。
+// 目的是让这两件事落在 Navigation 转场动画结束之后:回传会触发列表页 item 重渲染,上报要经
+// ArkWeb 桥 runJavaScript 发请求,压在 pop 那一帧上会掉帧。二者都是"发出去就不管"的收尾,
+// 晚这么一会儿对语义没有任何影响。取值略大于系统转场时长(~350ms)。
+const DETACH_DEFER_MS: number = 600;
 
 export type DetailProvider = () => TopicDetail | undefined;
 export type PostsProvider = () => TopicPost[];
@@ -40,11 +45,15 @@ export class TopicReadController {
     }
   }
 
-  // 页面离开:先把当前已读状态回传列表页,再结算并停止计时(最后一次 flush 上报)、
-  // 清掉未触发的错峰定时器与前后台订阅。
+  // 页面离开。同步只做必须立刻做的部分:停表结算(晚停会把用户离开后的时间也算进阅读时长)、
+  // 清掉未触发的错峰定时器与前后台订阅。把"回传已读状态给列表页"和"最后一次 timings 上报"
+  // 推迟 DETACH_DEFER_MS 再做,让它们落在转场动画之后——见该常量的注释。
+  //
+  // 注意:延迟回调执行时详情页组件已销毁,provider 闭包(getDetail/getPosts)不能再碰。
+  // 所以回传载荷在这里同步算好(两趟数组遍历,很便宜)再捕获进闭包。
   detach(): void {
-    this.publishReadStateToList();
-    this.tracker.stop();
+    const payload: TopicReadState | undefined = this.buildReadStatePayload();
+    const wasRunning: boolean = this.tracker.stopTiming();
     this.started = false;
 
     for (let index: number = 0; index < this.staggerTimers.length; index++) {
@@ -56,6 +65,16 @@ export class TopicReadController {
       this.unsubscribeAppState();
       this.unsubscribeAppState = undefined;
     }
+
+    const tracker: ReadingTracker = this.tracker;
+    setTimeout(() => {
+      if (payload) {
+        TopicReadStateEventBus.publish(payload);
+      }
+      if (wasRunning) {
+        tracker.flushPending();
+      }
+    }, DETACH_DEFER_MS);
   }
 
   // 详情加载成功后启动计时上报。未登录一律不启动:匿名 POST /topics/timings 会被后端拒,
@@ -115,27 +134,27 @@ export class TopicReadController {
     this.tracker.scrolled();
   }
 
-  // 离开详情页时把该主题的已读状态回传给列表页:
-  // 蓝点消失(unseen=false),未读徽标 = 最高楼号 − 已读到的最高楼号(可能只加载了部分楼层,
-  // 但 highestPostNumber/stream 在首屏就给了全量总数,所以未读数依然准确)。
-  private publishReadStateToList(): void {
+  // 算出要回传给列表页的已读状态:蓝点消失(unseen=false),未读徽标 = 最高楼号 − 已读到的最高楼号
+  // (可能只加载了部分楼层,但 highestPostNumber/stream 在首屏就给了全量总数,所以未读数依然准确)。
+  // 只负责算、不负责发:发的时机由 detach 推迟到转场之后。返回 undefined 表示这次不该回传。
+  private buildReadStatePayload(): TopicReadState | undefined {
     const detail: TopicDetail | undefined = this.getDetail();
     if (!detail) {
-      return;
+      return undefined;
     }
     // 匿名或响应无已读态时不上报,避免把服务端真实状态误清。
     if (!this.hasServerReadState()) {
-      return;
+      return undefined;
     }
 
     const highest: number = this.highestKnownPostNumber();
     const highestRead: number = this.highestReadPostNumber();
     const unread: number = Math.max(0, highest - highestRead);
-    TopicReadStateEventBus.publish({
+    return {
       topicId: detail.id,
       unseen: false,
       unreadPosts: unread
-    });
+    };
   }
 
   private highestKnownPostNumber(): number {
