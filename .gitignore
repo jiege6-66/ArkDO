@@ -27,3 +27,5 @@ deployments.log
 # Python 字节码缓存(中继本地调试产生)。
 __pycache__/
 *.pyc
+# hvigor/DevEco 本地缓存目录,构建产物性质,不入库。
+/.cache
