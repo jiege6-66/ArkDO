@@ -72,6 +72,13 @@ export struct ImageViewer {
   @Param images: ViewerImage[] = [];
   @Param startIndex: number = 0;
   @Param onClose: () => void = () => {};
+  // 入场动效播完、黑底已铺满整屏的时刻。隐藏状态栏这类会让底层页面重排的窗口级操作要挂在这里,
+  // 重排才发生在不透明黑底底下——HdsNavigation 标题栏开了 avoidLayoutSafeArea,实时读系统
+  // 安全区,状态栏一隐藏它就自己往上塌一个状态栏高度,在飞行途中做这件事会被看得一清二楚。
+  @Param onCovered: () => void = () => {};
+  // 退场动效即将开始、黑底还满着的时刻,与 onCovered 对称:恢复状态栏放这里,
+  // 塌回来的那一帧同样被黑底盖住。
+  @Param onRevealing: () => void = () => {};
   // 系统返回键信号计数(Index 拦截后 bump):非首图翻回上一张,首图关闭预览。
   @Param backTick: number = 0;
 
@@ -367,6 +374,7 @@ export struct ImageViewer {
           // 落位矩形与 Swiper 里那张图逐像素重合，直接对调看不出接缝
           this.contentOpacity = 1;
           this.heroOpacity = 0;
+          this.onCovered();
         }
       }, () => {
         this.heroRect = { x: 0, y: 0, w: this.viewW, h: this.viewH };
@@ -376,7 +384,16 @@ export struct ImageViewer {
     }
     // 没有 hero（或视口没量到）：退化为淡入
     this.heroMounted = false;
-    this.getUIContext().animateTo({ duration: FADE_MS, curve: Curve.EaseOut }, () => {
+    this.getUIContext().animateTo({
+      duration: FADE_MS,
+      curve: Curve.EaseOut,
+      onFinish: () => {
+        if (this.closing) {
+          return;
+        }
+        this.onCovered();
+      }
+    }, () => {
       this.contentOpacity = 1;
       this.contentScale = 1;
       this.backdropAlpha = 1;
@@ -394,6 +411,9 @@ export struct ImageViewer {
       return;
     }
     this.closing = true;
+    // 趁黑底还满着先把状态栏还回去:恢复引起的底层重排(HDS 标题栏塌回原位)这一帧被盖住,
+    // 等动效放完页面露出来时它早已稳定。放到动效结束再恢复,就会当着用户的面跳一下。
+    this.onRevealing();
     const zoomed: boolean = this.scaleGuess > ZOOM_EPSILON;
     const src: HeroRect | undefined = zoomed ? undefined : this.sourceRect(this.currentIndex);
     if (this.heroMounted && src !== undefined) {

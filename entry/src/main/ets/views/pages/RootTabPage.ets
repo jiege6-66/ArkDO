@@ -122,6 +122,9 @@ export struct RootTabPage {
   // (padding 加在带页面背景色的容器上,背景自然填满状态栏条且颜色逐页正确);
   // 页面内遮罩/浮层留在未加 padding 的层级,天然盖满物理屏。此处 Navigation 不加任何避让。
   private viewerWindow?: window.Window = undefined;
+  // 预览期间是否已隐藏状态栏。隐藏/恢复卡在浮层盖满屏的窗口内做(见 openImageViewer 注释),
+  // 入场动效没放完就被关掉时压根没隐藏过,靠这个标志决定要不要恢复。
+  private viewerBarHidden: boolean = false;
   // 搜索 Flow:根 Stack 覆盖层负责一镜到底;内部自带 Navigation 负责搜索结果 -> 详情 -> Web -> 原路返回。
   @State private searchFlowMounted: boolean = false;
   @State private showSearchFlow: boolean = false;
@@ -356,6 +359,12 @@ export struct RootTabPage {
           images: this.viewerImages,
           startIndex: this.viewerStartIndex,
           backTick: this.viewerBackTick,
+          onCovered: () => {
+            this.onImageViewerCovered();
+          },
+          onRevealing: () => {
+            this.onImageViewerRevealing();
+          },
           onClose: () => {
             this.closeImageViewer();
           }
@@ -1303,25 +1312,52 @@ export struct RootTabPage {
   // (hero 从列表原位飞入 / 飞回,拿不到源节点几何时降级淡入淡出),这里只负责挂载与卸载。
   // 窗口常驻全屏布局(ImmersiveWindow),浮层在 Navigation 之外天然铺满物理屏——无须切窗口模式、
   // 无须背景补偿。这里只做一件窗口级小事:预览期间隐藏状态栏(时间/电量不印在图上),关闭时恢复。
-  // 全屏布局下系统栏显隐不引起任何布局变化,且隐藏触发的插图归零事件被 suppress 丢弃,
-  // 背景 padding 全程一个值,不存在可闪的重排。
+  //
+  // 隐藏/恢复的时机要卡在「浮层已经盖满屏」的窗口内(onCovered / onRevealing),不能跟着
+  // 挂载卸载走:详情页标题栏是 HdsNavigation,开了 avoidLayoutSafeArea 会实时读系统安全区,
+  // 状态栏一隐藏它就自己往上塌一个状态栏高度——这个重排 suppressInsetSync 管不着
+  // (那只冻结喂给内容 spacer 的 AppStorage 镜像),只能靠不透明黑底盖住它发生的那一帧。
   private openImageViewer(images: ViewerImage[], startIndex: number): void {
     this.viewerImages = images;
     this.viewerStartIndex = startIndex;
     // 镜像可见态:预览打开期间系统返回键由 Index @Entry 拦截(翻回上一张/首图关闭)。
     AppStorage.setOrCreate(IMAGE_VIEWER_VISIBLE_KEY, true);
-    // 先暂停插图同步再隐藏,归零事件不落到背景 padding 上。
+    // 先暂停插图同步,之后隐藏状态栏的归零事件不落到背景 padding 上。
     ImmersiveWindow.suppressInsetSync(true);
+    // 窗口引用先拿着(异步),等入场动效放完再真正动系统栏。
     window.getLastWindow(getContext(this)).then((win: window.Window) => {
       this.viewerWindow = win;
-      win.setWindowSystemBarEnable(['navigation']).catch(() => {});
-      // 底部手势条图标改白,黑底上可见。
-      win.setWindowSystemBarProperties({
-        navigationBarContentColor: '#FFFFFF'
-      }).catch(() => {});
     }).catch(() => {});
     // 直接挂载,不套动画:hero 飞入由 ImageViewer 自己跑(它首帧就渲染成源图大小)。
     this.showImageViewer = true;
+  }
+
+  // 入场动效已放完、黑底铺满:此刻才隐藏状态栏,底层标题栏的塌陷藏在黑底底下。
+  private onImageViewerCovered(): void {
+    const win: window.Window | undefined = this.viewerWindow;
+    if (win === undefined || this.viewerBarHidden) {
+      return;
+    }
+    this.viewerBarHidden = true;
+    win.setWindowSystemBarEnable(['navigation']).catch(() => {});
+    // 底部手势条图标改白,黑底上可见。
+    win.setWindowSystemBarProperties({
+      navigationBarContentColor: '#FFFFFF'
+    }).catch(() => {});
+  }
+
+  // 退场动效即将开始、黑底还满着:趁现在把状态栏还回去,标题栏塌回原位那一帧同样被盖住。
+  // 入场动效没放完就被关掉时 viewerBarHidden 还是 false,这里什么都不用做。
+  private onImageViewerRevealing(): void {
+    const win: window.Window | undefined = this.viewerWindow;
+    if (win === undefined || !this.viewerBarHidden) {
+      return;
+    }
+    this.viewerBarHidden = false;
+    // 恢复状态栏显示;图标色统一走 ImmersiveWindow 按当前主题基线恢复。
+    win.setWindowSystemBarEnable(['status', 'navigation']).catch(() => {});
+    const dark: boolean = (AppStorage.get(APP_IS_DARK_STORAGE_KEY) as boolean | undefined) ?? false;
+    ImmersiveWindow.applyBarContentColor(dark);
   }
 
   // 详情页返回键统一入口:先看全屏编辑器浮层(可见则 bump tick 交详情页一镜回落),再看图片预览。
@@ -1360,14 +1396,9 @@ export struct RootTabPage {
 
   private closeImageViewer(): void {
     AppStorage.setOrCreate(IMAGE_VIEWER_VISIBLE_KEY, false);
-    const win: window.Window | undefined = this.viewerWindow;
-    if (win !== undefined) {
-      // 恢复状态栏显示;图标色统一走 ImmersiveWindow 按当前主题基线恢复。
-      win.setWindowSystemBarEnable(['status', 'navigation']).catch(() => {});
-      const dark: boolean = (AppStorage.get(APP_IS_DARK_STORAGE_KEY) as boolean | undefined) ?? false;
-      ImmersiveWindow.applyBarContentColor(dark);
-      this.viewerWindow = undefined;
-    }
+    // 常规路径下状态栏已在 onRevealing 还回去了;这里兜底,防止某条路径没走到那一步就卸载。
+    this.onImageViewerRevealing();
+    this.viewerWindow = undefined;
     // 恢复插图同步:状态栏重新出现触发的 avoidAreaChange 会把插图写回(与预览前同值,padding 不动)。
     ImmersiveWindow.suppressInsetSync(false);
     // onClose 由 ImageViewer 在退场动效播完后才回调,这里直接卸载即可。
