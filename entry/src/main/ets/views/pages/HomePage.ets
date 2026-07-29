@@ -74,6 +74,20 @@ const LOG_TAG: string = '[ArkDO][Home]';
 const DIAG_TAG: string = '[ARKDO_CF_DIAG]';
 // 侧边抽屉宽度(关闭时向左平移此距离移出屏幕)。
 const DRAWER_WIDTH: number = 288;
+// ===== 从左边缘右滑跟手拉出版块抽屉 =====
+// 起手区宽度(vp):按下点距屏幕左边小于它,右滑才认作「拉抽屉」,否则中屏随手右滑就把抽屉带出来了。
+// 别再往小调:实测「贴着边缘滑」的按下点落在 30~45,而不是贴着 0——最靠边的那几毫米被系统侧滑
+// 返回的热区吃掉,触点根本派发不进来。留出这段够不着的余量,起手区才有实际可用宽度。
+// (391vp 屏宽下约占 14%,而中屏右滑实测 downX≈245,离得很远,不会误触。)
+const DRAWER_EDGE_WIDTH: number = 56;
+// 松手判定阈值:拉出/推回超过抽屉宽度这个比例即补完动作,否则回弹。开与关同一比例,两向手感对称。
+const DRAWER_COMMIT_RATIO: number = 0.4;
+// 松手判定阈值:横向甩速(vp/s)超过即直接补完,不看距离。
+const DRAWER_COMMIT_VELOCITY: number = 800;
+// ↓↓↓ 手感就调这三个:补完时长、回弹时长、收尾曲线。与个人中心左滑那套(RootTabPage)取值一致。 ↓↓↓
+const DRAWER_COMMIT_MS: number = 280;
+const DRAWER_REBOUND_MS: number = 220;
+const DRAWER_SETTLE_CURVE: Curve = Curve.Friction;
 // 版本公告弹窗:true=每次启动都弹(调试用);false=同一版本只弹一次(上线值)。
 const ANNOUNCE_ALWAYS_SHOW: boolean = false;
 // 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
@@ -101,6 +115,11 @@ const INCOMING_PROMPT_EXIT_MS: number = 180;
 const INCOMING_INSERT_MS: number = 360;
 // 单条增量行的兜底高度(含分割线)。真机测到实际高度前先用它算揭示距离，避免第一帧跳变。
 const INCOMING_INSERT_ROW_ESTIMATE: number = 96;
+
+// 把比例夹到 0~1。跟手手势里到处要用:手指可以拖过头,进度不能。
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
 
 // 下一帧回调。setTimeout(0) 只是"下一个宏任务",跟"上一帧已渲染"没有任何保证关系,
 // 用它串瞬移→动画会时灵时不灵;postFrameCallback 才是真正的帧边界。
@@ -140,10 +159,15 @@ export struct HomePage {
   @State private drawerMounted: boolean = false;
   // 版块树的展开态。放在本页而非抽屉内部:抽屉内容会随开合挂载/卸载,状态留在里面会被一起丢掉。
   @State private drawerExpandedIds: number[] = [];
-  // 抽屉横向拖拽偏移(向左拖为负,跟手);松手过阈值关闭、否则弹回 0。
-  @State private drawerDragX: number = 0;
+  // 抽屉展开进度 0~1(0=完全在屏外,1=完全展开)。同时驱动抽屉位移与遮罩浓度,拖拽期间直接跟手,
+  // 开合动画期间由 animateTo 插值。位移 = (progress - 1) * DRAWER_WIDTH。
+  @State private drawerProgress: number = 0;
   // 本轮左滑是否已被接管:onActionStart 里判定一次,后续 update/end 据此放行。
   private swipeTracking: boolean = false;
+  // 本轮边缘右滑(拉抽屉)是否已被接管。与 swipeTracking 同由 onActionStart 二选一置真。
+  private drawerSwiping: boolean = false;
+  // 最近一次按下的横坐标(vp,即距屏幕左边的距离)。判「是否从左边缘起手」用。-1 = 还没按下过。
+  private touchDownX: number = -1;
   // 当前内容源:selectedCategory 有值=看某版块;否则看内置入口 selectedFeedKey。
   @State private selectedCategory?: TopicCategory = undefined;
   @State private selectedFeedKey: string = FeedKey.LATEST;
@@ -427,7 +451,7 @@ export struct HomePage {
     if (this.swipeAreaWidth <= 0) {
       return 0;
     }
-    return Math.min(1, Math.max(0, -offsetX / this.swipeAreaWidth));
+    return clampUnit(-offsetX / this.swipeAreaWidth);
   }
 
   build() {
@@ -455,12 +479,15 @@ export struct HomePage {
       .height('100%')
       .backgroundColor($r('app.color.page_bg'))
 
-      // 遮罩:抽屉打开时铺满,拦截并点击关闭,防止点穿到帖子列表。
-      if (this.showSideBar) {
+      // 遮罩:抽屉在场时铺满,拦截并点击关闭,防止点穿到帖子列表。
+      // 挂载条件跟抽屉内容同一个闸(drawerMounted)而非 showSideBar:边缘拖拽期间抽屉只出来一半,
+      // 遮罩得同步跟着浓起来;浓度直接绑 drawerProgress,跟手与开合动画共用同一个源。
+      if (this.drawerMounted) {
         Column()
           .width('100%')
           .height('100%')
           .backgroundColor(SCRIM)
+          .opacity(this.drawerProgress)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
           .onClick(() => {
             this.closeDrawer();
@@ -512,18 +539,23 @@ export struct HomePage {
       }
       .width(DRAWER_WIDTH)
       .height('100%')
-      // 打开时叠加拖拽偏移跟手;关闭时整体移出屏幕左侧。
-      .translate({ x: this.showSideBar ? this.drawerDragX : -DRAWER_WIDTH })
+      // 进度 0 时整体在屏幕左外,1 时贴左边缘归位;中间值即跟手位置。
+      .translate({ x: (this.drawerProgress - 1) * DRAWER_WIDTH })
       .gesture(
-        // 横向拖:向左拖动抽屉,过 1/3 宽即关闭,否则弹回。仅横向,不干扰内部竖向滚动。
+        // 横向拖:向左拖动抽屉,过阈值即关闭,否则弹回。仅横向,不干扰内部竖向滚动。
+        // 这条只管「已展开后往回推」:边缘拉出走的是主体那条 pan(起手时抽屉还在屏外,命中不到这里)。
         PanGesture({ direction: PanDirection.Horizontal })
           .onActionUpdate((event: GestureEvent) => {
             if (this.showSideBar) {
-              this.drawerDragX = Math.min(0, event.offsetX);
+              this.drawerProgress = clampUnit(1 + event.offsetX / DRAWER_WIDTH);
             }
           })
           .onActionEnd((event: GestureEvent) => {
-            this.handleDrawerPanEnd();
+            this.handleDrawerPanEnd(event.velocityX);
+          })
+          .onActionCancel(() => {
+            // 被系统打断:按零速松手处理(照阈值判开/关),别把抽屉卡在半开。
+            this.handleDrawerPanEnd(0);
           })
       )
 
@@ -732,42 +764,77 @@ export struct HomePage {
       this.listViewportH = Number(newArea.height);
       this.swipeAreaWidth = newArea.width as number;
     })
-    // 左滑跟手拉出个人中心:位移换算成 0~1 进度上抛,由宿主驱动 Navigation 的交互式转场。
+    // 记录每次按下的横坐标。判「是不是从左边缘起手」只能靠按下点,而手势回调里拿不到可靠的按下点:
+    // PanGesture 的 onActionStart 已经是走完识别阈值之后,fingerList 也不保证有值。onTouch 的
+    // Down 事件则必定带着触点、且拿到的就是真正的按下位置,不用拿位移反推。
+    // 与主体这条 pan 挂在同一个节点上,坐标系天然一致(根 Stack 铺满窗口,windowX 即本地 X)。
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down && event.touches.length > 0) {
+        this.touchDownX = event.touches[0].windowX;
+      }
+    })
+    // 主体上的横向跟手手势,一条 pan 兼管两个方向:
+    //   · 向左  → 拉出个人中心(位移换算成 0~1 进度上抛,由宿主驱动 Navigation 的交互式转场)
+    //   · 按下点落在左边缘、向右 → 拉出版块抽屉(本页自绘,进度直接驱动 drawerProgress)
+    // 两件事合在一条 pan 上,而不是给抽屉单挂一条:识别器落在哪个节点上能被派发到,是要碰运气的
+    // (给边缘窄条单挂一条 PanGesture 实测就没被识别,右滑无人接管,反而漏成了点开帖子);
+    // 而这条 pan 挂在主体根节点上、左滑拉个人中心一直好用,是已经验证过能收到横向拖动的位置。
+    // 方向归属在起手时一锤定音,后续 update/end 照它走,中途不改判。起手 10vp 才认,与 List 的
+    // 竖向滚动靠方向隔离。
     .gesture(
-      // 仅向左、起手 10vp 才认:与 List 的竖向滚动靠方向隔离,与抽屉靠 showSideBar 闸隔离。
-      PanGesture({ direction: PanDirection.Left, distance: 10 })
-        .onActionStart(() => {
-          // 抽屉开着时左滑归抽屉(那是关抽屉手势),不抢。
-          if (this.showSideBar || this.swipeAreaWidth <= 0) {
-            this.swipeTracking = false;
+      PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+        .onActionStart((event: GestureEvent) => {
+          this.swipeTracking = false;
+          this.drawerSwiping = false;
+          // 抽屉开着/正拉出时不归这里(往回推是抽屉自己那条 pan 的事),发帖浮层盖着时同理,不抢。
+          if (this.showSideBar || this.drawerMounted || this.showComposer || this.swipeAreaWidth <= 0) {
             return;
           }
-          this.swipeTracking = true;
-          this.onProfileSwipeStart();
+          if (event.offsetX < 0) {
+            this.swipeTracking = true;
+            this.onProfileSwipeStart();
+            return;
+          }
+          if (this.isEdgeTouchDown()) {
+            this.drawerSwiping = true;
+            // 内容先挂上(此刻抽屉整体还在屏外,看不见),之后每帧直接改 drawerProgress 跟手。
+            this.prepareDrawerContent();
+          }
         })
         .onActionUpdate((event: GestureEvent) => {
-          if (!this.swipeTracking) {
-            return;
+          if (this.swipeTracking) {
+            this.onProfileSwipeUpdate(this.swipeProgressOf(event.offsetX));
+          } else if (this.drawerSwiping) {
+            this.drawerProgress = clampUnit(event.offsetX / DRAWER_WIDTH);
           }
-          this.onProfileSwipeUpdate(this.swipeProgressOf(event.offsetX));
         })
         .onActionEnd((event: GestureEvent) => {
-          if (!this.swipeTracking) {
-            return;
+          if (this.swipeTracking) {
+            this.swipeTracking = false;
+            // velocityX 向左为负,取反换成「向左甩得多快」。
+            this.onProfileSwipeEnd(this.swipeProgressOf(event.offsetX), -event.velocityX);
+          } else if (this.drawerSwiping) {
+            this.drawerSwiping = false;
+            this.endDrawerSwipe(event.velocityX);
           }
-          this.swipeTracking = false;
-          // velocityX 向左为负,取反换成「向左甩得多快」。
-          this.onProfileSwipeEnd(this.swipeProgressOf(event.offsetX), -event.velocityX);
         })
         .onActionCancel(() => {
-          if (!this.swipeTracking) {
-            return;
+          // 手势被系统打断:两边都当回弹处理,别把转场/抽屉悬在半路。
+          if (this.swipeTracking) {
+            this.swipeTracking = false;
+            this.onProfileSwipeEnd(0, 0);
+          } else if (this.drawerSwiping) {
+            this.drawerSwiping = false;
+            this.settleDrawer(false);
           }
-          this.swipeTracking = false;
-          // 手势被系统打断:当回弹处理,别把转场悬着。
-          this.onProfileSwipeEnd(0, 0);
         })
     )
+  }
+
+  // 按下点是否落在左边缘起手区。用 onTouch 记下的真实按下点,不拿手势位移反推——
+  // 反推(当前位置 - 累计位移)会算出负数,判定恒假,抽屉永远拉不出来。
+  private isEdgeTouchDown(): boolean {
+    return this.touchDownX >= 0 && this.touchDownX <= DRAWER_EDGE_WIDTH;
   }
 
   @Builder
@@ -1004,12 +1071,28 @@ export struct HomePage {
 
   // 打开抽屉前刷新一次抽屉配置(设置页/站点管理页可能刚改过),挂载内容,带滑入动画。
   private openDrawer(): void {
+    this.prepareDrawerContent();
+    this.animateDrawer(true);
+  }
+
+  // 抽屉登场前的准备:重读配置 + 同步展开态 + 挂载内容。点汉堡和边缘拖拽共用。
+  // 内容此刻还在屏幕左外(drawerProgress 仍为 0),挂载过程看不见。
+  private prepareDrawerContent(): void {
     this.refreshDrawerPrefs();
     this.syncDrawerAutoExpand();
-    this.drawerDragX = 0;
-    // 内容此刻还在屏幕左外(showSideBar 仍为 false),挂载过程看不见。
+    this.drawerProgress = 0;
     this.drawerMounted = true;
-    this.animateDrawer(true);
+  }
+
+  // 左边缘右滑松手:拉出过阈值、或向右甩得够快,就补完展开;否则滑回屏外收场。
+  private endDrawerSwipe(velocityX: number): void {
+    const commit: boolean = this.drawerProgress >= DRAWER_COMMIT_RATIO || velocityX >= DRAWER_COMMIT_VELOCITY;
+    this.settleDrawer(commit);
+  }
+
+  // 跟手结束后的收尾:把进度补到 0 或 1。补完/回弹各用一套时长,曲线同个人中心那套。
+  private settleDrawer(open: boolean): void {
+    this.animateDrawer(open, open ? DRAWER_COMMIT_MS : DRAWER_REBOUND_MS, DRAWER_SETTLE_CURVE);
   }
 
   // 若当前看的是某个子版块,自动展开它的父版块,让选中项在树里可见。
@@ -1053,13 +1136,14 @@ export struct HomePage {
     this.animateDrawer(false);
   }
 
-  // 抽屉开合动画:在 animateTo 里翻转 showSideBar,遮罩淡入/淡出、抽屉平移滑动;同时归零拖拽偏移。
+  // 抽屉开合动画:在 animateTo 里把 drawerProgress 推到 0/1,抽屉平移、遮罩浓淡都跟着走;
+  // showSideBar 同步翻转,供遮罩点击、主体手势闸判定「抽屉是否已展开」。
   // 关闭动画播完才卸载抽屉内容——否则内容会在滑出途中凭空消失。onFinish 里以当时的 showSideBar
   // 为准而非捕获的 show:关闭动画未播完就被重新打开时,不能把刚挂上的内容又卸掉。
-  private animateDrawer(show: boolean): void {
+  private animateDrawer(show: boolean, duration: number = 220, curve: Curve = Curve.EaseOut): void {
     this.getUIContext().animateTo({
-      duration: 220,
-      curve: Curve.EaseOut,
+      duration: duration,
+      curve: curve,
       onFinish: () => {
         if (!this.showSideBar) {
           this.drawerMounted = false;
@@ -1067,22 +1151,20 @@ export struct HomePage {
       }
     }, () => {
       this.showSideBar = show;
-      this.drawerDragX = 0;
+      this.drawerProgress = show ? 1 : 0;
     });
   }
 
-  // 抽屉横向拖拽松手:向左拖过 1/3 宽则关闭,否则弹回原位。
-  private handleDrawerPanEnd(): void {
+  // 展开后往回推的松手判定:推回过阈值、或向左甩得够快则关闭,否则弹回展开态。
+  private handleDrawerPanEnd(velocityX: number): void {
     if (!this.showSideBar) {
       return;
     }
-    if (-this.drawerDragX > DRAWER_WIDTH / 3) {
-      this.closeDrawer();
+    if (this.drawerProgress <= 1 - DRAWER_COMMIT_RATIO || velocityX <= -DRAWER_COMMIT_VELOCITY) {
+      this.settleDrawer(false);
       return;
     }
-    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-      this.drawerDragX = 0;
-    });
+    this.settleDrawer(true);
   }
 
   // 抽屉里选了内置入口:切源并重载列表(与当前源相同则仅关抽屉)。
