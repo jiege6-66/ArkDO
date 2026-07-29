@@ -117,7 +117,7 @@ class NextFrameTask extends FrameCallback {
   }
 }
 
-@Component
+@Component({ freezeWhenInactive: true })
 export struct HomePage {
   @State private topics: Topic[] = [];
   // 完整刷新会替换整批 Topic 实例。版本变化后重建 TopicListItem，避免 @ObjectLink 仍绑定旧实例。
@@ -135,6 +135,11 @@ export struct HomePage {
   @State private categories: TopicCategory[] = [];
   // 侧边版块抽屉开关。
   @State private showSideBar: boolean = false;
+  // 抽屉内容是否挂载。与 showSideBar 分开:开抽屉时先于动画置真,关抽屉时等滑出动画播完才置假,
+  // 保证内容的挂载/卸载都发生在屏幕左外、看不见的位置。见 build 里抽屉那段的注释。
+  @State private drawerMounted: boolean = false;
+  // 版块树的展开态。放在本页而非抽屉内部:抽屉内容会随开合挂载/卸载,状态留在里面会被一起丢掉。
+  @State private drawerExpandedIds: number[] = [];
   // 抽屉横向拖拽偏移(向左拖为负,跟手);松手过阈值关闭、否则弹回 0。
   @State private drawerDragX: number = 0;
   // 本轮左滑是否已被接管:onActionStart 里判定一次,后续 update/end 据此放行。
@@ -462,49 +467,65 @@ export struct HomePage {
           })
       }
 
-      // 侧边抽屉:常驻渲染,靠 translate 滑入/滑出;关闭时移出屏幕左侧不可点。
-      CategoryDrawer({
-        categories: this.categories,
-        isLoggedIn: this.isLoggedIn,
-        enabledFeedKeys: this.enabledFeedKeys,
-        sitesEntryEnabled: this.sitesEntryEnabled,
-        sites: this.drawerSites,
-        selectedFeedKey: this.selectedCategory ? '' : this.selectedFeedKey,
-        selectedCategoryId: this.selectedCategory ? this.selectedCategory.id : 0,
-        onSelectFeed: (feedKey: string) => {
-          this.handleSelectFeed(feedKey);
-        },
-        onSelectCategory: (category: TopicCategory) => {
-          this.handleSelectCategory(category);
-        },
-        onRequireLogin: () => {
-          this.handleDrawerRequireLogin();
-        },
-        onOpenSites: () => {
-          this.closeDrawer();
-          this.onOpenSites();
-        },
-        onOpenSite: (url: string, title: string, siteId: string) => {
-          this.closeDrawer();
-          this.onOpenSite(url, title, siteId);
+      // 侧边抽屉。外壳常驻、内容按需挂载:
+      //  · 外壳(这个 Column)一直在,承载宽度/位移/拖拽手势。滑入滑出动画作用在它身上,
+      //    所以 animateTo 永远拿得到动画起点——若把带 translate 的节点本身做成条件渲染,
+      //    挂载与翻转 showSideBar 落在同一帧,动画起点缺失,抽屉会直接闪现在最终位置。
+      //  · 内容(CategoryDrawer)只在抽屉真正用到时才挂:它内部是 Scroll + 四层嵌套 ForEach
+      //    (入口/站点/顶级版块/子版块),全量构建无回收,几十个节点。常驻的话每次返回首页的
+      //    转场里这些节点都要参与绘制,而转场期间两个页面同屏、每帧预算本来就紧张。
+      //    挂载与卸载都发生在外壳位于屏幕左外(translate=-DRAWER_WIDTH)时,看不到内容突现/突消。
+      Column() {
+        if (this.drawerMounted) {
+          CategoryDrawer({
+            categories: this.categories,
+            isLoggedIn: this.isLoggedIn,
+            enabledFeedKeys: this.enabledFeedKeys,
+            sitesEntryEnabled: this.sitesEntryEnabled,
+            sites: this.drawerSites,
+            selectedFeedKey: this.selectedCategory ? '' : this.selectedFeedKey,
+            selectedCategoryId: this.selectedCategory ? this.selectedCategory.id : 0,
+            // 展开态提到本页持有:抽屉内容按需卸载后,折叠/展开的选择不能跟着一起丢。
+            expandedIds: this.drawerExpandedIds,
+            onToggleExpand: (categoryId: number) => {
+              this.handleDrawerToggleExpand(categoryId);
+            },
+            onSelectFeed: (feedKey: string) => {
+              this.handleSelectFeed(feedKey);
+            },
+            onSelectCategory: (category: TopicCategory) => {
+              this.handleSelectCategory(category);
+            },
+            onRequireLogin: () => {
+              this.handleDrawerRequireLogin();
+            },
+            onOpenSites: () => {
+              this.closeDrawer();
+              this.onOpenSites();
+            },
+            onOpenSite: (url: string, title: string, siteId: string) => {
+              this.closeDrawer();
+              this.onOpenSite(url, title, siteId);
+            }
+          })
         }
-      })
-        .width(DRAWER_WIDTH)
-        .height('100%')
-        // 打开时叠加拖拽偏移跟手;关闭时整体移出屏幕左侧。
-        .translate({ x: this.showSideBar ? this.drawerDragX : -DRAWER_WIDTH })
-        .gesture(
-          // 横向拖:向左拖动抽屉,过 1/3 宽即关闭,否则弹回。仅横向,不干扰内部竖向滚动。
-          PanGesture({ direction: PanDirection.Horizontal })
-            .onActionUpdate((event: GestureEvent) => {
-              if (this.showSideBar) {
-                this.drawerDragX = Math.min(0, event.offsetX);
-              }
-            })
-            .onActionEnd((event: GestureEvent) => {
-              this.handleDrawerPanEnd();
-            })
-        )
+      }
+      .width(DRAWER_WIDTH)
+      .height('100%')
+      // 打开时叠加拖拽偏移跟手;关闭时整体移出屏幕左侧。
+      .translate({ x: this.showSideBar ? this.drawerDragX : -DRAWER_WIDTH })
+      .gesture(
+        // 横向拖:向左拖动抽屉,过 1/3 宽即关闭,否则弹回。仅横向,不干扰内部竖向滚动。
+        PanGesture({ direction: PanDirection.Horizontal })
+          .onActionUpdate((event: GestureEvent) => {
+            if (this.showSideBar) {
+              this.drawerDragX = Math.min(0, event.offsetX);
+            }
+          })
+          .onActionEnd((event: GestureEvent) => {
+            this.handleDrawerPanEnd();
+          })
+      )
 
       // 发帖浮层:挂在根 Stack 最顶层,盖住顶栏/列表/抽屉。不进 Navigation 栈,返回键由 Index 拦截。
       // 淡入淡出(无一镜到底源可配对——首页没有内联输入条,不像详情页从回复条生长)。
@@ -981,11 +1002,43 @@ export struct HomePage {
     )
   }
 
-  // 打开抽屉前刷新一次抽屉配置(设置页/站点管理页可能刚改过),带滑入动画。
+  // 打开抽屉前刷新一次抽屉配置(设置页/站点管理页可能刚改过),挂载内容,带滑入动画。
   private openDrawer(): void {
     this.refreshDrawerPrefs();
+    this.syncDrawerAutoExpand();
     this.drawerDragX = 0;
+    // 内容此刻还在屏幕左外(showSideBar 仍为 false),挂载过程看不见。
+    this.drawerMounted = true;
     this.animateDrawer(true);
+  }
+
+  // 若当前看的是某个子版块,自动展开它的父版块,让选中项在树里可见。
+  // 原先写在 CategoryDrawer.aboutToAppear 里,而抽屉是随首页一起构建的、那时还没有任何选中版块,
+  // 等于从没生效过;改为按需挂载后放在这里,每次开抽屉判定一次,才真正起到"让选中项可见"的作用。
+  private syncDrawerAutoExpand(): void {
+    const selected: TopicCategory | undefined = this.selectedCategory;
+    if (!selected || selected.parentCategoryId === undefined) {
+      return;
+    }
+    const parentId: number = selected.parentCategoryId;
+    if (this.drawerExpandedIds.indexOf(parentId) >= 0) {
+      return;
+    }
+    const next: number[] = this.drawerExpandedIds.slice();
+    next.push(parentId);
+    this.drawerExpandedIds = next;
+  }
+
+  // 抽屉里点展开箭头:展开态由本页持有,这里做增删。
+  private handleDrawerToggleExpand(categoryId: number): void {
+    const next: number[] = this.drawerExpandedIds.slice();
+    const index: number = next.indexOf(categoryId);
+    if (index >= 0) {
+      next.splice(index, 1);
+    } else {
+      next.push(categoryId);
+    }
+    this.drawerExpandedIds = next;
   }
 
   // 抽屉配置统一重读:启用入口 + 站点入口开关 + 要展示的站点。
@@ -1001,8 +1054,18 @@ export struct HomePage {
   }
 
   // 抽屉开合动画:在 animateTo 里翻转 showSideBar,遮罩淡入/淡出、抽屉平移滑动;同时归零拖拽偏移。
+  // 关闭动画播完才卸载抽屉内容——否则内容会在滑出途中凭空消失。onFinish 里以当时的 showSideBar
+  // 为准而非捕获的 show:关闭动画未播完就被重新打开时,不能把刚挂上的内容又卸掉。
   private animateDrawer(show: boolean): void {
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+    this.getUIContext().animateTo({
+      duration: 220,
+      curve: Curve.EaseOut,
+      onFinish: () => {
+        if (!this.showSideBar) {
+          this.drawerMounted = false;
+        }
+      }
+    }, () => {
       this.showSideBar = show;
       this.drawerDragX = 0;
     });
@@ -1081,7 +1144,6 @@ export struct HomePage {
     this.currentPage = 0;
     this.hasMore = true;
     this.loadFailed = false;
-    // 换内容源后列表从头开始,按钮身份跟着复位——否则会卡在回顶态(新列表已在顶部,却显示回顶)。
     this.showBackToTopFab = false;
     this.refreshLatestTopics();
   }

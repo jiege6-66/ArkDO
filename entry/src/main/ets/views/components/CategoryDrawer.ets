@@ -48,15 +48,11 @@ export struct CategoryDrawer {
   onOpenSites: () => void = () => {};
   // 打开某个站点(走通用 WebView 页,与帖子外链同一条链路)。siteId 用于缓存该站 favicon。
   onOpenSite: (url: string, title: string, siteId: string) => void = () => {};
-  @State private expandedIds: number[] = [];
-
-  aboutToAppear(): void {
-    // 若当前选中的是某子版块,自动展开其父,让选中项可见。
-    const selected: TopicCategory | undefined = this.findCategory(this.selectedCategoryId);
-    if (selected && selected.parentCategoryId !== undefined) {
-      this.expandedIds = [selected.parentCategoryId];
-    }
-  }
+  // 已展开的顶级版块 id。受控:状态由宿主(首页)持有——本组件随抽屉开合挂载/卸载,
+  // 展开态若留在组件内部会被一起丢掉。自动展开选中项父版块的逻辑同样在宿主侧。
+  @Prop expandedIds: number[] = [];
+  // 点展开箭头:只上报,由宿主增删。
+  onToggleExpand: (categoryId: number) => void = () => {};
 
   build() {
     Column() {
@@ -315,14 +311,7 @@ export struct CategoryDrawer {
   }
 
   private toggleExpand(id: number): void {
-    const next: number[] = this.expandedIds.slice();
-    const index: number = next.indexOf(id);
-    if (index >= 0) {
-      next.splice(index, 1);
-    } else {
-      next.push(id);
-    }
-    this.expandedIds = next;
+    this.onToggleExpand(id);
   }
 
   // ==================== 数据 ====================
@@ -349,18 +338,6 @@ export struct CategoryDrawer {
 
   private hasChildren(parentId: number): boolean {
     return CategoryIndex.hasChildren(this.categories, parentId);
-  }
-
-  private findCategory(id: number): TopicCategory | undefined {
-    if (id <= 0) {
-      return undefined;
-    }
-    for (let index: number = 0; index < this.categories.length; index++) {
-      if (this.categories[index].id === id) {
-        return this.categories[index];
-      }
-    }
-    return undefined;
   }
 
   private isExpanded(id: number): boolean {

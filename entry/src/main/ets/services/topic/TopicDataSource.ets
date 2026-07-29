@@ -43,8 +43,13 @@ export class TopicDataSource implements IDataSource {
     if (fresh.length === 0) {
       return 0;
     }
+    const startIndex: number = this.topics.length;
     this.topics = this.topics.concat(fresh);
-    this.notifyReload();
+    for (let i: number = 0; i < fresh.length; i++) {
+      for (let j: number = 0; j < this.listeners.length; j++) {
+        this.listeners[j].onDataAdd(startIndex + i);
+      }
+    }
     return fresh.length;
   }
 

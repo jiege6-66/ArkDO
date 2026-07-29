@@ -90,10 +90,9 @@ const SWIPE_COMMIT_VELOCITY: number = 800;
 const SWIPE_COMMIT_MS: number = 280;
 const SWIPE_REBOUND_MS: number = 220;
 const SWIPE_SETTLE_CURVE: Curve = Curve.Friction;
-// 首页视差(对齐系统默认转场的观感):个人中心滑到底时,首页左移自身宽度的这个比例、并压暗这个幅度。
+// 首页视差(对齐系统默认转场的观感):个人中心滑到底时,首页左移自身宽度的这个比例。
 // 与个人中心的位移共用同一个 progress,天然同步。0 即关掉视差。
 const SWIPE_PARALLAX_RATIO: number = 0.25;
-const SWIPE_PARALLAX_DIM: number = 0.08;
 
 enum RootSheet {
   NONE = 0,
@@ -1081,11 +1080,16 @@ export struct RootTabPage {
     .width('100%')
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    // 视差:跟手期间首页左移+压暗,补上自绘转场缺失的层次感
+    // 视差:跟手期间首页左移,补上自绘转场缺失的层次感
     // (系统默认转场自带这层,一旦用 customNavContentTransition 接管就得自己画,否则首页完全静止)。
     // 百分比相对自身宽度,不必测屏宽。手势闸关闭时恒复位,点头像那条路不受影响。
+    //
+    // 曾经这里还配了一笔 .brightness 压暗(幅度 0.08)。已移除:brightness 是颜色滤镜,即便手势不活动、
+    // 值恒为 1,修饰符也常年挂在首页根节点上,让整棵首页子树走离屏合成——每次 pop 回首页的转场都要
+    // 为此掉帧(首页列表越长越明显)。而那 8% 压暗只在跟手拖动的几百毫秒内、且首页仅露出左侧 25% 时
+    // 可见,实测拿掉后观感无差别。日后若想把压暗找回来,别再用滤镜:改成仅 profileSwipeActive 期间
+    // 挂载的半透明黑色浮层(opacity 跟 progress 走),静止态节点根本不在树上,零常驻成本。
     .translate({ x: this.profileSwipeActive ? `${-SWIPE_PARALLAX_RATIO * 100 * this.profileSwipeProgress}%` : 0 })
-    .brightness(this.profileSwipeActive ? 1 - SWIPE_PARALLAX_DIM * this.profileSwipeProgress : 1)
   }
 
   private openLoginPage(): void {
