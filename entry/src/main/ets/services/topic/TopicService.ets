@@ -602,7 +602,25 @@ export class TopicService {
   // selectedTagIds 是已选标签 id,让服务端把已选项排除并按剩余上下文再排(对齐官方 composer 的逐次 refine)。
   // 返回的 name 用于提交(tags[]),id 用于下一次 refine。pm_only 标签滤掉(不用于公开发帖)。
   async searchTags(categoryId: number, query: string, selectedTagIds: number[]): Promise<NetworkResult<TagSuggestion[]>> {
-    let path: string = `/tags/filter/search?q=${encodeURIComponent(query)}&limit=8&categoryId=${categoryId}`;
+    return this.fetchTagSuggestions(query, selectedTagIds, categoryId);
+  }
+
+  // 全站标签联想:高级搜索的 tags: 条件不隶属任何分类(可以不先选分类就按标签筛),
+  // 故不带 categoryId —— /tags/filter/search 的 categoryId 本就是可选参数,省略即全站候选。
+  async searchTagsSiteWide(query: string, selectedTagIds: number[]): Promise<NetworkResult<TagSuggestion[]>> {
+    return this.fetchTagSuggestions(query, selectedTagIds, -1);
+  }
+
+  // 标签联想请求与解析:发帖(限定分类)与搜索(全站)共用,只差 categoryId 带不带。
+  private async fetchTagSuggestions(
+    query: string,
+    selectedTagIds: number[],
+    categoryId: number
+  ): Promise<NetworkResult<TagSuggestion[]>> {
+    let path: string = `/tags/filter/search?q=${encodeURIComponent(query)}&limit=8`;
+    if (categoryId >= 0) {
+      path += `&categoryId=${categoryId}`;
+    }
     for (let index: number = 0; index < selectedTagIds.length; index++) {
       path += `&selected_tag_ids%5B%5D=${selectedTagIds[index]}`;
     }

@@ -1,11 +1,23 @@
 import { Topic } from '../../models/Topic';
 import { User } from '../../models/User';
 import {
+  ActivityRouteParam,
+  BadgesRouteParam,
+  buildActivityRouteParam,
+  buildBadgesRouteParam,
+  buildSolvedRouteParam,
   buildTopicDetailRouteParam,
+  buildUserProfileRouteParam,
   buildWebRouteParam,
+  isActivityRouteParam,
+  isBadgesRouteParam,
+  isSolvedRouteParam,
   isTopicDetailRouteParam,
+  isUserProfileRouteParam,
   isWebRouteParam,
+  SolvedRouteParam,
   TopicDetailRouteParam,
+  UserProfileRouteParam,
   WebRouteParam
 } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
@@ -13,11 +25,21 @@ import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge'
 import { bumpTick, COMPOSER_OVERLAY_BACK_TICK_KEY, COMPOSER_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SearchOverlay } from './SearchOverlay';
 import { ViewerImage } from './ImageViewer';
+import { ActivityListPage } from '../pages/ActivityListPage';
+import { BadgesPage } from '../pages/BadgesPage';
+import { SolvedPostsPage } from '../pages/SolvedPostsPage';
 import { TopicDetailPage } from '../pages/TopicDetailPage';
+import { UserProfilePage } from '../pages/UserProfilePage';
 import { WebViewPage } from '../pages/WebViewPage';
 
 const SEARCH_FLOW_TOPIC_DETAIL: string = 'searchTopicDetail';
 const SEARCH_FLOW_WEB: string = 'searchWeb';
+// 个人主页及其下级页面都在搜索自己的栈里打开:点搜索结果里的用户不再关掉搜索页,
+// 与「点帖子进详情」一致,返回即回到原来的搜索结果。
+const SEARCH_FLOW_USER_PROFILE: string = 'searchUserProfile';
+const SEARCH_FLOW_ACTIVITY: string = 'searchUserActivity';
+const SEARCH_FLOW_BADGES: string = 'searchUserBadges';
+const SEARCH_FLOW_SOLVED: string = 'searchUserSolved';
 
 @Component
 export struct SearchFlow {
@@ -44,6 +66,10 @@ export struct SearchFlow {
         },
         onOpenTopic: (topic: Topic) => {
           this.openTopic(topic);
+        },
+        // 「用户」类型的搜索结果:在搜索自己的栈里 push 个人主页,不关搜索页。
+        onOpenUser: (user: User) => {
+          this.openUserProfile(user.username, user.displayName ?? '', user.avatarTemplate ?? '', user.id);
         }
       })
     }
@@ -76,13 +102,109 @@ export struct SearchFlow {
             this.handleOpenLink(url);
           },
           onOpenUser: (user: User) => {
-            this.leaveSearchAndOpenUser(user);
+            this.openUserProfile(user.username, user.displayName ?? '', user.avatarTemplate ?? '', user.id);
           }
         })
       }
       .hideTitleBar(true)
       .onBackPressed(() => this.consumeTopicDetailBack())
       .backgroundColor($r('app.color.topic_detail_page_bg'))
+    } else if (name === SEARCH_FLOW_USER_PROFILE && isUserProfileRouteParam(param)) {
+      NavDestination() {
+        UserProfilePage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as UserProfileRouteParam).username,
+          seedDisplayName: (param as UserProfileRouteParam).displayName ?? '',
+          seedAvatarTemplate: (param as UserProfileRouteParam).avatarTemplate ?? '',
+          seedUserId: (param as UserProfileRouteParam).userId ?? 0,
+          onBack: () => {
+            this.popInternal();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(
+              SEARCH_FLOW_TOPIC_DETAIL,
+              buildTopicDetailRouteParam(topicId, undefined, title, postNumber, postNumber !== undefined)
+            ));
+          },
+          onOpenActivity: (username: string, filter: string, title: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(
+              SEARCH_FLOW_ACTIVITY,
+              buildActivityRouteParam(username, filter, title)
+            ));
+          },
+          onOpenBadges: (username: string, badgeCount: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(SEARCH_FLOW_BADGES, buildBadgesRouteParam(username, badgeCount)));
+          },
+          onOpenSolved: (username: string, solvedCount: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(SEARCH_FLOW_SOLVED, buildSolvedRouteParam(username, solvedCount)));
+          },
+          // 互动圈头像可点:递归 push 同一路由,栈自然记住来路。
+          onOpenUser: (username: string, displayName: string, avatarTemplate: string, userId: number) => {
+            this.openUserProfile(username, displayName, avatarTemplate, userId);
+          },
+          onOpenWeb: (url: string, title?: string) => {
+            this.navPathStack.pushPath(new NavPathInfo(SEARCH_FLOW_WEB, buildWebRouteParam(url, title)));
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === SEARCH_FLOW_ACTIVITY && isActivityRouteParam(param)) {
+      NavDestination() {
+        ActivityListPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as ActivityRouteParam).username,
+          filter: (param as ActivityRouteParam).filter,
+          pageTitle: (param as ActivityRouteParam).title,
+          onBack: () => {
+            this.popInternal();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(
+              SEARCH_FLOW_TOPIC_DETAIL,
+              buildTopicDetailRouteParam(topicId, undefined, title, postNumber, postNumber !== undefined)
+            ));
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === SEARCH_FLOW_BADGES && isBadgesRouteParam(param)) {
+      NavDestination() {
+        BadgesPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as BadgesRouteParam).username,
+          badgeCount: (param as BadgesRouteParam).badgeCount,
+          onBack: () => {
+            this.popInternal();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === SEARCH_FLOW_SOLVED && isSolvedRouteParam(param)) {
+      NavDestination() {
+        SolvedPostsPage({
+          bridge: this.bridge,
+          isArkWebReady: this.isArkWebReady,
+          username: (param as SolvedRouteParam).username,
+          solvedCount: (param as SolvedRouteParam).solvedCount,
+          onBack: () => {
+            this.popInternal();
+          },
+          onOpenTopic: (topicId: number, title: string, postNumber?: number) => {
+            this.navPathStack.pushPath(new NavPathInfo(
+              SEARCH_FLOW_TOPIC_DETAIL,
+              buildTopicDetailRouteParam(topicId, undefined, title, postNumber, postNumber !== undefined)
+            ));
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
     } else if (name === SEARCH_FLOW_WEB && isWebRouteParam(param)) {
       NavDestination() {
         WebViewPage({
@@ -153,28 +275,46 @@ export struct SearchFlow {
     this.onClose();
   }
 
+  // 正文里点链接:凡是「导航」都留在搜索自己的栈里,不关搜索页。
+  // 原先只有 WEB 走站内 push,帖子链接 / @提及 一律 onClose() 交给外层,
+  // 于是正文里点个 @某人,整个搜索结果就没了——与「点帖子能返回」自相矛盾。
   private handleOpenLink(url: string): void {
     const target: LinkTarget = LinkRouter.resolve(url);
-    if (target.kind === LinkTargetKind.WEB) {
-      if (target.url.length === 0) {
-        return;
-      }
+    if (target.kind === LinkTargetKind.TOPIC && target.topicId !== undefined) {
+      // 标题从链接里拿不到,留空由详情页自己加载;带楼号的链接落地即高亮该楼(对齐官网 anchor)。
       this.navPathStack.pushPath(new NavPathInfo(
-        SEARCH_FLOW_WEB,
-        buildWebRouteParam(target.url)
+        SEARCH_FLOW_TOPIC_DETAIL,
+        buildTopicDetailRouteParam(target.topicId, undefined, '', target.postNumber, target.postNumber !== undefined)
       ));
       return;
     }
-    this.leaveSearchAndOpenNativeTarget(url);
+    if (target.kind === LinkTargetKind.USER && target.username !== undefined) {
+      this.openUserProfile(target.username, '', '', 0);
+      return;
+    }
+    if (target.kind === LinkTargetKind.DOWNLOAD) {
+      // 下载是个动作不是跳转,交给外层触发原生下载即可,更没有理由把搜索页关掉。
+      this.onOpenLink(url);
+      return;
+    }
+    if (target.url.length === 0) {
+      return;
+    }
+    this.navPathStack.pushPath(new NavPathInfo(
+      SEARCH_FLOW_WEB,
+      buildWebRouteParam(target.url)
+    ));
   }
 
-  private leaveSearchAndOpenNativeTarget(url: string): void {
-    this.onClose();
-    this.onOpenLink(url);
-  }
-
-  private leaveSearchAndOpenUser(user: User): void {
-    this.onClose();
-    this.onOpenUser(user);
+  // 帖子详情里点头像也走站内 push,与「搜索结果点用户」一致:
+  // 原来是 onClose() + onOpenUser() 关掉整个搜索页再去主页,返回时搜索结果就没了。
+  private openUserProfile(username: string, displayName: string, avatarTemplate: string, userId: number): void {
+    if (username.length === 0) {
+      return;
+    }
+    this.navPathStack.pushPath(new NavPathInfo(
+      SEARCH_FLOW_USER_PROFILE,
+      buildUserProfileRouteParam(username, displayName, avatarTemplate, userId)
+    ));
   }
 }

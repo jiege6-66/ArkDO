@@ -208,6 +208,19 @@ interface DiscourseSolvedPost {
   created_at?: string;
 }
 
+// /u/search/users 的响应:扁平 users 数组,字段比 /u/{username}.json 少得多
+// (只保证 username / name / avatar_template,id 不一定给)。
+interface DiscourseUserSearchItem {
+  id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
+}
+
+interface DiscourseUserSearchResponse {
+  users?: DiscourseUserSearchItem[];
+}
+
 // 个人中心数据服务:资料 /u/{username}.json、摘要 /u/{username}/summary.json、
 // 最近活动 /user_actions.json?filter=4,5(4=发布话题 5=回复)。均为 Discourse 标准接口。
 // 另有 /solution/by_user.json(discourse-solved 插件),他人主页的「解决方案」入口用。
@@ -216,6 +229,53 @@ export class UserProfileService {
 
   constructor(bridge: JsonNetworkClient) {
     this.bridge = bridge;
+  }
+
+  /**
+   * 用户搜索:GET /u/search/users?term=&limit=。
+   * 这是整页搜索「用户」类型走的接口(见 frontend 的 lib/user-search.js),
+   * 与 /search.json 无关,响应是扁平的 { users: [...] },没有分页。
+   */
+  async searchUsers(term: string, limit: number): Promise<NetworkResult<User[]>> {
+    const path: string = `/u/search/users?term=${encodeURIComponent(term)}&limit=${limit}`;
+    const response: NetworkResult<string> = await this.bridge.getJson(path);
+    if (!response.success) {
+      return this.forwardFailure<User[]>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, 'Linux.do 用户搜索响应为空。');
+    }
+    try {
+      const payload: DiscourseUserSearchResponse = JSON.parse(response.data) as DiscourseUserSearchResponse;
+      const raw: DiscourseUserSearchItem[] = payload.users ?? [];
+      const users: User[] = [];
+      for (let index: number = 0; index < raw.length; index++) {
+        const item: DiscourseUserSearchItem = raw[index];
+        if (typeof item.username !== 'string' || item.username.length === 0) {
+          continue;
+        }
+        const user: User = {
+          // 该接口不回 id(只有 username/name/avatar_template),下游按 username 取资料,id 占位 0。
+          id: typeof item.id === 'number' ? item.id : 0,
+          username: item.username
+        };
+        if (item.name && item.name.length > 0) {
+          user.displayName = item.name;
+        }
+        if (item.avatar_template && item.avatar_template.length > 0) {
+          user.avatarTemplate = item.avatar_template;
+        }
+        users.push(user);
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: users
+      };
+    } catch (error) {
+      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, 'Linux.do 用户搜索响应不是有效 JSON。');
+    }
   }
 
   async getProfileDetail(username: string): Promise<NetworkResult<UserProfileDetail>> {
