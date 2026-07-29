@@ -32,6 +32,11 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
 const SMALL_IMAGE_MAX: number = 48;
 
+// 图片浏览器 hero 转场用的源节点 id 序号：id 必须全 app 唯一，而同一张图 URL 可能同时
+// 出现在多个 post(引用/跨楼层重复贴图)里,单靠 URL 会撞。每个 PostRichContent 实例领一个
+// 号,与图片 URL 组合成 id,同实例内同 URL 出现两次才会重合(极罕见,后果仅是缩回前一张)。
+let heroTokenSeq: number = 0;
+
 // 宽屏(平板横屏)阅读场景下正文大图的最大显示宽度(vp)。取 ≈ 手机基准内容宽(~350)×1.5,
 // 满足上架规范「平板图片放大不超过直板机 1.5 倍」。手机 / 窄屏永不使用此值。
 const WIDE_IMAGE_MAX_WIDTH: number = 525;
@@ -129,6 +134,8 @@ export struct PostRichContent {
   private mathRequested: Set<string> = new Set();
   // 本帖是否已 retain 公式引擎(有公式才 retain,离开时 release)。
   private mathRetained: boolean = false;
+  // 本实例的 hero id 前缀(aboutToAppear 领号)。见 heroTokenSeq。
+  private heroToken: string = '';
   // 组件是否仍挂载:异步续体(如引用卡拉全文的 .then)跨越网络往返落地时,组件可能已被 LazyForEach 回收
   // 或返回上一页销毁;续体前置守卫,避免在已卸载组件上 getUIContext().animateTo(null) 抛异常/无效写 @State。
   private isActive: boolean = false;
@@ -144,6 +151,8 @@ export struct PostRichContent {
   aboutToAppear(): void {
     this.isActive = true;
     this.renderablePolls = this.polls;
+    heroTokenSeq++;
+    this.heroToken = heroTokenSeq.toString(36);
     this.prepareMath();
   }
 
@@ -926,6 +935,7 @@ export struct PostRichContent {
         // 小图（如 emoji、图标）：按 cooked 自带的真实尺寸显示，左对齐、不撑满、不显示 alt
         // 手机 / 宽屏一致,不动。
         Image(block.src ? block.src : '')
+          .id(this.heroIdOf(block))
           .width(block.width ? block.width : 20)
           .height(block.height ? block.height : 20)
           .objectFit(ImageFit.Contain)
@@ -939,6 +949,7 @@ export struct PostRichContent {
         Row() {
           if (this.hasImageSize(block)) {
             Image(block.src ? block.src : '')
+              .id(this.heroIdOf(block))
               .width('100%')
               .aspectRatio(this.getImageAspectRatio(block))
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH, maxHeight: this.wideImageMaxHeight() })
@@ -949,6 +960,7 @@ export struct PostRichContent {
               })
           } else {
             Image(block.src ? block.src : '')
+              .id(this.heroIdOf(block))
               .width('100%')
               .height(260)
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH })
@@ -964,6 +976,7 @@ export struct PostRichContent {
       } else if (this.hasImageSize(block)) {
         // 手机 / 窄屏:原逻辑,一字未改(width 100% + maxHeight 520,靠外层 Column 左对齐)。
         Image(block.src ? block.src : '')
+          .id(this.heroIdOf(block))
           .width('100%')
           .aspectRatio(this.getImageAspectRatio(block))
           .constraintSize({ maxHeight: 520 })
@@ -974,6 +987,7 @@ export struct PostRichContent {
           })
       } else {
         Image(block.src ? block.src : '')
+          .id(this.heroIdOf(block))
           .width('100%')
           .height(260)
           .objectFit(ImageFit.Contain)
@@ -1685,7 +1699,9 @@ export struct PostRichContent {
         if (primary.length > 0) {
           // 兜底用优化图 src（与帖子内联同源、多已缓存），原图加载失败时回退
           const optimized: string = block.src && block.src !== primary ? block.src : '';
-          result.push({ url: primary, fallbackUrl: optimized });
+          // heroId 与 ImageBlock 里挂的 .id() 同源(都由 primaryImageUrl 推出),
+          // 浏览器据此现查源节点几何做 hero 转场。
+          result.push({ url: primary, fallbackUrl: optimized, heroId: this.heroIdOf(block) });
         }
       }
       // 列表项内的块级图(item.blocks)也要进浏览器,否则点开只有它自己、无法左右翻页。
@@ -1711,6 +1727,29 @@ export struct PostRichContent {
         }
       }
     }
+  }
+
+  /**
+   * 图片浏览器 hero 转场用的源节点 id：实例号 + 图片 URL 的哈希。
+   * 挂 .id() 与收集 ViewerImage 两处必须用同一个值,浏览器才能按 id 反查回源节点。
+   * 用 URL 而非块路径,是因为 BlockView 的渲染路径与 collectImagesFrom 的收集路径
+   * 在通用嵌套(-c/-tq vs -x)上并不一致,对不齐。
+   */
+  private heroIdOf(block: RichBlock): string {
+    const url: string = this.primaryImageUrl(block);
+    if (url.length === 0) {
+      return '';
+    }
+    return `hero-${this.heroToken}-${this.hashKey(url)}`;
+  }
+
+  // 32 位 djb2,把 URL 压成短串:id 只需稳定且不含奇异字符,不需要可逆。
+  private hashKey(value: string): string {
+    let hash: number = 5381;
+    for (let i: number = 0; i < value.length; i++) {
+      hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
+    }
+    return (hash >>> 0).toString(36);
   }
 
   // 看图优先用高清原图 href（lightbox 全尺寸）；缺失时才用优化图 src

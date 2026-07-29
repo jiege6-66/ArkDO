@@ -360,10 +360,9 @@ export struct RootTabPage {
             this.closeImageViewer();
           }
         })
-          // 入场/退场:纯淡入淡出,由 open/close 的 animateTo 驱动。
-          .transition(
-            TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
-          )
+        // 挂载/卸载不带任何 transition:开关场动效(hero 飞入飞回,或降级的淡入淡出)
+        // 全部由 ImageViewer 自己在内部跑完——外层再套一层 opacity 会把飞行中的图一起淡掉。
+        // 相应地 onClose 是「动效已播完」的信号,收到就能直接卸载。
       }
 
     }
@@ -1300,7 +1299,8 @@ export struct RootTabPage {
     }
   }
 
-  // 图片浏览器开关:详情页经 onOpenImages 回调冒泡上来触发。animateTo 驱动 .transition 淡入/淡出。
+  // 图片浏览器开关:详情页经 onOpenImages 回调冒泡上来触发。开关场动效在 ImageViewer 内部
+  // (hero 从列表原位飞入 / 飞回,拿不到源节点几何时降级淡入淡出),这里只负责挂载与卸载。
   // 窗口常驻全屏布局(ImmersiveWindow),浮层在 Navigation 之外天然铺满物理屏——无须切窗口模式、
   // 无须背景补偿。这里只做一件窗口级小事:预览期间隐藏状态栏(时间/电量不印在图上),关闭时恢复。
   // 全屏布局下系统栏显隐不引起任何布局变化,且隐藏触发的插图归零事件被 suppress 丢弃,
@@ -1320,9 +1320,8 @@ export struct RootTabPage {
         navigationBarContentColor: '#FFFFFF'
       }).catch(() => {});
     }).catch(() => {});
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
-      this.showImageViewer = true;
-    });
+    // 直接挂载,不套动画:hero 飞入由 ImageViewer 自己跑(它首帧就渲染成源图大小)。
+    this.showImageViewer = true;
   }
 
   // 详情页返回键统一入口:先看全屏编辑器浮层(可见则 bump tick 交详情页一镜回落),再看图片预览。
@@ -1371,9 +1370,8 @@ export struct RootTabPage {
     }
     // 恢复插图同步:状态栏重新出现触发的 avoidAreaChange 会把插图写回(与预览前同值,padding 不动)。
     ImmersiveWindow.suppressInsetSync(false);
-    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseIn }, () => {
-      this.showImageViewer = false;
-    });
+    // onClose 由 ImageViewer 在退场动效播完后才回调,这里直接卸载即可。
+    this.showImageViewer = false;
   }
 
   // 搜索 Flow 开关:根 Stack 覆盖层负责首页搜索图标 -> 搜索页图标的一镜到底;
