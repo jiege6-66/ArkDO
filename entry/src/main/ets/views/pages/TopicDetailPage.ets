@@ -1592,10 +1592,18 @@ export struct TopicDetailPage {
     return modifier;
   }
 
+  // 列表末项下标。项序:0 = 摘要卡 → 1..postCount = 楼层 → 待审区(条件渲染) → 底部加载态行(有楼层时)。
+  // 待审区那一项必须算进来:漏掉它时 lastIndex 指向的是待审区而非真正的末项,于是待审区一进视口
+  // 就判成"已到底"——钉底闩提前落下,实时新楼也会误判成"人在底部"。只有本人在本帖有未过审回复时才撞上。
+  private lastListIndex(): number {
+    const pendingSection: number = (!this.hasMorePosts && this.pendingPosts.length > 0) ? 1 : 0;
+    const tailRow: number = this.postCount > 0 ? 1 : 0;
+    return this.postCount + pendingSection + tailRow;
+  }
+
   // 依据视口首/末项下标维护 scrubber 状态:可滚动性、钉底闩、当前楼号。
-  // 列表项布局:index 0 = 摘要卡,1..postCount = 楼层,postCount+1 = 底部加载态行(有楼层时恒存在)。
   private updateScrubberFromScroll(start: number, end: number): void {
-    const lastIndex: number = this.postCount + 1;
+    const lastIndex: number = this.lastListIndex();
     // 摘要(index 0)与末尾项同时可见 = 整屏放得下、不可滚动 → 隐藏 scrubber。
     this.listScrollable = !(start === 0 && end >= lastIndex);
     // 末尾项滚出视口即离开底部,撤销钉底(短楼:滑块回落到首楼映射;长末楼:首楼本就是 max,无影响)。
