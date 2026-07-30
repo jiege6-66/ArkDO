@@ -88,6 +88,13 @@ const REPLY_DRAFT_SAVE_DEBOUNCE_MS: number = 2000;
 const POST_LIST_BOTTOM_SPACER: number = 28;
 // 实时新楼(MessageBus /topic created)去抖窗口:合并 ~400ms 内连着来的多条 created,一次批量拉。
 const INCOMING_POST_DEBOUNCE_MS: number = 400;
+// "N 条新回复"提示条高度。必须写死而非由 padding 撑开:它要与 52vp 悬浮回复按钮垂直居中对齐,
+// 对齐算式需要确切的半高;交给内容撑高就只能用百分比锚点,而那条路已经证明会把胶囊顶出屏幕。
+const INCOMING_BANNER_HEIGHT: number = 34;
+// 提示条在"与悬浮回复按钮垂直居中"这个基准位之上再抬高多少。抬高的理由不是观感而是占位:
+// 底部那一行要留给后续的「正在回复」头像区(它会与回复按钮垂直对齐),提示条得让开、浮在其上方。
+// 实测值——基准位(抬高 0)确认过就是与按钮正中对齐,这 24 是在其上额外让出的余量。
+const INCOMING_BANNER_LIFT: number = 24;
 // 离开详情页后延迟这么久再去长轮询循环里删掉本帖频道。该操作要经 ArkWeb 桥 runJavaScript,
 // 压在 pop 那一帧上会掉帧;推迟到转场动画结束之后再做。与 TopicReadController 的 DETACH_DEFER_MS 同理。
 const CHANNEL_UNSUBSCRIBE_DEFER_MS: number = 600;
@@ -769,28 +776,42 @@ export struct TopicDetailPage {
     }
 
     // 实时新楼提示条：用户不在底部时新楼到达累计，点按跳到首条新楼。悬浮在底部中央、不参与布局，
-    // 与向上加载胶囊同一套"悬浮小胶囊"长相。在底部时不显示(那时直接追加并滚动揭示)。
+    // 与向上加载胶囊同一套"悬浮小胶囊"长相。在底部时不显示(那时直接追加，见 flushCreatedPosts)。
+    //
+    // 定位方式与右下角悬浮回复按钮保持一致(满屏容器 + 底距)，不要改回
+    // position('100%') + markAnchor('50%') + offset 那一套：算式上两者中心该重合，实测胶囊却沉到
+    // 屏幕外只露出顶部一条——百分比锚点作用在由内容撑开的组件上并不可靠。
+    // 底距 = FAB 底距 + FAB 半高 26 − 胶囊半高（此式即与按钮垂直居中，已实测确认）再加让位余量。
     if (this.incomingNewPostCount > 0 && !this.showComposer) {
-      Row() {
-        Text('↓')
-          .fontSize(13)
-          .fontColor($r('app.color.brand'))
-          .margin({ right: 6 })
-        Text(`${this.incomingNewPostCount} 条新回复`)
-          .fontSize(13)
-          .fontColor($r('app.color.brand'))
+      Column() {
+        Row() {
+          Text('↓')
+            .fontSize(13)
+            .fontColor($r('app.color.brand'))
+            .margin({ right: 6 })
+          Text(`${this.incomingNewPostCount} 条新回复`)
+            .fontSize(13)
+            .fontColor($r('app.color.brand'))
+        }
+        .height(INCOMING_BANNER_HEIGHT)
+        .padding({ left: 14, right: 14 })
+        .backgroundColor($r('app.color.surface_card'))
+        .borderRadius(INCOMING_BANNER_HEIGHT / 2)
+        .shadow({ radius: 8, color: SHADOW_SOFT, offsetX: 0, offsetY: 2 })
+        .onClick(() => {
+          this.openIncomingPosts();
+        })
       }
-      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-      .backgroundColor($r('app.color.surface_card'))
-      .borderRadius(16)
-      .shadow({ radius: 8, color: SHADOW_SOFT, offsetX: 0, offsetY: 2 })
-      // 垂直中心与右下角悬浮回复按钮对齐：按中心锚定到底边，再上移(FAB 底距 + FAB 半高 26)。
-      .position({ x: '50%', y: '100%' })
-      .markAnchor({ x: '50%', y: '50%' })
-      .offset({ y: -(floatingActionBottomMargin(this.sysBottomInset) + 26) })
-      .onClick(() => {
-        this.openIncomingPosts();
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.End)
+      .alignItems(HorizontalAlign.Center)
+      .padding({
+        bottom: floatingActionBottomMargin(this.sysBottomInset) + 26 - INCOMING_BANNER_HEIGHT / 2
+          + INCOMING_BANNER_LIFT
       })
+      // 满屏容器只为定位，不能吃掉正文的滚动与点击。
+      .hitTestBehavior(HitTestMode.Transparent)
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
