@@ -19,11 +19,14 @@ export struct ReplyingPresenceBar {
   build() {
     Row() {
       Row() {
-        ForEach(this.users, (user: User, index: number) => {
+        // 每个头像统一 -overlap 左移形成叠放；外层补一个 overlap 左内边距抵消第一个，使首个头像齐平。
+        // 不按 index 设 margin：keyed ForEach 复用已存在项时不重跑生成器，index 会过期导致位置错乱。
+        ForEach(this.users, (user: User) => {
           UserAvatar({ user: user, avatarSize: this.avatarSize })
-            .margin({ left: index === 0 ? 0 : -this.overlap })
-        }, (user: User, index: number) => index.toString())
+            .margin({ left: -this.overlap })
+        }, (user: User) => user.id.toString())
       }
+      .padding({ left: this.overlap })
       .alignItems(VerticalAlign.Center)
 
       // 文字与三点底部对齐(对齐 Discourse：句号点落在文字基线上，从底部起跳)。

@@ -268,9 +268,6 @@ export struct TopicDetailPage {
   // 「帖子实时更新」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
   @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
   private realtimePostsEnabled: boolean = false;
-  // [Presence UI 联调] 正在回复者(假数据)。仅供 UI 效果测试:点调试按钮往里塞当前用户头像,
-  // 循环 0→1→2→…→0。真实 Presence 数据由 presenceUsers 提供,非空时优先显示真实数据(见 currentRepliers)。
-  @State private fakeRepliers: User[] = [];
   // 块 2(下行、只读)：真实"正在回复"用户,由 TopicPresenceService 维护后回调写入。
   @State private presenceUsers: User[] = [];
   // Presence 下行服务。bridge 走闭包惰性读取(字段初始化时父注入的 bridge 尚未覆盖默认空壳)。
@@ -838,11 +835,11 @@ export struct TopicDetailPage {
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
-    // 底部"正在回复"悬浮条：真实 Presence 数据(presenceUsers)优先，无则回退假数据(调试预览用)。
-    // 定位与"N 条新回复"一致(满屏容器 + 底距)，与右下角悬浮回复按钮垂直居中。
-    if (this.detail && this.currentRepliers().length > 0 && !this.showComposer) {
+    // 底部"正在回复"悬浮条：真实 Presence 数据驱动。定位与"N 条新回复"一致(满屏容器 + 底距)，
+    // 与右下角悬浮回复按钮垂直居中。
+    if (this.detail && this.presenceUsers.length > 0 && !this.showComposer) {
       Column() {
-        ReplyingPresenceBar({ users: this.currentRepliers() })
+        ReplyingPresenceBar({ users: this.presenceUsers })
       }
       .width('100%')
       .height('100%')
@@ -856,33 +853,6 @@ export struct TopicDetailPage {
       })
       .hitTestBehavior(HitTestMode.Transparent)
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
-    }
-
-    // [Presence UI 联调] 临时调试按钮(左下角)：每点一次往"正在回复"塞一个当前用户头像，
-    // 循环 0→1→2→3→0，用来观察 1 人 / 多人叠头像 + 三点跳动的效果。接真实数据后删除本块。
-    if (this.detail && !this.showComposer) {
-      Column() {
-        Text(`+正在回复 (${this.fakeRepliers.length})`)
-          .fontSize(11)
-          .fontColor(Color.White)
-          .padding({ left: 10, right: 10, top: 7, bottom: 7 })
-          .backgroundColor('#B3000000')
-          .borderRadius(14)
-          .onClick(() => {
-            // 上限 5 对齐 Discourse presence_max_users_shown 默认值；到顶再点归零，方便循环看效果。
-            if (this.fakeRepliers.length >= 5) {
-              this.fakeRepliers = [];
-            } else {
-              this.fakeRepliers = this.fakeRepliers.concat([this.currentUser]);
-            }
-          })
-      }
-      .width('100%')
-      .height('100%')
-      .justifyContent(FlexAlign.End)
-      .alignItems(HorizontalAlign.Start)
-      .padding({ left: 16, bottom: floatingActionBottomMargin(this.sysBottomInset) + 12 })
-      .hitTestBehavior(HitTestMode.Transparent)
     }
 
     // 评论输入浮层:内联挂在根 Stack 顶层(而非 contentCover),这样组件 getLastWindow 拿到主窗口、
@@ -1337,11 +1307,6 @@ export struct TopicDetailPage {
   private clearIncomingBanner(): void {
     this.incomingNewPostCount = 0;
     this.incomingFirstNewPostNumber = 0;
-  }
-
-  // "正在回复"条的数据源：真实 Presence(presenceUsers)优先；为空时回退假数据(调试按钮预览用)。
-  private currentRepliers(): User[] {
-    return this.presenceUsers.length > 0 ? this.presenceUsers : this.fakeRepliers;
   }
 
   // 点"N 条新回复"提示条：跳到首条新楼(已在列表中，走 jumpToPostNumber 的已加载滚动+落地高亮分支)。
