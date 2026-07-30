@@ -4,9 +4,21 @@ import { ChallengeState } from '../network/NetworkTypes';
 
 const LOG_TAG: string = '[ArkDO][MessageBus]';
 
+// Presence 频道 payload 里的用户(BasicUserSerializer：id/username/name/avatar_template)。
+export interface MessageBusPresenceUser {
+  id?: number;
+  username?: string;
+  name?: string;
+  avatar_template?: string;
+}
+
 export interface MessageBusData {
   topic_id?: number;
   message_type?: string;
+  // /presence/<channel> 频道 payload(presence_channel.rb:335-347)：谁进入/离开"正在回复"。
+  entering_users?: MessageBusPresenceUser[];
+  leaving_user_ids?: number[];
+  count_delta?: number;
   // /notification/<id> 频道 payload 的未读数（user.rb publish_notifications_state:921-931，已核源码）。
   // 铃铛角标用 all_unread_notifications_count（总未读，含私信）；unread_notifications 只含
   // high_priority=FALSE，漏私信，不能用于角标。unread_high_priority_notifications 为高优先级子集。

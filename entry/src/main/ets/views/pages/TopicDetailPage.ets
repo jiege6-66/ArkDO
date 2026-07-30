@@ -20,6 +20,7 @@ import { TopicReadController } from '../../services/reading/TopicReadController'
 import { CreateReplyOutcome, TopicService } from '../../services/topic/TopicService';
 import { extractCreatedPostId, MessageBusEvent, MessageBusEventBus } from '../../services/message/MessageBusEventBus';
 import { REALTIME_POSTS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimePostsPrefs';
+import { TopicPresenceService } from '../../services/presence/TopicPresenceService';
 import { DraftService } from '../../services/draft/DraftService';
 import { DraftEventBus } from '../../services/draft/DraftEventBus';
 import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
@@ -268,8 +269,17 @@ export struct TopicDetailPage {
   @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
   private realtimePostsEnabled: boolean = false;
   // [Presence UI 联调] 正在回复者(假数据)。仅供 UI 效果测试:点调试按钮往里塞当前用户头像,
-  // 循环 0→1→2→3→0。待接真实 Presence 数据时替换来源即可,与真实逻辑无关。
+  // 循环 0→1→2→…→0。真实 Presence 数据由 presenceUsers 提供,非空时优先显示真实数据(见 currentRepliers)。
   @State private fakeRepliers: User[] = [];
+  // 块 2(下行、只读)：真实"正在回复"用户,由 TopicPresenceService 维护后回调写入。
+  @State private presenceUsers: User[] = [];
+  // Presence 下行服务。bridge 走闭包惰性读取(字段初始化时父注入的 bridge 尚未覆盖默认空壳)。
+  private presence: TopicPresenceService = new TopicPresenceService(
+    (): ArkWebNetworkBridge => this.bridge,
+    (): number => this.currentUser.id,
+    (users: User[]): void => {
+      this.presenceUsers = users;
+    });
   // 已读追踪控制器:计时上报、已读水位、错峰翻已读、离开时回传列表页,全部由它托管。
   // 用闭包读取 detail 与数据源当前楼层数组(分页后数组会变,不能捕获快照)。
   private readController: TopicReadController = new TopicReadController(
@@ -361,7 +371,11 @@ export struct TopicDetailPage {
       const bridge: ArkWebNetworkBridge = this.bridge;
       setTimeout(() => {
         bridge.unsubscribeTopicChannel(topicId);
+        // Presence 退订同理经桥 runJavaScript，一并推迟到转场之后。总线已同步退订，此前不会有人处理增量。
+        this.presence.stop();
       }, CHANNEL_UNSUBSCRIBE_DEFER_MS);
+    } else {
+      this.presence.stop();
     }
     if (this.createdFetchTimer !== -1) {
       clearTimeout(this.createdFetchTimer);
@@ -824,11 +838,11 @@ export struct TopicDetailPage {
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
-    // [Presence UI 联调] 底部"正在回复"悬浮条：定位方式与"N 条新回复"一致(满屏容器 + 底距)，
-    // 与右下角悬浮回复按钮垂直居中(底距 = FAB 底距 + FAB 半高 26 − 胶囊半高)。UI 效果先行，数据是假的。
-    if (this.detail && this.fakeRepliers.length > 0 && !this.showComposer) {
+    // 底部"正在回复"悬浮条：真实 Presence 数据(presenceUsers)优先，无则回退假数据(调试预览用)。
+    // 定位与"N 条新回复"一致(满屏容器 + 底距)，与右下角悬浮回复按钮垂直居中。
+    if (this.detail && this.currentRepliers().length > 0 && !this.showComposer) {
       Column() {
-        ReplyingPresenceBar({ users: this.fakeRepliers })
+        ReplyingPresenceBar({ users: this.currentRepliers() })
       }
       .width('100%')
       .height('100%')
@@ -1220,12 +1234,16 @@ export struct TopicDetailPage {
     this.bridge.subscribeTopicChannel(this.detail.id, position);
   }
 
-  // 「帖子实时更新」开关运行中翻转：开⇒订阅本帖频道；关⇒退订并清掉待处理与提示条。
+  // 「帖子实时更新」开关运行中翻转：开⇒订阅本帖频道 + 启动 Presence；关⇒退订、停 Presence、清提示条。
   private onRealtimePostsToggled(): void {
     if (this.realtimePostsEnabled) {
       this.subscribeTopicChannel();
+      if (this.detail) {
+        this.presence.start(this.detail.id);
+      }
     } else if (this.detail) {
       this.bridge.unsubscribeTopicChannel(this.detail.id);
+      this.presence.stop();
       this.pendingCreatedPostIds = [];
       if (this.createdFetchTimer !== -1) {
         clearTimeout(this.createdFetchTimer);
@@ -1237,11 +1255,14 @@ export struct TopicDetailPage {
 
   // 总线事件入口。只处理本帖 /topic/<id> 上的 created(MVP)；循环重启时补订阅。
   private handleMessageBusEvent(event: MessageBusEvent): void {
-    // 循环重启(host 重载/前后台切换)后 state 重建，补订本帖频道(subscribeTopicChannel 自身按开关守卫)。
+    // 循环重启(host 重载/前后台切换)后 state 重建，补订本帖频道 + 重同步 Presence。
     if (event.type === 'status' && event.stage === 'config-ready') {
       this.subscribeTopicChannel();
+      this.presence.resync();
       return;
     }
+    // Presence 增量：独立于下面 /topic 新楼的门控(服务内部按 started/频道自守卫)。
+    this.presence.handleBusEvent(event);
     if (!this.realtimePostsEnabled || event.type !== 'message' || this.detail === undefined) {
       return;
     }
@@ -1316,6 +1337,11 @@ export struct TopicDetailPage {
   private clearIncomingBanner(): void {
     this.incomingNewPostCount = 0;
     this.incomingFirstNewPostNumber = 0;
+  }
+
+  // "正在回复"条的数据源：真实 Presence(presenceUsers)优先；为空时回退假数据(调试按钮预览用)。
+  private currentRepliers(): User[] {
+    return this.presenceUsers.length > 0 ? this.presenceUsers : this.fakeRepliers;
   }
 
   // 点"N 条新回复"提示条：跳到首条新楼(已在列表中，走 jumpToPostNumber 的已加载滚动+落地高亮分支)。
@@ -1794,6 +1820,10 @@ export struct TopicDetailPage {
       this.startReadingTrackerIfNeeded();
       // detail 就位：订阅 /topic/<id> 实时新楼（起点游标取 message_bus_last_id，缺失回落 -1）。
       this.subscribeTopicChannel();
+      // 块 2：启动"正在回复"下行(仅当开关开；服务内部再走 /presence/get + 订阅增量)。
+      if (this.realtimePostsEnabled) {
+        this.presence.start(this.detail.id);
+      }
       return;
     }
 

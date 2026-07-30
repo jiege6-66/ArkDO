@@ -443,11 +443,23 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   // position=打开帖子时的 message_bus_last_id（-1=只收新）。脚本已注入则即时加频道；
   // 未注入(loop 未跑)则兜底写持久集合 __arkdoMessageBusChannels，待下次 startMessageBus 并入。
   subscribeTopicChannel(topicId: number, position: number): void {
+    this.subscribeChannel(`/topic/${topicId}`, position);
+  }
+
+  // 离开详情页时退订 /topic/<id>：删频道，下一轮 poll 不再携带它。
+  unsubscribeTopicChannel(topicId: number): void {
+    this.unsubscribeChannel(`/topic/${topicId}`);
+  }
+
+  // 通用：往运行中的长轮询循环动态订阅任意 MessageBus 频道(如 Presence 的 /presence/...)。
+  // position=订阅起点游标(-1=只收新)。脚本已注入则即时加频道；未注入(loop 未跑)则兜底写持久集合，
+  // 待下次 startMessageBus 并入。controller 未就绪时 skip。
+  subscribeChannel(channelName: string, position: number): void {
     if (!this.controller) {
-      logNetwork('MessageBus subscribeTopic skipped: controller not ready');
+      logNetwork('MessageBus subscribeChannel skipped: controller not ready');
       return;
     }
-    const channel: string = JSON.stringify(`/topic/${topicId}`);
+    const channel: string = JSON.stringify(channelName);
     const pos: number = Number.isFinite(position) ? Math.floor(position) : -1;
     const script: string =
       `if (window.__arkdoMessageBusAddChannel) { window.__arkdoMessageBusAddChannel(${channel}, ${pos}); } ` +
@@ -455,29 +467,28 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       `if (!(${channel} in window.__arkdoMessageBusChannels)) { window.__arkdoMessageBusChannels[${channel}] = ${pos}; } }`;
     try {
       this.controller.runJavaScript(script).catch(() => {
-        logNetwork('MessageBus subscribeTopic injection failed');
+        logNetwork('MessageBus subscribeChannel injection failed');
       });
     } catch (error) {
-      logNetwork('MessageBus subscribeTopic injection failed');
+      logNetwork('MessageBus subscribeChannel injection failed');
     }
   }
 
-  // 离开详情页时退订 /topic/<id>：删频道，下一轮 poll 不再携带它。
-  unsubscribeTopicChannel(topicId: number): void {
+  unsubscribeChannel(channelName: string): void {
     if (!this.controller) {
-      logNetwork('MessageBus unsubscribeTopic skipped: controller not ready');
+      logNetwork('MessageBus unsubscribeChannel skipped: controller not ready');
       return;
     }
-    const channel: string = JSON.stringify(`/topic/${topicId}`);
+    const channel: string = JSON.stringify(channelName);
     const script: string =
       `if (window.__arkdoMessageBusRemoveChannel) { window.__arkdoMessageBusRemoveChannel(${channel}); } ` +
       `else if (window.__arkdoMessageBusChannels) { delete window.__arkdoMessageBusChannels[${channel}]; }`;
     try {
       this.controller.runJavaScript(script).catch(() => {
-        logNetwork('MessageBus unsubscribeTopic injection failed');
+        logNetwork('MessageBus unsubscribeChannel injection failed');
       });
     } catch (error) {
-      logNetwork('MessageBus unsubscribeTopic injection failed');
+      logNetwork('MessageBus unsubscribeChannel injection failed');
     }
   }
 
