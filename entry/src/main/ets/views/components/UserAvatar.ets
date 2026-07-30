@@ -22,7 +22,7 @@ export struct UserAvatar {
   // 「动态头像」开关(实验性功能,默认关)。关⇒头像与图片型 flair 一律取首帧渲染成静态;
   // 开⇒CDN 上的图交给原生 Image 直载,是动图就自动播放。运行中翻转由 @Watch 重取当前候选。
   @StorageProp(ANIMATED_AVATAR_ENABLED_STORAGE_KEY) @Watch('onAnimatedAvatarToggled')
-  private animatedAvatarEnabled: boolean = false;
+  private animatedAvatarEnabled: boolean = true;
   // 关闭动图时图片型 flair 解出的单帧 PixelMap。之所以不是"直接不显示角标":
   // 开关一翻角标就消失的话,分不清观感变化是"动图停了"还是"少了一批组件",对照就不干净了。
   @State private flairPixelMap: image.PixelMap | undefined = undefined;

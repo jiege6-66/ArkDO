@@ -24,8 +24,8 @@ export struct ExperimentalSettingsPage {
   @State private realtimeTopicsEnabled: boolean = false;
   // 帖子实时更新开关(默认关),进页时从 preferences 载入。
   @State private realtimePostsEnabled: boolean = false;
-  // 动态头像开关(默认关),进页时从 preferences 载入。
-  @State private animatedAvatarEnabled: boolean = false;
+  // 动态头像开关(默认开),进页时从 preferences 载入。
+  @State private animatedAvatarEnabled: boolean = true;
   // 智感握姿开关(默认关),进页时从 HoldingHandManager 读取。
   @State private smartReachEnabled: boolean = false;
   private scroller: Scroller = new Scroller();
