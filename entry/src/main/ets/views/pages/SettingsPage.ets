@@ -29,8 +29,8 @@ export struct SettingsPage {
   // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   onBack: () => void = () => {};
-  // 打开站内 Web 页:关于弹框里"开发者 @JoeyYin"跳 linux.do 个人资料页复用此链路,由 RootTabPage 注入。
-  onOpenWeb: (url: string, title?: string) => void = () => {};
+  // 关于弹框里"开发者 @JoeyYin"跳原生用户主页(UserProfilePage,按 username 加载),push 由 RootTabPage 注入。
+  onOpenUser: (username: string, displayName: string) => void = () => {};
   // 反馈与建议:打开站内反馈帖的原生详情页。本页拿不到 navPathStack,push 由 RootTabPage 注入。
   onOpenFeedback: () => void = () => {};
   // 四个分类子页入口:本页不持有 navPathStack,push 均由 RootTabPage 注入。
@@ -56,7 +56,7 @@ export struct SettingsPage {
   private aboutDialogController: CustomDialogController = new CustomDialogController({
     builder: AboutDialog({
       onOpenDeveloper: () => {
-        this.onOpenWeb('https://linux.do/u/joeyyin/', 'JoeyYin');
+        this.onOpenUser('joeyyin', 'JoeyYin');
       }
     }),
     alignment: DialogAlignment.Center,

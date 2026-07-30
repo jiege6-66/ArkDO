@@ -684,8 +684,8 @@ export struct RootTabPage {
           onBack: () => {
             this.popNavigation();
           },
-          onOpenWeb: (url: string, title?: string) => {
-            this.openWebPage(url, title);
+          onOpenUser: (username: string, displayName: string) => {
+            this.openUserProfile(username, displayName, '', 0);
           },
           onOpenFeedback: () => {
             // 标题留空:详情页拉到帖子后自会填真实标题,不必在此硬编码一份易过期的副本。
