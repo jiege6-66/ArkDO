@@ -34,6 +34,7 @@ import { TopicDetailHeader } from '../components/TopicDetailHeader';
 import { TopicSummaryCard } from '../components/TopicSummaryCard';
 import { PendingPostCard } from '../components/PendingPostCard';
 import { TopicPostItem } from '../components/TopicPostItem';
+import { REPLYING_PRESENCE_BAR_HEIGHT, ReplyingPresenceBar } from '../components/ReplyingPresenceBar';
 import { ViewerImage } from '../components/ImageViewer';
 import { CommentInputBar, NO_MAX_CHARS, REPLY_BLUE } from '../components/CommentInputBar';
 import { ComposerPage, COMPOSER_ANIM_MS } from './ComposerPage';
@@ -266,6 +267,9 @@ export struct TopicDetailPage {
   // 「帖子实时更新」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
   @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
   private realtimePostsEnabled: boolean = false;
+  // [Presence UI 联调] 正在回复者(假数据)。仅供 UI 效果测试:点调试按钮往里塞当前用户头像,
+  // 循环 0→1→2→3→0。待接真实 Presence 数据时替换来源即可,与真实逻辑无关。
+  @State private fakeRepliers: User[] = [];
   // 已读追踪控制器:计时上报、已读水位、错峰翻已读、离开时回传列表页,全部由它托管。
   // 用闭包读取 detail 与数据源当前楼层数组(分页后数组会变,不能捕获快照)。
   private readController: TopicReadController = new TopicReadController(
@@ -813,6 +817,53 @@ export struct TopicDetailPage {
       // 满屏容器只为定位，不能吃掉正文的滚动与点击。
       .hitTestBehavior(HitTestMode.Transparent)
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
+    }
+
+    // [Presence UI 联调] 底部"正在回复"悬浮条：定位方式与"N 条新回复"一致(满屏容器 + 底距)，
+    // 与右下角悬浮回复按钮垂直居中(底距 = FAB 底距 + FAB 半高 26 − 胶囊半高)。UI 效果先行，数据是假的。
+    if (this.detail && this.fakeRepliers.length > 0 && !this.showComposer) {
+      Column() {
+        ReplyingPresenceBar({ users: this.fakeRepliers })
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.End)
+      .alignItems(HorizontalAlign.Center)
+      .padding({
+        // 与右下角回复按钮垂直居中(FAB 底距 + FAB 半高 26 − 胶囊半高)；FAB 走 HdsActionBar 内部已处理
+        // 底部安全区，本条是普通 Column 会把安全区多算一次，故再扣掉 sysBottomInset。
+        bottom: floatingActionBottomMargin(this.sysBottomInset) - this.sysBottomInset
+          + 26 - REPLYING_PRESENCE_BAR_HEIGHT / 2
+      })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
+    }
+
+    // [Presence UI 联调] 临时调试按钮(左下角)：每点一次往"正在回复"塞一个当前用户头像，
+    // 循环 0→1→2→3→0，用来观察 1 人 / 多人叠头像 + 三点跳动的效果。接真实数据后删除本块。
+    if (this.detail && !this.showComposer) {
+      Column() {
+        Text(`+正在回复 (${this.fakeRepliers.length})`)
+          .fontSize(11)
+          .fontColor(Color.White)
+          .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+          .backgroundColor('#B3000000')
+          .borderRadius(14)
+          .onClick(() => {
+            // 上限 5 对齐 Discourse presence_max_users_shown 默认值；到顶再点归零，方便循环看效果。
+            if (this.fakeRepliers.length >= 5) {
+              this.fakeRepliers = [];
+            } else {
+              this.fakeRepliers = this.fakeRepliers.concat([this.currentUser]);
+            }
+          })
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.End)
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: 16, bottom: floatingActionBottomMargin(this.sysBottomInset) + 12 })
+      .hitTestBehavior(HitTestMode.Transparent)
     }
 
     // 评论输入浮层:内联挂在根 Stack 顶层(而非 contentCover),这样组件 getLastWindow 拿到主窗口、
