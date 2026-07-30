@@ -799,7 +799,12 @@ export struct TopicDetailPage {
         }
         .height(INCOMING_BANNER_HEIGHT)
         .padding({ left: 14, right: 14 })
-        .backgroundColor($r('app.color.surface_card'))
+        // 与"正在回复"胶囊 / 悬浮回复按钮同一套玻璃磨砂(强磨砂 + 通透)，不再用实色底。
+        .backgroundEffect({
+          radius: 28,
+          color: $r('app.color.hds_floating_action_bg'),
+          saturation: 1.2
+        })
         .borderRadius(INCOMING_BANNER_HEIGHT / 2)
         .shadow({ radius: 8, color: SHADOW_SOFT, offsetX: 0, offsetY: 2 })
         .onClick(() => {
