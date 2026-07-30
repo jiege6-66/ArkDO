@@ -315,7 +315,7 @@ export struct LdcCreditPage {
         Text(`共 +${formatLdcAmount(this.totalIncome())}`)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.ld_success'))
+          .fontColor($r('app.color.ldc_income'))
       }
       .width('100%')
       .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 6 })
@@ -357,7 +357,7 @@ export struct LdcCreditPage {
         Text(ldcAmountValue(stat.income) > 0 ? `+${formatLdcAmount(stat.income)}` : '—')
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(ldcAmountValue(stat.income) > 0 ? $r('app.color.ld_success') : $r('app.color.text_faint'))
+          .fontColor(ldcAmountValue(stat.income) > 0 ? $r('app.color.ldc_income') : $r('app.color.text_faint'))
       }
       .width('100%')
 
@@ -372,7 +372,7 @@ export struct LdcCreditPage {
           .width(this.incomeBarWidth(stat))
           .height(5)
           .borderRadius(2.5)
-          .backgroundColor($r('app.color.ld_success'))
+          .backgroundColor($r('app.color.ldc_income'))
       }
       .width('100%')
       .margin({ top: 8 })
@@ -534,8 +534,16 @@ export struct LdcCreditPage {
   private async loadDailyStats(service: LdcCreditService): Promise<void> {
     const result: NetworkResult<LdcDailyStat[]> = await service.getDailyStats(RECENT_DAYS);
     if (result.success && result.data) {
-      this.dailyStats = result.data;
+      this.dailyStats = LdcCreditPage.sortNewestFirst(result.data);
     }
+  }
+
+  // 官方界面是最新的一天在最上面。接口给的顺序不保证,故按日期串倒序自己排一遍——
+  // 日期是 'YYYY-MM-DD' 定长格式,字典序即时间序,不必解析成 Date。
+  private static sortNewestFirst(stats: LdcDailyStat[]): LdcDailyStat[] {
+    const sorted: LdcDailyStat[] = stats.slice();
+    sorted.sort((left: LdcDailyStat, right: LdcDailyStat) => right.date.localeCompare(left.date));
+    return sorted;
   }
 
   private retry(): void {

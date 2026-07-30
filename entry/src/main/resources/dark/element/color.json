@@ -93,6 +93,10 @@
       "value": "#4CAF50"
     },
     {
+      "name": "ldc_income",
+      "value": "#CC00C950"
+    },
+    {
       "name": "ld_danger",
       "value": "#E85D5D"
     },
