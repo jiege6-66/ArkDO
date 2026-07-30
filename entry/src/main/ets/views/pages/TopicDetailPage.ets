@@ -1220,8 +1220,12 @@ export struct TopicDetailPage {
     const firstNewPostNumber: number = this.dataSource.getData(before).postNumber;
     Log.i(`${LOG_TAG} realtime created topicId=${topicId} ids=${ids.length} added=${added} atEnd=${this.atListEnd}`);
     if (this.atListEnd) {
-      // 在底部：直接滚到底揭示新楼，不累计提示条。
-      this.scroller.scrollEdge(Edge.Bottom);
+      // 在底部：只追加，不发滚动命令。新楼正好补进末尾"加载态行 + 底部留白"腾出的那段位置
+      // (54 + POST_LIST_BOTTOM_SPACER + 底部安全区 ≈ 116vp)，顶部自然露出来就够提示了；
+      // maintainVisibleContentPosition 保证已经在屏上的楼层原地不动。
+      // 此前这里发 scrollEdge(Edge.Bottom)，无动画瞬跳，正在读的内容会被整块顶走。
+      // 注意：追加后末项被挤出视口，onScrollIndex 会把 atListEnd 置回 false——人确实不在
+      // 真正的底部了，所以再来的新楼改走下面的提示条分支，这是预期行为。
       this.clearIncomingBanner();
     } else {
       // 不在底部：累计提示条，记住首条新楼楼号供点按跳转。
