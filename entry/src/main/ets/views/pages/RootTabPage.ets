@@ -702,6 +702,11 @@ export struct RootTabPage {
           },
           onOpenDiagnostics: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DIAGNOSTICS_SETTINGS, buildDiagnosticsSettingsRouteParam('settings')));
+          },
+          // 与抽屉那条入口进的是同一个页面,只是来源标成 settings。
+          // 站点页里的「在侧边栏显示入口」开关能把抽屉那条藏掉,所以这条路必须存在。
+          onOpenSites: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.SITES, buildSitesRouteParam('settings')));
           }
         })
       }

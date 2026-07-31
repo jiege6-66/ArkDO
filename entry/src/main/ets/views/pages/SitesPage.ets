@@ -186,6 +186,8 @@ export struct SitesPage {
   onOpenSite: (url: string, title: string, siteId: string) => void = () => {};
   // 全量站点,已显示段在前、未显示段在后(persist 时由 partition 保证)。
   @State private sites: SiteDef[] = [];
+  // 抽屉入口总开关(原在设置页「首页内容入口」组里,那组删掉后搬来这儿)。
+  @State private drawerEntryEnabled: boolean = true;
   // 拖动排序状态:draggingIndex=被拖行在已显示段的原始下标(-1 为未拖动);
   // dragOffsetY=浮起行跟手位移;hoverIndex=当前落位槽位(邻行据此实时让位)。
   @State private draggingIndex: number = -1;
@@ -206,12 +208,19 @@ export struct SitesPage {
     this.reload();
   }
 
+  // 首页每次开抽屉都重读 preferences,故写完即生效,无需通知首页。
+  private setDrawerEntryEnabled(enabled: boolean): void {
+    this.drawerEntryEnabled = enabled;
+    SitePrefs.setEntryEnabled(getContext(this), enabled);
+  }
+
   // 拖动中不重读:此刻 sites 顺序正被手势改写,冲掉会让拖动的行跳回原位。
   private reload(): void {
     if (this.draggingIndex >= 0) {
       return;
     }
     this.sites = SitePrefs.getSites(getContext(this));
+    this.drawerEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -242,6 +251,8 @@ export struct SitesPage {
       Column() {
         Blank()
           .height(immersiveTitleBarContentTopSpacer(this.sysTopInset))
+
+        this.DrawerEntryCard()
 
         if (this.sites.length === 0) {
           this.EmptyCard()
@@ -308,6 +319,44 @@ export struct SitesPage {
     .height('100%')
     .backgroundColor(Color.Transparent)
     .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  /**
+   * 抽屉入口总开关。原先挂在设置页「首页内容入口」那一组里,那组删掉后它搬到这儿——
+   * 设置本就该离它管辖的东西越近越好,而下面每个站点行里的「在侧边栏显示」正是它的单个版本,
+   * 一上一下形成「全部 / 单个」的层级。
+   *
+   * 关掉它只是收起抽屉里那条快捷方式,不影响站点本身:本页从设置页「我的站点」也进得来,
+   * 不会出现「关掉之后再也找不回来」的死角。
+   */
+  @Builder
+  private DrawerEntryCard() {
+    Column() {
+      Row() {
+        Column() {
+          Text('在侧边栏显示入口')
+            .fontSize(15)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Text('关闭后仍可从「设置 → 我的站点」进来')
+            .fontSize(12)
+            .fontColor($r('app.color.text_faint'))
+            .width('100%')
+            .margin({ top: 2 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.drawerEntryEnabled })
+          .selectedColor($r('app.color.ld_accent'))
+          .onChange((isOn: boolean) => {
+            this.setDrawerEntryEnabled(isOn);
+          })
+      }
+      .width('100%')
+      .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+    }
+    .cardStyle()
   }
 
   // 空态:这个功能的说明书。讲清「是什么 / 凭什么比浏览器强 / 现在该干嘛」三件事。

@@ -3,8 +3,6 @@ import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { bundleManager } from '@kit.AbilityKit';
 import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { FAB_GLASS_ENABLED_STORAGE_KEY, FabGlassPrefs } from '../../common/ui/FabGlassPrefs';
-import { FeedDef, FeedPrefs } from '../../services/site/FeedPrefs';
-import { SitePrefs } from '../../services/site/SitePrefs';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { SCRIM } from '../../common/theme/Palette';
@@ -19,11 +17,13 @@ import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarSt
 const LOG_TAG: string = '[ArkDO][Settings]';
 
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
-// 内容入口配置行高:拖动排序按此行高换算跟手位移与让位步长。
-const FEED_ROW_H: number = 52;
-
-// 设置页:顶层只保留高频项(外观)+ 分类入口(通知 / 网络与安全 / 实验性功能 / 诊断日志)
-// + 首页内容入口 + 关于。各分类的繁重配置收进独立子页,由个人中心右上角齿轮入口 push 进入。
+//
+// 设置页:顶层只保留高频项(外观)+ 分类入口(通知 / 网络与连接 / 实验性功能 / 我的站点)+ 关于。
+// 各分类的繁重配置收进独立子页,由个人中心右上角齿轮入口 push 进入。
+//
+// 原先这里还有一组「首页内容入口」,用来勾选并拖动排序抽屉里露出哪几个 feed。首页筛选改成
+// chips 之后五个入口只占两行,没有再裁剪的必要;而那套配置的默认值是空数组,反倒让新用户
+// 只看得到一枚「最新」。整组连同拖拽排序一起删了,五个入口现在恒显。
 @Component
 export struct SettingsPage {
   // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
@@ -37,21 +37,13 @@ export struct SettingsPage {
   onOpenPush: () => void = () => {};
   onOpenNetwork: () => void = () => {};
   onOpenExperimental: () => void = () => {};
+  // 站点管理页:与上面四个同款,push 由 RootTabPage 注入。
+  onOpenSites: () => void = () => {};
   onOpenDiagnostics: () => void = () => {};
   @StorageLink(THEME_MODE_STORAGE_KEY) themeMode: ThemeMode = ThemeMode.SYSTEM;
   // 「悬浮按钮玻璃效果」开关:镜像 AppStorage,onChange 落盘后两处 FAB 即时响应。默认关。
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
   @State private appVersion: string = '';
-  // 首页内容入口:启用且有序的可选入口 key(不含恒在的最新)。
-  @State private enabledFeeds: string[] = [];
-  // 抽屉「我的站点」区总开关。站点不是 feed(点它是 push 页面而非切内容流),故不并入
-  // feed_enabled_order 而用独立键:那个结构里空数组=全关,表达不了"默认开"。
-  @State private sitesEntryEnabled: boolean = true;
-  // 拖动排序状态:draggingIndex=被拖行原始下标(-1 为未拖动);dragOffsetY=浮起行跟手位移;
-  // hoverIndex=当前落位槽位(邻行据此实时让位)。松手后吸附到 hoverIndex 再提交顺序。
-  @State private draggingIndex: number = -1;
-  @State private dragOffsetY: number = 0;
-  @State private hoverIndex: number = -1;
   private scroller: Scroller = new Scroller();
   private aboutDialogController: CustomDialogController = new CustomDialogController({
     builder: AboutDialog({
@@ -66,8 +58,6 @@ export struct SettingsPage {
 
   aboutToAppear(): void {
     this.readAppVersion();
-    this.enabledFeeds = FeedPrefs.getEnabledKeys(getContext(this));
-    this.sitesEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -169,10 +159,14 @@ export struct SettingsPage {
         this.SettingCell($r('sys.symbol.gearshape'), '实验性功能', '', () => {
           this.onOpenExperimental();
         })
+        this.HairlineInset()
+        // 站点管理的「正门」。抽屉里那行「我的站点」只是快捷方式,而它自己可以被开关藏起来——
+        // 唯一入口能把自己藏掉是设计缺陷,所以这里必须有一条不受那个开关影响的路。
+        this.SettingCell($r('sys.symbol.house'), '我的站点', '', () => {
+          this.onOpenSites();
+        })
       }
       .cardStyle()
-
-      this.FeedGroup()
 
       this.AboutGroup()
 
@@ -308,160 +302,6 @@ export struct SettingsPage {
     .margin({ top: 0 })
   }
 
-  // 首页内容入口:最新恒在(默认、不可关不可拖);可选入口勾选启用,启用项可拖动排序。
-  @Builder
-  private FeedGroup() {
-    this.GroupLabel('首页内容入口')
-    Column() {
-      // 最新:默认入口,常驻不可配。
-      Row() {
-        Text('最新')
-          .fontSize(15)
-          .fontColor($r('app.color.text_primary'))
-          .layoutWeight(1)
-        Text('默认')
-          .fontSize(13)
-          .fontColor($r('app.color.text_faint'))
-      }
-      .width('100%')
-      .height(FEED_ROW_H)
-      .padding({ left: CARD_PADDING, right: CARD_PADDING })
-
-      // 启用区:长按整行抬起、跟手拖动,邻行实时让位,松手吸附落位(只有启用项参与排序)。
-      if (this.enabledFeeds.length > 0) {
-        this.HairlineInset()
-        Column() {
-          ForEach(this.enabledFeeds, (key: string, index: number) => {
-            this.EnabledFeedRow(key, index)
-          }, (key: string) => key)
-        }
-        .width('100%')
-        .clip(false)
-      }
-
-      // 未启用区:关闭态,勾选即启用(移入启用区末尾)。
-      if (this.disabledFeeds().length > 0) {
-        this.HairlineInset()
-        ForEach(this.disabledFeeds(), (feed: FeedDef) => {
-          this.DisabledFeedRow(feed)
-        }, (feed: FeedDef) => feed.key)
-      }
-
-      // 我的站点:独立开关,不参与上面那套启用/排序(站点之间的排序在站点管理页里做)。
-      this.HairlineInset()
-      this.SitesEntryRow()
-    }
-    .cardStyle()
-    .clip(true)
-    .margin({ top: 0 })
-  }
-
-  @Builder
-  private SitesEntryRow() {
-    Row() {
-      Column() {
-        Text('我的站点')
-          .fontSize(15)
-          .fontColor($r('app.color.text_primary'))
-          .width('100%')
-        Text('在侧边栏显示站点入口')
-          .fontSize(12)
-          .fontColor($r('app.color.text_faint'))
-          .width('100%')
-          .margin({ top: 2 })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      Toggle({ type: ToggleType.Switch, isOn: this.sitesEntryEnabled })
-        .selectedColor($r('app.color.ld_accent'))
-        .onChange((isOn: boolean) => {
-          this.setSitesEntryEnabled(isOn);
-        })
-    }
-    .width('100%')
-    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
-  }
-
-  @Builder
-  private EnabledFeedRow(key: string, index: number) {
-    Row() {
-      this.DragHandle()
-      Text(this.feedLabel(key))
-        .fontSize(15)
-        .fontColor($r('app.color.text_primary'))
-        .layoutWeight(1)
-        .margin({ left: 12 })
-      Toggle({ type: ToggleType.Switch, isOn: true })
-        .selectedColor($r('app.color.ld_accent'))
-        .onChange((isOn: boolean) => {
-          if (!isOn) {
-            this.disableFeed(key);
-          }
-        })
-    }
-    .width('100%')
-    .height(FEED_ROW_H)
-    .padding({ left: CARD_PADDING, right: CARD_PADDING })
-    .backgroundColor($r('app.color.surface_card'))
-    // 被拖行浮起在最上层;其余行按 hoverIndex 上下让位。
-    .zIndex(this.draggingIndex === index ? 1 : 0)
-    .translate({ y: this.rowTranslateY(index) })
-    .scale(this.draggingIndex === index ? { x: 1.02, y: 1.02 } : { x: 1, y: 1 })
-    .shadow(this.draggingIndex === index
-      ? { radius: 12, color: SCRIM, offsetY: 4 }
-      : { radius: 0, color: Color.Transparent })
-    // 长按抬起后转拖动:先长按拿到拖动权,再用竖向 Pan 跟手,避免与外层滚动抢手势。
-    .gesture(
-      GestureGroup(GestureMode.Sequence,
-        LongPressGesture({ repeat: false, duration: 300 })
-          .onAction(() => this.beginDrag(index)),
-        PanGesture({ direction: PanDirection.Vertical })
-          .onActionUpdate((event: GestureEvent) => this.updateDrag(event.offsetY))
-          .onActionEnd(() => this.endDrag())
-          .onActionCancel(() => this.endDrag())
-      )
-    )
-  }
-
-  @Builder
-  private DisabledFeedRow(feed: FeedDef) {
-    Row() {
-      Text(feed.label)
-        .fontSize(15)
-        .fontColor($r('app.color.text_primary'))
-      if (feed.requiresLogin) {
-        Text('需登录')
-          .fontSize(12)
-          .fontColor($r('app.color.text_faint'))
-          .margin({ left: 8 })
-      }
-      Blank()
-      Toggle({ type: ToggleType.Switch, isOn: false })
-        .selectedColor($r('app.color.ld_accent'))
-        .onChange((isOn: boolean) => {
-          if (isOn) {
-            this.enableFeed(feed.key);
-          }
-        })
-    }
-    .width('100%')
-    .height(FEED_ROW_H)
-    .padding({ left: CARD_PADDING, right: CARD_PADDING })
-  }
-
-  // 拖动手柄:三条短发丝线,提示可拖(实际拖动靠长按整行)。
-  @Builder
-  private DragHandle() {
-    Column({ space: 3 }) {
-      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
-      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
-      Divider().width(14).strokeWidth(1.5).color($r('app.color.text_faint'))
-    }
-    .justifyContent(FlexAlign.Center)
-    .width(16)
-  }
-
   @Builder
   private HairlineInset() {
     Divider()
@@ -505,142 +345,6 @@ export struct SettingsPage {
   // 玻璃效果开关:写盘 + 同步 AppStorage 镜像,首页/详情页 FAB 经 @StorageProp 即时响应,无需重启。
   private setFabGlassEnabled(enabled: boolean): void {
     FabGlassPrefs.setEnabled(getContext(this), enabled);
-  }
-
-  // ==================== 首页内容入口 ====================
-
-  private feedLabel(key: string): string {
-    const def: FeedDef | undefined = FeedPrefs.feedDef(key);
-    return def ? def.label : key;
-  }
-
-  // 未启用的可选入口(保持 optionalFeeds 原始顺序)。
-  private disabledFeeds(): FeedDef[] {
-    const all: FeedDef[] = FeedPrefs.optionalFeeds();
-    const result: FeedDef[] = [];
-    for (let index: number = 0; index < all.length; index++) {
-      if (this.enabledFeeds.indexOf(all[index].key) < 0) {
-        result.push(all[index]);
-      }
-    }
-    return result;
-  }
-
-  private enableFeed(key: string): void {
-    if (this.enabledFeeds.indexOf(key) >= 0) {
-      return;
-    }
-    const next: string[] = this.enabledFeeds.slice();
-    next.push(key);
-    this.persistFeeds(next);
-  }
-
-  private disableFeed(key: string): void {
-    const next: string[] = this.enabledFeeds.slice();
-    const index: number = next.indexOf(key);
-    if (index < 0) {
-      return;
-    }
-    next.splice(index, 1);
-    this.persistFeeds(next);
-  }
-
-  // 被拖行浮起后,其余行让位的位移量:被拖行本身跟手,夹在原位与落位之间的行整体上/下移一格。
-  private rowTranslateY(index: number): number {
-    if (this.draggingIndex < 0) {
-      return 0;
-    }
-    if (index === this.draggingIndex) {
-      return this.dragOffsetY;
-    }
-    const from: number = this.draggingIndex;
-    const to: number = this.hoverIndex;
-    if (from < to && index > from && index <= to) {
-      return -FEED_ROW_H;
-    }
-    if (from > to && index >= to && index < from) {
-      return FEED_ROW_H;
-    }
-    return 0;
-  }
-
-  // 长按达成:抬起该行(轻微放大+投影),进入拖动。
-  private beginDrag(index: number): void {
-    this.hoverIndex = index;
-    this.dragOffsetY = 0;
-    animateTo({ duration: 150, curve: Curve.FastOutSlowIn }, () => {
-      this.draggingIndex = index;
-    });
-  }
-
-  // 拖动中:跟手位移(夹在启用区上下边界内),按半格阈值更新落位槽,邻行动画让位。
-  private updateDrag(offsetY: number): void {
-    if (this.draggingIndex < 0) {
-      return;
-    }
-    const len: number = this.enabledFeeds.length;
-    const maxUp: number = -this.draggingIndex * FEED_ROW_H;
-    const maxDown: number = (len - 1 - this.draggingIndex) * FEED_ROW_H;
-    let y: number = offsetY;
-    if (y < maxUp) {
-      y = maxUp;
-    }
-    if (y > maxDown) {
-      y = maxDown;
-    }
-    this.dragOffsetY = y;
-    let hover: number = this.draggingIndex + Math.round(y / FEED_ROW_H);
-    if (hover < 0) {
-      hover = 0;
-    }
-    if (hover > len - 1) {
-      hover = len - 1;
-    }
-    if (hover !== this.hoverIndex) {
-      animateTo({ duration: 180, curve: Curve.Friction }, () => {
-        this.hoverIndex = hover;
-      });
-    }
-  }
-
-  // 松手:浮起行吸附到落位槽,动画结束后提交新顺序并清空拖动态(此刻数组与画面已一致,无跳变)。
-  private endDrag(): void {
-    if (this.draggingIndex < 0) {
-      return;
-    }
-    const from: number = this.draggingIndex;
-    const to: number = this.hoverIndex;
-    animateTo({
-      duration: 180,
-      curve: Curve.FastOutSlowIn,
-      onFinish: () => this.commitReorder(from, to)
-    }, () => {
-      this.dragOffsetY = (to - from) * FEED_ROW_H;
-    });
-  }
-
-  private commitReorder(from: number, to: number): void {
-    if (from >= 0 && to >= 0 && from !== to && from < this.enabledFeeds.length) {
-      const next: string[] = this.enabledFeeds.slice();
-      const moved: string[] = next.splice(from, 1);
-      const target: number = to > next.length ? next.length : to;
-      next.splice(target, 0, moved[0]);
-      this.persistFeeds(next);
-    }
-    this.draggingIndex = -1;
-    this.hoverIndex = -1;
-    this.dragOffsetY = 0;
-  }
-
-  private persistFeeds(keys: string[]): void {
-    this.enabledFeeds = keys;
-    FeedPrefs.setEnabledKeys(getContext(this), keys);
-  }
-
-  // 站点入口开关:首页每次开抽屉都重读 preferences,故写完即生效,无需通知首页。
-  private setSitesEntryEnabled(enabled: boolean): void {
-    this.sitesEntryEnabled = enabled;
-    SitePrefs.setEntryEnabled(getContext(this), enabled);
   }
 
   // ==================== 辅助 ====================
