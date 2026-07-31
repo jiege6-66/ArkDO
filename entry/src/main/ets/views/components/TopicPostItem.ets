@@ -738,7 +738,12 @@ export struct TopicPostItem {
     Flex({ wrap: FlexWrap.Wrap, alignItems: ItemAlign.Center }) {
       ForEach(this.boostList(), (boost: PostBoost) => {
         Row() {
+          // 点 boost 头像进该用户主页。与楼层头部一致:onClick 只挂头像自身,不挂气泡外层 Row
+          // (本 SDK 无 stopPropagation,外层挂了会和气泡内可能的其它点击行为冒泡打架)。
           UserAvatar({ user: boost.user, avatarSize: 20 })
+            .onClick(() => {
+              this.openUser(boost.user);
+            })
           Text() {
             // boost 内容按行内节点渲染:文字用 Span、emoji 用 ImageSpan,
             // 避免纯 emoji 的 boost 被当成空文本丢失。
