@@ -39,6 +39,23 @@ const COPY_CHECK_DRAW_MS: number = 1700;
 const COPY_FEEDBACK_TIMEOUT_MS: number = 3000;
 const COPY_FEEDBACK_TRANSITION_MS: number = 250;
 
+// boost 气泡的布局尺寸(vp)。用来按 boost 行实测宽度反算「文字最大宽度」——
+// 气泡是「裹内容」的不定宽 Row,只有 constraintSize 上限、没有确定宽度,flexShrink 缺少可收缩的
+// 基准因而不生效:Text 会按自然宽度铺开,把右侧删除按钮顶到气泡灰底之外(长 boost 上肉眼可见)。
+// 故不靠 shrink,直接给 Text 算一个确定的 vp 上限,让文字先省略、按钮永远落在背景内。
+// 气泡最宽占 boost 行的比例。1.0 = 最多铺满一整行,与官方一致:
+// discourse-boosts 的 .discourse-boosts__bubble 是 inline-flex,**没有任何 max-width,也没有 ellipsis**,
+// 长 boost 就是独占一行(容器 .discourse-boosts__list 是 flex-wrap:wrap,放不下自然换行)。
+// 之前的 0.72 是本项目 ce8c7c7 随手定的,没有依据,反而会让顶格 boost(服务端上限 16 字)被截断。
+// 不写成"完全不设限"是因为我们这层没有 web 的自动收缩:真溢出会横向捅出屏幕,故以整行宽封顶。
+const BOOST_BUBBLE_MAX_RATIO: number = 1.0;
+const BOOST_AVATAR_W: number = 20;
+const BOOST_TEXT_MARGIN_L: number = 6;
+const BOOST_PADDING_H: number = 14;             // 气泡左内边距 4 + 右内边距 10
+const BOOST_DELETE_SLOT_W: number = 25;         // 删除按钮 21 + 其左 margin 4
+const BOOST_TEXT_MIN_W: number = 24;            // 下限兜底,避免窄屏算出 0/负数把文字挤没
+const BOOST_TEXT_UNBOUNDED_W: number = 10000;   // 首帧还没量到行宽时不设限
+
 // 表情短名 + 已解析的本地资源(过滤未知表情后类型非空,供 Image 使用)。
 interface ReactionIcon {
   id: string;
@@ -91,6 +108,11 @@ export struct TopicPostItem {
   onReply: (post: TopicPost) => void = () => {};
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
   onAddBoost: (post: TopicPost) => void = () => {};
+  // 删除自己发的 boost:上抛页面发 DELETE 并从本楼摘掉该条;返回是否成功。
+  onDeleteBoost: (post: TopicPost, boost: PostBoost) => Promise<boolean> = () => Promise.resolve(false);
+  // 当前登录用户 id(页面从 currentUser 下发,未登录为 0):判断某条 boost 是不是我发的,
+  // 只有我自己的 boost 点了才展开删除图标。@Prop:登录/切号后要跟着变。
+  @Prop currentUserId: number = 0;
   // 点头像/昵称进他人主页。挂在头像与昵称各自身上而非外层 Row——
   // 本 SDK 无 stopPropagation,外层挂了会与「回复别人」指示器的 onClick 冒泡打架。
   onOpenUser: (user: User) => void = () => {};
@@ -156,6 +178,12 @@ export struct TopicPostItem {
   @State private meTooCountLocal: number = 0;
   // 请求进行中:守卫防连点(乐观已翻转,不再叠加 loading 图标,观感对齐官网即点即变)。
   @State private meTooRequesting: boolean = false;
+  // 当前展开了删除图标的 boost id(0=没有)。同一时刻只展开一条:点另一条即改指向它,再点自己则收起。
+  @State private deleteTargetBoostId: number = 0;
+  // 删除请求进行中的 boost id:该条的垃圾桶图标换成转圈,期间忽略重复点击。
+  @State private deletingBoostId: number = 0;
+  // boost 行实测宽度(vp,onAreaChange 写入):算气泡内文字最大宽度的基准,见 boostTextMaxWidth。
+  @State private boostRowWidth: number = 0;
 
   build() {
     ListItem() {
@@ -766,11 +794,28 @@ export struct TopicPostItem {
           .margin({ left: 6 })
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          // 文字上限按实测行宽算死(含删除按钮的占位),不用 layoutWeight——那会把短 boost 也拉到满宽。
+          // 这一句才是"删除按钮不跑到灰底外面"的关键,详见 BOOST_* 常量处的说明。
+          .constraintSize({ maxWidth: this.boostTextMaxWidth(boost) })
+          // 保留 shrink 作二道防线:上限算好后本不该再溢出,万一有误差也是文字先收,不挤按钮。
+          .flexShrink(1)
+          // 点 boost 文字区展开/收起删除图标。挂在文字自身而非气泡外层 Row——
+          // 本 SDK 无 stopPropagation,外层挂了会与头像的「进主页」冒泡打架(点头像会同时触发两者)。
+          .onClick(() => {
+            this.toggleBoostDelete(boost);
+          })
+
+          // 删除入口:仅「这条是我发的」且已点开时占位。在气泡内、文字右侧,与站点一致。
+          if (this.deleteTargetBoostId === boost.id) {
+            this.BoostDeleteButton(boost)
+          }
         }
         .padding({ left: 4, right: 10, top: 4, bottom: 4 })
         .backgroundColor($r('app.color.boost_bubble_bg'))
         .borderRadius(16)
-        .constraintSize({ maxWidth: '72%' })
+        // 首帧(还没量到行宽)的兜底上限;量到后由文字的 vp 上限反推封死,这里不再起作用。
+        // 与 BOOST_BUBBLE_MAX_RATIO 是同一个值,改比例记得一起改。
+        .constraintSize({ maxWidth: '100%' })
         .margin({ right: 8, top: 6 })
       }, (boost: PostBoost) => boost.id.toString())
 
@@ -783,6 +828,87 @@ export struct TopicPostItem {
     // 楼底是"上次访问"红线时:红线绝对定位骑在楼底分界线上,文字会向上侵入本楼,
     // boost 行多留 8 下间距避免被红线文字贴住;普通 1px 灰线无需额外留白。
     .margin({ top: 2, bottom: this.showLastVisitedLine ? 8 : 0 })
+    // 量 boost 行实际宽度,供 boostTextMaxWidth 反算文字上限。旋转/分屏改宽度会再次触发,自动跟随。
+    .onAreaChange((_: Area, area: Area) => {
+      const width: number = Number(area.width);
+      if (width > 0 && Math.abs(width - this.boostRowWidth) > 0.5) {
+        this.boostRowWidth = width;
+      }
+    })
+  }
+
+  // 气泡内文字的最大宽度(vp)= 气泡上限 - 头像 - 文字左间距 - 气泡左右内边距 -(展开时)删除按钮占位。
+  // 展开时上限跟着减 25:长 boost 的文字改省略、气泡总宽不变,点开删除按钮不会把同排气泡挤到下一行。
+  private boostTextMaxWidth(boost: PostBoost): number {
+    if (this.boostRowWidth <= 0) {
+      return BOOST_TEXT_UNBOUNDED_W;
+    }
+    const deleteSlot: number = this.deleteTargetBoostId === boost.id ? BOOST_DELETE_SLOT_W : 0;
+    const maxWidth: number = this.boostRowWidth * BOOST_BUBBLE_MAX_RATIO -
+      BOOST_AVATAR_W - BOOST_TEXT_MARGIN_L - BOOST_PADDING_H - deleteSlot;
+    return maxWidth > BOOST_TEXT_MIN_W ? maxWidth : BOOST_TEXT_MIN_W;
+  }
+
+  // boost 气泡内的删除入口:红色垃圾桶,请求中换转圈。
+  // 图标 16 但左右各留 4 内边距,让实际可点区域够到 24 宽,不至于点不中。
+  // loading / 常态用结构化 if/else 各自独立实例:ArkUI 对子组件对象型属性的 diff 更新不可靠(同 chevron/书签)。
+  @Builder
+  private BoostDeleteButton(boost: PostBoost) {
+    Row() {
+      if (this.deletingBoostId === boost.id) {
+        LoadingProgress()
+          .width(12)
+          .height(12)
+          .color($r('app.color.ld_danger'))
+      } else {
+        FaIconView({ icon: this.faIcon('trash-can'), color: $r('app.color.ld_danger'), iconSize: 13 })
+      }
+    }
+    // 点击区固定 21x20、图标居中:热区与图标尺寸解耦,图标再调大小也不会跟着缩,手感不变。
+    // (若靠 padding 撑,图标一改就得连带重算左右内边距。)21+左 margin 4 = 气泡因此增宽的总量。
+    .width(21)
+    .height(20)
+    .margin({ left: 4 })
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    // 展开时淡入 + 从左侧移入(负 x = 起点在最终位置左边,再滑向右就位):图标像是从文字底下钻出来的,
+    // 与气泡向右变宽的方向一致。正 x 会变成从气泡外的右侧倒着挤进来,和变宽方向相反,观感别扭。
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: -8 })))
+    .onClick(() => {
+      this.deleteBoost(boost);
+    })
+  }
+
+  // 这条 boost 是不是我发的。未登录(currentUserId=0)一律为否;
+  // boost.user.id 在接口缺 id 时被映射成 0,与 currentUserId>0 的前置判断一起,不会误判成"我的"。
+  private isMyBoost(boost: PostBoost): boolean {
+    return this.currentUserId > 0 && boost.user.id === this.currentUserId;
+  }
+
+  // 点 boost 文字:我自己的才展开删除图标(别人的点了无反应);再点一次收起,点另一条则改指向那条。
+  // 包在 animateTo 里:气泡要变宽,同排后面的气泡可能被挤到下一行,带过渡比瞬间跳位好看。
+  private toggleBoostDelete(boost: PostBoost): void {
+    if (!this.isMyBoost(boost)) {
+      return;
+    }
+    const next: number = this.deleteTargetBoostId === boost.id ? 0 : boost.id;
+    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      this.deleteTargetBoostId = next;
+    });
+  }
+
+  // 删除这条 boost:请求先行(不做乐观移除),转圈期间忽略重复点击。
+  // 成功后由页面把该条从 post.boosts 摘掉(整条气泡随之消失),这里只复位展开态。
+  private async deleteBoost(boost: PostBoost): Promise<void> {
+    if (this.deletingBoostId > 0) {
+      return;
+    }
+    this.deletingBoostId = boost.id;
+    const ok: boolean = await this.onDeleteBoost(this.post, boost);
+    this.deletingBoostId = 0;
+    if (ok) {
+      this.deleteTargetBoostId = 0;
+    }
   }
 
   // 火箭入口:点击上抛给页面打开 boost 输入浮层。两处复用(操作行内 38/0 / boost 列表末尾 28/6)。

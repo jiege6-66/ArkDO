@@ -699,6 +699,26 @@ export class TopicService {
     }
   }
 
+  // discourse-boosts:删除自己发的一条 boost。DELETE /discourse-boosts/boosts/{boostId},无请求体。
+  // 抓包确认:成功返回 204 No Content(响应体为空),故只看 success、不解析 body。
+  // 服务端自己校验归属(只能删自己的),客户端的「是我的才显示删除图标」只是前置的交互约束。
+  async deleteBoost(boostId: number, topicId: number): Promise<NetworkResult<boolean>> {
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> = await this.bridge.deleteForm(`/discourse-boosts/boosts/${boostId}`, '', {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<boolean>(response);
+    }
+    return {
+      success: true,
+      statusCode: response.statusCode,
+      challengeState: response.challengeState,
+      data: true
+    };
+  }
+
   // 书签:给某楼加书签。POST /bookmarks.json,form body(对齐抓包):
   // reminder_at=&auto_delete_preference=3&bookmarkable_id=<postId>&bookmarkable_type=Post。
   // 响应 { success:"OK", id:<bookmarkId> };返回 bookmarkId 供后续取消。

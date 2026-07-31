@@ -445,6 +445,11 @@ export struct TopicDetailPage {
           onAddBoost: (targetPost: TopicPost) => {
             this.openComposerForBoost(targetPost);
           },
+          // 删除自己发的 boost。currentUserId 下发给楼层判断「这条是不是我的」(未登录为 0,谁的都不是)。
+          currentUserId: this.currentUser.id,
+          onDeleteBoost: (targetPost: TopicPost, boost: PostBoost): Promise<boolean> => {
+            return this.deleteBoost(targetPost, boost);
+          },
           onOpenUser: (user: User) => {
             this.onOpenUser(user);
           },
@@ -1191,6 +1196,34 @@ export struct TopicDetailPage {
     const reason: string = result.error ? result.error.message : 'Boost 发送失败，请稍后重试。';
     this.showComposerToast(reason, 2000);
     return false;
+  }
+
+  // 删除自己发的 boost:DELETE /discourse-boosts/boosts/{id}(204 无响应体)。
+  // 不做乐观移除——删失败还得把气泡按原顺序塞回去,不值当;等服务端确认再摘,失败则原样留着(同待审帖删除)。
+  // 与 submitBoost 对称:成功后把该条从这一楼摘掉,并把 canBoost 放回 true——
+  // 一人一楼只能 boost 一次,删掉自己那条后服务端就会重新允许,火箭即时回来,无需退出重进。
+  private async deleteBoost(post: TopicPost, boost: PostBoost): Promise<boolean> {
+    if (!this.detail || !LoginGate.ensureLoggedIn()) {
+      return false;
+    }
+    const result: NetworkResult<boolean> =
+      await new TopicService(this.bridge).deleteBoost(boost.id, this.detail.id);
+    if (!result.success) {
+      Log.i(`${LOG_TAG} deleteBoost failed id=${boost.id} status=${result.statusCode}`);
+      this.showComposerToast(result.error ? result.error.message : 'Boost 删除失败，请稍后重试', 2000);
+      return false;
+    }
+
+    const target: TopicPost | undefined = PostStreamPager.findById(this.dataSource.getAll(), post.id);
+    if (target) {
+      // 用新数组赋值触发 @ObjectLink 精准重渲染(就地改现有数组不会被观测),同 submitBoost。
+      const next: PostBoost[] = (target.boosts ? target.boosts : [])
+        .filter((item: PostBoost) => item.id !== boost.id);
+      target.boosts = next;
+      target.canBoost = true;
+    }
+    this.showComposerToast('Boost 已删除', 1500);
+    return true;
   }
 
   // ===== 实时新楼(MessageBus /topic/<id> 的 created 事件) =====
