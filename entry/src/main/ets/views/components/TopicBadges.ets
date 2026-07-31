@@ -10,6 +10,8 @@ export struct TopicMetadataBadges {
   category?: TopicCategory;
   parentCategory?: TopicCategory;
   tags: TopicTag[] = [];
+  // 接了这条线的场景(首页列表)标签徽章可点=按该标签筛选;不接则徽章保持纯展示。
+  onTagClick?: (tag: TopicTag) => void = undefined;
   // 标签行实际宽度与视口宽度:两者比出「装不装得下」。
   // Row 上有 minWidth:'100%',故内容宽恒 ≥ 视口宽,只需判大于。
   @State private contentWidth: number = 0;
@@ -26,7 +28,16 @@ export struct TopicMetadataBadges {
         }
 
         ForEach(this.tags, (tag: TopicTag) => {
-          TopicTagBadge({ tag: tag })
+          TopicTagBadge({
+            tag: tag,
+            tappable: this.onTagClick !== undefined,
+            onTap: () => {
+              const handler: ((tag: TopicTag) => void) | undefined = this.onTagClick;
+              if (handler !== undefined) {
+                handler(tag);
+              }
+            }
+          })
         }, (tag: TopicTag, index: number) => `${index}-${tag.name}`)
       }
       .height(20)

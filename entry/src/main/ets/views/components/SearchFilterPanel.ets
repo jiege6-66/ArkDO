@@ -19,6 +19,7 @@ import {
   SearchFilters
 } from '../../services/search/SearchFilters';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
+import { ChoiceChip } from './ChoiceChip';
 import { getCategoryColor, getCategoryIcon } from './TopicBadgeUtils';
 
 const LOG_TAG: string = '[ArkDO][Search]';
@@ -447,25 +448,18 @@ export struct SearchFilterPanel {
       if (this.draft.tags.length > 0) {
         Flex({ wrap: FlexWrap.Wrap }) {
           ForEach(this.draft.tags, (tag: string) => {
-            Row({ space: 4 }) {
-              Text(tag)
-                .fontSize(13)
-                .fontColor($r('app.color.brand'))
-              Text('✕')
-                .fontSize(11)
-                .fontColor($r('app.color.brand'))
-            }
-            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-            .margin({ right: 8, bottom: 8 })
-            .backgroundColor($r('app.color.info_soft_bg'))
-            .borderRadius(12)
-            .onClick(() => {
-              const next: SearchFilters = this.draft.clone();
-              next.tags = next.tags.filter((item: string) => item !== tag);
-              if (next.tags.length < 2) {
-                next.tagsMatchAll = false;
+            ChoiceChip({
+              label: tag,
+              compact: true,
+              removable: true,
+              onTap: () => {
+                const next: SearchFilters = this.draft.clone();
+                next.tags = next.tags.filter((item: string) => item !== tag);
+                if (next.tags.length < 2) {
+                  next.tagsMatchAll = false;
+                }
+                this.draft = next;
               }
-              this.draft = next;
             })
           }, (tag: string) => `st${tag}`)
         }
@@ -634,7 +628,7 @@ export struct SearchFilterPanel {
       this.SectionTitle('话题状态')
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(SEARCH_STATUS_OPTIONS, (option: SearchFilterOption) => {
-          this.ChoiceChip({
+          this.FilterChip({
             label: option.label,
             selected: this.draft.status === option.value,
             onTap: () => {
@@ -716,7 +710,7 @@ export struct SearchFilterPanel {
       // 免得历史记录里的相对天数隔天含义就变了。
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(SEARCH_TIME_PRESETS, (preset: SearchFilterOption) => {
-          this.ChoiceChip({
+          this.FilterChip({
             label: preset.label,
             selected: this.isTimePresetActive(preset.value),
             onTap: () => {
@@ -846,7 +840,7 @@ export struct SearchFilterPanel {
       this.SectionTitle('搜索范围')
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(SEARCH_IN_POST_OPTIONS, (option: SearchFilterOption) => {
-          this.ChoiceChip({
+          this.FilterChip({
             label: option.label,
             selected: this.draft.inFilters.indexOf(option.value) >= 0,
             onTap: () => {
@@ -860,7 +854,7 @@ export struct SearchFilterPanel {
       this.SectionTitle('与我相关')
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(SEARCH_IN_USER_OPTIONS, (option: SearchFilterOption) => {
-          this.ChoiceChip({
+          this.FilterChip({
             label: option.label,
             selected: this.draft.inFilters.indexOf(option.value) >= 0,
             onTap: () => {
@@ -897,7 +891,7 @@ export struct SearchFilterPanel {
       this.SectionTitle('排序')
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(SEARCH_ORDER_OPTIONS, (option: SearchFilterOption) => {
-          this.ChoiceChip({
+          this.FilterChip({
             label: option.label,
             selected: this.draft.order === option.value,
             onTap: () => {
@@ -923,19 +917,17 @@ export struct SearchFilterPanel {
       .fontColor($r('app.color.text_secondary'))
   }
 
+  // 规格统一收在 ChoiceChip 组件里(首页筛选抽屉共用同一套),这里只走 compact 档。
   @Builder
-  private ChoiceChip(p: ChipParams) {
-    Text(p.label)
-      .fontSize(13)
-      .fontColor(p.selected ? $r('app.color.brand') : $r('app.color.text_body'))
-      .fontWeight(p.selected ? FontWeight.Medium : FontWeight.Regular)
-      .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-      .margin({ right: 8, bottom: 8 })
-      .backgroundColor(p.selected ? $r('app.color.info_soft_bg') : $r('app.color.surface_muted'))
-      .borderRadius(14)
-      .onClick(() => {
+  private FilterChip(p: ChipParams) {
+    ChoiceChip({
+      label: p.label,
+      selected: p.selected,
+      compact: true,
+      onTap: () => {
         p.onTap();
-      })
+      }
+    })
   }
 
   @Builder

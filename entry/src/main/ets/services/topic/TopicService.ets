@@ -1,10 +1,11 @@
-import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
+import { Topic, TopicTag } from '../../models/Topic';
 import { AcceptedAnswer, PendingPost, Poll, PollOption, PollVoteResult, PostBoost, PostReaction, ReactionUser, ReactionUsersPage, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { User } from '../../models/User';
 import { CookedHtmlParser } from '../content/CookedHtmlParser';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { FeedKey } from '../site/FeedPrefs';
+import { buildTopicListPath, TopicListQuery } from './TopicListQuery';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 import { CreatePostResponse, CreateReplyPayload, CreateTopicPayload, DiscourseAcceptedAnswer,
   DiscourseBadgeDef, DiscourseBookmarkDeleteResponse, DiscourseBookmarkResponse, DiscourseBoost,
@@ -124,14 +125,16 @@ export class TopicService {
     };
   }
 
-  // 全站内置入口(最新/热门/未读/新主题)分页:响应体均为 topic_list.topics 结构,共用解析。
-  async getFeedPage(feedKey: string, page: number): Promise<NetworkResult<TopicPage>> {
-    return this.getTopicListPage(this.getFeedPath(feedKey, page), page);
+  // 首页列表分页。过滤器 × 版块 × 标签的四种 scope 组合都走这一条:响应体一律是
+  // topic_list.topics 结构,路径拼装的规则全在 TopicListQuery 里(那边是纯函数,单测覆盖)。
+  async getQueryPage(query: TopicListQuery, page: number): Promise<NetworkResult<TopicPage>> {
+    return this.getTopicListPage(buildTopicListPath(query, page), page);
   }
 
-  // 某版块分页:/c/{slug}/{id}/l/latest.json,同为 topic_list.topics 结构。
-  async getCategoryTopicsPage(category: TopicCategory, page: number): Promise<NetworkResult<TopicPage>> {
-    return this.getTopicListPage(this.getCategoryPath(category, page), page);
+  // 全站内置入口(最新/热门/未读/新主题)分页:等价于「不限版块、不限标签」的查询。
+  async getFeedPage(feedKey: string, page: number): Promise<NetworkResult<TopicPage>> {
+    const query: TopicListQuery = { filter: feedKey, category: undefined, tag: undefined };
+    return this.getQueryPage(query, page);
   }
 
   // 已读列表分页:/read.json 是 Discourse core 的 read 过滤器(网页版 /u/{用户名}/activity/read 的数据源),
@@ -754,30 +757,6 @@ export class TopicService {
     } catch (error) {
       return { success: true, statusCode: response.statusCode, challengeState: response.challengeState, data: undefined };
     }
-  }
-
-  private getFeedPath(feedKey: string, page: number): string {
-    const suffix: string = page > 0 ? `?page=${page}` : '';
-    switch (feedKey) {
-      case FeedKey.TOP:
-        return `/top.json${suffix}`;
-      case FeedKey.HOT:
-        return `/hot.json${suffix}`;
-      case FeedKey.UNREAD:
-        return `/unread.json${suffix}`;
-      case FeedKey.NEW:
-        return `/new.json${suffix}`;
-      default:
-        return `/latest.json${suffix}`;
-    }
-  }
-
-  private getCategoryPath(category: TopicCategory, page: number): string {
-    const suffix: string = page > 0 ? `?page=${page}` : '';
-    if (category.slug && category.slug.length > 0) {
-      return `/c/${encodeURIComponent(category.slug)}/${category.id}/l/latest.json${suffix}`;
-    }
-    return `/c/${category.id}/l/latest.json${suffix}`;
   }
 
   private getTopicDetailPath(topicId: number, slug?: string, postNumber?: number): string {

@@ -5,7 +5,7 @@ import {
 } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
-import { Topic, TopicCategory } from '../../models/Topic';
+import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
 import { UserAvatar } from '../components/UserAvatar';
 import { NotificationBell } from '../components/NotificationBell';
@@ -23,7 +23,17 @@ import {
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicDataSource } from '../../services/topic/TopicDataSource';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
-import { FeedDef, FeedKey, FeedPrefs } from '../../services/site/FeedPrefs';
+import {
+  cloneTopicListQuery,
+  createDefaultTopicListQuery,
+  hasTopicListSummary,
+  isDefaultTopicListQuery,
+  sameTopicListQuery,
+  topicListPrimaryTitle,
+  topicListSummaryLead,
+  topicListSummaryTag,
+  TopicListQuery
+} from '../../services/topic/TopicListQuery';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { CategoryDrawer } from '../components/CategoryDrawer';
 import { HomeFab } from '../components/HomeFab';
@@ -48,6 +58,14 @@ import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 import { SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PostRichContent } from '../components/PostRichContent';
+import {
+  getCategoryColor,
+  getCategoryIcon,
+  getCategoryLogo,
+  getTagColor,
+  getTagIcon,
+  resolveBadgeAssetUrl
+} from '../components/TopicBadgeUtils';
 import { VersionAnnouncement, VersionAnnouncementService } from '../../services/announce/VersionAnnouncement';
 import { bundleManager } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -115,6 +133,28 @@ const INCOMING_PROMPT_EXIT_MS: number = 180;
 const INCOMING_INSERT_MS: number = 360;
 // 单条增量行的兜底高度(含分割线)。真机测到实际高度前先用它算揭示距离，避免第一帧跳变。
 const INCOMING_INSERT_ROW_ESTIMATE: number = 96;
+// 顶栏主标题(版块/标签名)的字号区间:装得下用大的,长名字自适应往下缩,缩到下限还装不下才截断。
+// ArkDO 那个默认标题不走这套(它长度固定),仍是 26。
+// 独占一行时给足 21;要带副行时收到 19,和 13 的副行拉开层次但不至于一大一小失衡。
+const TITLE_MAX_FONT_SIZE: number = 21;
+const TITLE_MIN_FONT_SIZE: number = 15;
+const TITLE_WITH_SUMMARY_MAX_FONT_SIZE: number = 19;
+const TITLE_WITH_SUMMARY_MIN_FONT_SIZE: number = 14;
+// 副行胶囊:高度压到 20 是为了两行合计仍落在 MINI 顶栏高度内(标题 19 + 间距 1 + 胶囊 20)。
+// 实机若发现被裁,优先动这三个数。
+const SUMMARY_FONT_SIZE: number = 12;
+const SUMMARY_CHIP_HEIGHT: number = 20;
+const SUMMARY_CHIP_ICON_SIZE: number = 10;
+const TITLE_ICON_SIZE: number = 17;
+
+// 顶栏副行里一枚条件胶囊的入参。
+interface QueryChipParams {
+  label: string;
+  // 无图标时传 undefined(排序胶囊就没有图标)。
+  icon?: FaIconDefinition;
+  // 十六进制色;空串 = 跟随文字色。
+  iconColor: string;
+}
 
 // 把比例夹到 0~1。跟手手势里到处要用:手指可以拖过头,进度不能。
 function clampUnit(value: number): number {
@@ -168,12 +208,12 @@ export struct HomePage {
   private drawerSwiping: boolean = false;
   // 最近一次按下的横坐标(vp,即距屏幕左边的距离)。判「是否从左边缘起手」用。-1 = 还没按下过。
   private touchDownX: number = -1;
-  // 当前内容源:selectedCategory 有值=看某版块;否则看内置入口 selectedFeedKey。
-  @State private selectedCategory?: TopicCategory = undefined;
-  @State private selectedFeedKey: string = FeedKey.LATEST;
-  // 设置页启用且有序的可选入口 key(打开抽屉时刷新)。
-  @State private enabledFeedKeys: string[] = [];
-  // 抽屉「我的站点」区:入口开关 + 要展示的站点(打开抽屉时与 enabledFeedKeys 一并刷新)。
+  // 当前生效的列表条件:过滤器 × 版块 × 标签三个维度正交(不是互斥的单选),拼装规则见 TopicListQuery。
+  @State private listQuery: TopicListQuery = createDefaultTopicListQuery();
+  // 抽屉里正在编辑的那份草稿。放在本页而非抽屉内部:抽屉内容随开合挂载/卸载,状态留在里面会被一起丢掉
+  // (与 drawerExpandedIds 同理)。开抽屉时从 listQuery 拷一份,点「查看结果」才提交回 listQuery。
+  @State private draftQuery: TopicListQuery = createDefaultTopicListQuery();
+  // 抽屉「我的站点」区:入口开关 + 要展示的站点(打开抽屉时刷新)。
   @State private sitesEntryEnabled: boolean = true;
   @State private drawerSites: SiteDef[] = [];
   // 头像铃铛未读数:由 NotificationEventBus 广播驱动(NotificationService 前台轮询产出)。
@@ -505,23 +545,30 @@ export struct HomePage {
       Column() {
         if (this.drawerMounted) {
           CategoryDrawer({
+            bridge: this.bridge,
+            isArkWebReady: this.isArkWebReady,
             categories: this.categories,
             isLoggedIn: this.isLoggedIn,
-            enabledFeedKeys: this.enabledFeedKeys,
             sitesEntryEnabled: this.sitesEntryEnabled,
             sites: this.drawerSites,
-            selectedFeedKey: this.selectedCategory ? '' : this.selectedFeedKey,
-            selectedCategoryId: this.selectedCategory ? this.selectedCategory.id : 0,
-            // 展开态提到本页持有:抽屉内容按需卸载后,折叠/展开的选择不能跟着一起丢。
+            // 草稿与生效值都提到本页持有:抽屉内容按需卸载后,编辑中的选择不能跟着一起丢。
+            draft: this.draftQuery,
+            applied: this.listQuery,
             expandedIds: this.drawerExpandedIds,
             onToggleExpand: (categoryId: number) => {
               this.handleDrawerToggleExpand(categoryId);
             },
-            onSelectFeed: (feedKey: string) => {
-              this.handleSelectFeed(feedKey);
+            onDraftChange: (next: TopicListQuery) => {
+              this.draftQuery = next;
             },
-            onSelectCategory: (category: TopicCategory) => {
-              this.handleSelectCategory(category);
+            onApply: () => {
+              this.handleApplyDraftQuery();
+            },
+            onClose: () => {
+              this.closeDrawer();
+            },
+            onNotice: (message: string) => {
+              this.showToast(message);
             },
             onRequireLogin: () => {
               this.handleDrawerRequireLogin();
@@ -629,6 +676,9 @@ export struct HomePage {
                 this.incomingInsertingTopicIds.indexOf(topic.id) >= 0,
               onIncomingInsertMeasured: (topicId: number, height: number) => {
                 this.handleIncomingInsertMeasured(topicId, height);
+              },
+              onTagClick: (tag: TopicTag) => {
+                this.handleTagClick(tag);
               },
               onTopicClick: (selectedTopic: Topic) => {
                 // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
@@ -938,34 +988,207 @@ export struct HomePage {
     .padding({ left: 20, right: 20, bottom: 24 })
   }
 
-  // 顶栏标题:默认「最新」显示应用名时,把「ArkDO」末尾的 O 换成 linux.do 三色圆 logo(内联 ImageSpan
-  // 保持基线对齐);选中版块/其他入口时仍是纯文字标题。logo 为固定色 SVG,深色模式下不翻转,保留品牌配色。
+  // 顶栏标题区。全默认(全站 · 最新 · 不限标签)时与改造前完全一致——单行大标题,「ArkDO」末尾的 O
+  // 换成 linux.do 三色圆 logo(内联 ImageSpan 保持基线对齐;logo 为固定色 SVG,深色模式下不翻转以保留品牌配色)。
+  //
+  // 一旦有筛选条件就长出第二行条件摘要,主标题相应收一号(26 → 19),两行合计仍落在 MINI 顶栏高度内。
+  // 默认态零视觉负担、有条件时才占位,这样"清爽"和"看得见当前在筛什么"才能同时成立。
   @Builder
   private FeedTitle() {
-    if (this.currentFeedTitle() === AppConstants.APP_NAME) {
-      Text() {
-        Span(AppConstants.APP_NAME.slice(0, -1))
-        ImageSpan($r('app.media.linuxdo_logo'))
-          .width(24)
-          .height(24)
-          .verticalAlign(ImageSpanAlignment.CENTER)
-          .margin({ bottom: 2 })
-      }
-      .fontSize(26)
-      .fontWeight(FontWeight.Bold)
-      .fontColor($r('app.color.text_primary'))
-      .maxLines(1)
-      .textOverflow({ overflow: TextOverflow.Ellipsis })
-      .layoutWeight(1)
-    } else {
-      Text(this.currentFeedTitle())
+    Column({ space: 1 }) {
+      if (isDefaultTopicListQuery(this.listQuery)) {
+        Text() {
+          Span(AppConstants.APP_NAME.slice(0, -1))
+          ImageSpan($r('app.media.linuxdo_logo'))
+            .width(24)
+            .height(24)
+            .verticalAlign(ImageSpanAlignment.CENTER)
+            .margin({ bottom: 2 })
+        }
         .fontSize(26)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .layoutWeight(1)
+        .width('100%')
+      } else {
+        Row() {
+          this.QueryTitleIcon()
+          Text(this.currentFeedTitle())
+            // 版块名可以很长(「积分乐园, Lv1」这种带后缀的),而顶栏右边还站着搜索/铃铛/头像,
+            // 留给标题的宽度本就不多。宁可自适应缩字号也别直接截成「积分乐园, …」——
+            // 截断丢的是尾部的区分信息(Lv1),缩字号只是小一点,还认得出是哪个版块。
+            // MAX_LINES_FIRST = 优先保住 maxLines(1),为此可以一路缩到 minFontSize。
+            .fontSize(this.titleMaxFontSize())
+            .minFontSize(this.titleMinFontSize())
+            .maxFontSize(this.titleMaxFontSize())
+            .heightAdaptivePolicy(TextHeightAdaptivePolicy.MAX_LINES_FIRST)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        if (hasTopicListSummary(this.listQuery)) {
+          this.QuerySummaryRow()
+        }
+      }
     }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+    .justifyContent(FlexAlign.Center)
+  }
+
+  // 主标题的前导图标:与帖子卡片上的徽章同一套视觉——版块走「专属图标 → 上传 logo → 兜底色点」,
+  // 标签走「专属图标 → 通用小标签图标」。只按过滤器筛(未读/热门)时没有可画的东西,整个图标位不占。
+  @Builder
+  private QueryTitleIcon() {
+    if (this.listQuery.category !== undefined) {
+      Row() {
+        if (this.titleCategoryIcon() !== undefined) {
+          FaIconView({
+            icon: this.titleCategoryIcon() as FaIconDefinition,
+            color: getCategoryColor(this.listQuery.category as TopicCategory),
+            iconSize: this.titleIconSize()
+          })
+        } else if (this.titleCategoryLogo().length > 0) {
+          Image(resolveBadgeAssetUrl(this.titleCategoryLogo()))
+            .width(this.titleIconSize())
+            .height(this.titleIconSize())
+            .objectFit(ImageFit.Contain)
+        } else {
+          Circle()
+            .width(this.titleIconSize() - 5)
+            .height(this.titleIconSize() - 5)
+            .fill(getCategoryColor(this.listQuery.category as TopicCategory))
+        }
+      }
+      .width(this.titleIconSize() + 5)
+      .justifyContent(FlexAlign.Center)
+      .margin({ right: 7 })
+    } else if (this.listQuery.tag !== undefined) {
+      Row() {
+        FaIconView({
+          icon: this.tagIcon((this.listQuery.tag as TopicTag).name),
+          color: getTagColor((this.listQuery.tag as TopicTag).name),
+          iconSize: this.titleIconSize() - 1
+        })
+      }
+      .width(this.titleIconSize() + 5)
+      .justifyContent(FlexAlign.Center)
+      .margin({ right: 7 })
+    }
+  }
+
+  // 前导图标不随副行有无变化:标题字号只差两号,图标跟着跳反而显得晃。
+  private titleIconSize(): number {
+    return TITLE_ICON_SIZE;
+  }
+
+  private titleMaxFontSize(): number {
+    return hasTopicListSummary(this.listQuery) ? TITLE_WITH_SUMMARY_MAX_FONT_SIZE : TITLE_MAX_FONT_SIZE;
+  }
+
+  private titleMinFontSize(): number {
+    return hasTopicListSummary(this.listQuery) ? TITLE_WITH_SUMMARY_MIN_FONT_SIZE : TITLE_MIN_FONT_SIZE;
+  }
+
+  // 副行的一枚小胶囊。@Builder 的参数必须打包成单个对象:多个/基本类型参数是按值传递,
+  // 捕获一次就不再重算,条件变了胶囊不会跟着刷新。
+  @Builder
+  private QueryChip(p: QueryChipParams) {
+    Row({ space: 4 }) {
+      if (p.icon !== undefined) {
+        FaIconView({
+          icon: p.icon as FaIconDefinition,
+          color: p.iconColor.length > 0 ? p.iconColor : $r('app.color.text_secondary'),
+          iconSize: SUMMARY_CHIP_ICON_SIZE
+        })
+      }
+      Text(p.label)
+        .fontSize(SUMMARY_FONT_SIZE)
+        .fontColor($r('app.color.text_secondary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .height(SUMMARY_CHIP_HEIGHT)
+    // 带图标时左内边距收一点:图标本身已经贡献了视觉留白。
+    .padding({ left: p.icon !== undefined ? 6 : 8, right: 8 })
+    .constraintSize({ maxWidth: '60%' })
+    .backgroundColor($r('app.color.surface_muted'))
+    .borderRadius(SUMMARY_CHIP_HEIGHT / 2)
+    .alignItems(VerticalAlign.Center)
+  }
+
+  /**
+   * 副行:主标题下面那一行,每个条件各占一枚小胶囊。
+   *
+   * 做成胶囊而不是裸文字,是因为「未读」这种两个字的副标题裸着挂在标题下面会显得是"没写完";
+   * 套上边界之后同样的内容读起来就是"这一行有一枚标记",观感完全不同。顺带还有两个好处:
+   * 胶囊边界自己就是分隔,不再需要那个中点;以后要加第四个维度,多一枚胶囊即可。
+   *
+   * 点整行回抽屉接着改(省得去够左上角的汉堡)。胶囊本身暂不单独响应——
+   * 「点某一枚只改那一维」是个合理期待,但那要先想清楚点了是清空还是进对应 Tab,留到后面再说。
+   */
+  @Builder
+  private QuerySummaryRow() {
+    Row({ space: 6 }) {
+      if (topicListSummaryLead(this.listQuery).length > 0) {
+        this.QueryChip({
+          label: topicListSummaryLead(this.listQuery),
+          icon: undefined,
+          iconColor: ''
+        })
+      }
+
+      if (topicListSummaryTag(this.listQuery) !== undefined) {
+        this.QueryChip({
+          label: (topicListSummaryTag(this.listQuery) as TopicTag).name,
+          icon: this.tagIcon((topicListSummaryTag(this.listQuery) as TopicTag).name),
+          iconColor: this.tagIconColor((topicListSummaryTag(this.listQuery) as TopicTag).name)
+        })
+      }
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.openDrawer();
+    })
+  }
+
+  // 版块图标要带上父版块做兜底(子版块自己常常没图标,得回退到父版块那一套)。
+  private titleCategoryIcon(): FaIconDefinition | undefined {
+    const category: TopicCategory | undefined = this.listQuery.category;
+    if (category === undefined) {
+      return undefined;
+    }
+    return getCategoryIcon(category, CategoryIndex.findParent(this.categories, category.id));
+  }
+
+  private titleCategoryLogo(): string {
+    const category: TopicCategory | undefined = this.listQuery.category;
+    if (category === undefined) {
+      return '';
+    }
+    return getCategoryLogo(category, CategoryIndex.findParent(this.categories, category.id));
+  }
+
+  // 没有专属图标时回空串,让通用小标签图标跟着胶囊的文字色走——固定的灰在深色模式下会比文字暗一档。
+  private tagIconColor(name: string): string {
+    return getTagIcon(name) !== undefined ? getTagColor(name) : '';
+  }
+
+  // 没登记过专属图标的标签退回通用小标签图标,图标位始终有东西,标题不会一会儿缩进一会儿不缩。
+  private tagIcon(name: string): FaIconDefinition {
+    const own: FaIconDefinition | undefined = getTagIcon(name);
+    if (own !== undefined) {
+      return own;
+    }
+    const fallback: FaIconDefinition | undefined = getFaIcon('tag');
+    return fallback ? fallback : { id: 'tag', rawfilePath: 'fa_icons/tag.svg' };
   }
 
   // 左上角汉堡入口:打开版块抽屉(三条发丝线,无需依赖 sys.symbol 资源)。
@@ -1075,10 +1298,12 @@ export struct HomePage {
     this.animateDrawer(true);
   }
 
-  // 抽屉登场前的准备:重读配置 + 同步展开态 + 挂载内容。点汉堡和边缘拖拽共用。
+  // 抽屉登场前的准备:重读配置 + 草稿对齐当前条件 + 同步展开态 + 挂载内容。点汉堡和边缘拖拽共用。
   // 内容此刻还在屏幕左外(drawerProgress 仍为 0),挂载过程看不见。
   private prepareDrawerContent(): void {
     this.refreshDrawerPrefs();
+    // 每次开抽屉都从生效条件重新拷一份草稿:上次没点确认就滑走的那些改动就此丢弃(等同「取消」)。
+    this.draftQuery = cloneTopicListQuery(this.listQuery);
     this.syncDrawerAutoExpand();
     this.drawerProgress = 0;
     this.drawerMounted = true;
@@ -1099,7 +1324,7 @@ export struct HomePage {
   // 原先写在 CategoryDrawer.aboutToAppear 里,而抽屉是随首页一起构建的、那时还没有任何选中版块,
   // 等于从没生效过;改为按需挂载后放在这里,每次开抽屉判定一次,才真正起到"让选中项可见"的作用。
   private syncDrawerAutoExpand(): void {
-    const selected: TopicCategory | undefined = this.selectedCategory;
+    const selected: TopicCategory | undefined = this.listQuery.category;
     if (!selected || selected.parentCategoryId === undefined) {
       return;
     }
@@ -1124,10 +1349,9 @@ export struct HomePage {
     this.drawerExpandedIds = next;
   }
 
-  // 抽屉配置统一重读:启用入口 + 站点入口开关 + 要展示的站点。
+  // 抽屉配置统一重读:站点入口开关 + 要展示的站点。
   // 子页改完 pop 回来不会重建本页,靠每次开抽屉重读 preferences 拿最新值(无需 AppStorage tick)。
   private refreshDrawerPrefs(): void {
-    this.enabledFeedKeys = FeedPrefs.getEnabledKeys(getContext(this));
     this.sitesEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
     this.drawerSites = SitePrefs.drawerSites(getContext(this));
   }
@@ -1167,24 +1391,27 @@ export struct HomePage {
     this.settleDrawer(true);
   }
 
-  // 抽屉里选了内置入口:切源并重载列表(与当前源相同则仅关抽屉)。
-  private handleSelectFeed(feedKey: string): void {
+  // 抽屉点「查看结果」:提交草稿、关抽屉、整列重载。与当前条件无差异时抽屉侧就不会走到这里。
+  private handleApplyDraftQuery(): void {
     this.closeDrawer();
-    if (this.selectedCategory === undefined && this.selectedFeedKey === feedKey) {
+    if (sameTopicListQuery(this.draftQuery, this.listQuery)) {
       return;
     }
-    this.selectedCategory = undefined;
-    this.selectedFeedKey = feedKey;
+    this.listQuery = cloneTopicListQuery(this.draftQuery);
     this.resetAndReload();
   }
 
-  // 抽屉里选了某版块:切源并重载列表。
-  private handleSelectCategory(category: TopicCategory): void {
-    this.closeDrawer();
-    if (this.selectedCategory !== undefined && this.selectedCategory.id === category.id) {
+  // 点帖子卡片上的标签徽章:在当前条件之上加这个标签(标签单选,已选中同一个则忽略)。
+  // 保留版块与排序而不是清空重来——在某版块里看到感兴趣的标签,想要的多半是「这个版块下的这个标签」。
+  private handleTagClick(tag: TopicTag): void {
+    if (this.listQuery.tag !== undefined && this.listQuery.tag.name === tag.name) {
       return;
     }
-    this.selectedCategory = category;
+    const next: TopicListQuery = cloneTopicListQuery(this.listQuery);
+    next.tag = tag;
+    this.listQuery = next;
+    // 顶栏此刻多半已随滚动收起,摘要行看不见,所以给一句 toast 交代刚发生了什么。
+    this.showToast(`已按标签「${tag.name}」筛选`);
     this.resetAndReload();
   }
 
@@ -1249,8 +1476,9 @@ export struct HomePage {
     if (!this.realtimeTopicsEnabled) {
       return;
     }
-    if (event.channel !== '/latest' || this.selectedCategory !== undefined ||
-      this.selectedFeedKey !== FeedKey.LATEST) {
+    // MessageBus 的 /latest 频道推的是全站最新,只有条件全默认时它才和当前列表说的是同一件事;
+    // 一旦限定了版块或标签,推来的新帖多半根本不属于当前列表,插进去就是错的。
+    if (event.channel !== '/latest' || !isDefaultTopicListQuery(this.listQuery)) {
       return;
     }
     const topicId: number | undefined = extractMessageBusTopicId(event);
@@ -1289,26 +1517,17 @@ export struct HomePage {
     this.refreshLatestTopics();
   }
 
-  // 按当前内容源取一页:选中版块走分类接口,否则走内置入口接口。
+  // 按当前条件取一页。四种 scope 组合共用一个入口,路径拼装全在 TopicListQuery 里。
   private fetchTopicPage(page: number): Promise<NetworkResult<TopicPage>> {
-    const service: TopicService = new TopicService(this.bridge);
-    if (this.selectedCategory !== undefined) {
-      return service.getCategoryTopicsPage(this.selectedCategory, page);
-    }
-    return service.getFeedPage(this.selectedFeedKey, page);
+    return new TopicService(this.bridge).getQueryPage(this.listQuery, page);
   }
 
-  // 当前内容源的标题:选中版块=版块名;热门/未读等入口=入口名;默认「最新」显示应用名 ArkDO。
+  // 顶栏主标题:版块名 → #标签名 → 过滤器名;全默认时显示应用名 ArkDO(FeedTitle 据此换 logo 版式)。
   private currentFeedTitle(): string {
-    if (this.selectedCategory !== undefined) {
-      return this.selectedCategory.name;
-    }
-    if (this.selectedFeedKey === FeedKey.LATEST) {
-      return AppConstants.APP_NAME;
-    }
-    const def: FeedDef | undefined = FeedPrefs.feedDef(this.selectedFeedKey);
-    return def ? def.label : AppConstants.APP_NAME;
+    const title: string = topicListPrimaryTitle(this.listQuery);
+    return title.length > 0 ? title : AppConstants.APP_NAME;
   }
+
 
   private showToast(message: string): void {
     promptToast(this.getUIContext(), message);
