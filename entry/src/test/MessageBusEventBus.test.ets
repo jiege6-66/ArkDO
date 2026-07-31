@@ -12,7 +12,7 @@ export default function messageBusEventBusTest() {
   describe('messageBusEventBusTest', () => {
     it('parsesLatestTopicMessage', 0, () => {
       const event: MessageBusEvent | undefined = parseMessageBusEvent(
-        '{"type":"message","channel":"/latest","messageId":1001,"data":{"topic_id":375}}'
+        '{"type":"message","channel":"/latest","messageId":1001,"data":{"topic_id":375,"message_type":"latest"}}'
       );
 
       expect(event?.channel).assertEqual('/latest');
@@ -24,8 +24,34 @@ export default function messageBusEventBusTest() {
       expect(parseMessageBusEvent('{bad json')).assertUndefined();
       expect(parseMessageBusEvent('{"type":"message","channel":3}')).assertUndefined();
       expect(extractMessageBusTopicId(parseMessageBusEvent(
-        '{"type":"message","channel":"/latest","messageId":1,"data":{"topic_id":0}}'
+        '{"type":"message","channel":"/latest","messageId":1,"data":{"topic_id":0,"message_type":"latest"}}'
       ))).assertUndefined();
+    });
+
+    // /latest 上还跑着静音/取消静音,它们不是「新的或更新的话题」,计进去就成了凭空冒出的提示。
+    it('ignoresMutedAndUnmutedOnLatestChannel', 0, () => {
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":2,"data":{"topic_id":375,"message_type":"muted"}}'
+      ))).assertUndefined();
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":3,"data":{"topic_id":375,"message_type":"unmuted"}}'
+      ))).assertUndefined();
+      // 白名单:没有 message_type、或将来新增的未知类型,一律不计。
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":4,"data":{"topic_id":375}}'
+      ))).assertUndefined();
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":5,"data":{"topic_id":375,"message_type":"whatever"}}'
+      ))).assertUndefined();
+    });
+
+    it('countsNewTopicAndBumpedTopic', 0, () => {
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":6,"data":{"topic_id":41,"message_type":"new_topic"}}'
+      ))).assertEqual(41);
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":7,"data":{"topic_id":42,"message_type":"latest"}}'
+      ))).assertEqual(42);
     });
 
     it('publishesValidPayloadToSubscribersOnly', 0, () => {

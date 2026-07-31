@@ -62,8 +62,27 @@ export function parseMessageBusEvent(payload: string): MessageBusEvent | undefin
   }
 }
 
+/**
+ * /latest 频道上会计入「新的或更新的话题」的 message_type(白名单)。
+ *
+ * 这个频道跑的不止新话题 —— topic_tracking_state.rb 往 LATEST_MESSAGE_BUS_CHANNEL 发四种消息:
+ *   · latest    (publish_latest) 话题被顶起来了     → 计入
+ *   · new_topic (publish_new)    新建话题           → 计入
+ *   · muted     (publish_muted)   有人静音了该话题   → 不计
+ *   · unmuted   (publish_unmuted) 有人取消静音       → 不计
+ * 官方前端 topic-tracking-state.js 的 notifyIncoming 同样只认前两种。
+ *
+ * 用白名单而不是「排除 muted/unmuted」的黑名单:将来 Discourse 往这个频道加新类型时,
+ * 白名单默认不计、顶多漏报;黑名单会默默把它算成新话题,又变回现在这个 bug。
+ */
+const INCOMING_TOPIC_MESSAGE_TYPES: string[] = ['latest', 'new_topic'];
+
 export function extractMessageBusTopicId(event: MessageBusEvent | undefined): number | undefined {
   if (!event || event.type !== 'message' || !event.data) {
+    return undefined;
+  }
+  const messageType: string | undefined = event.data.message_type;
+  if (messageType === undefined || INCOMING_TOPIC_MESSAGE_TYPES.indexOf(messageType) < 0) {
     return undefined;
   }
   const topicId: number | undefined = event.data.topic_id;
