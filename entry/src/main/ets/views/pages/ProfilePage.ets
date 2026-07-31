@@ -89,6 +89,9 @@ export struct ProfilePage {
   // 登出前的系统推送清理(退订 linux.do + 解绑中继)。由 RootTabPage 注入,必须在 logout
   // 请求之前 await 完:登出后没了登录 cookie 就退不掉订阅,本机会继续收到该账号的推送。
   onLogoutCleanup: () => Promise<void> = async () => {};
+  // 服务端已确认登出后的本地清态(清 currentUser / 登录态镜像 / 通知轮询 / 推送基准),由 RootTabPage
+  // 注入。不靠随后的会话复查:那一次若遇 CF 盾或断网会走「失败保留上一次登录态」兜底,登录态就卡死。
+  onLoggedOut: () => void = () => {};
   // 用户动态列表(我的话题/回复/点赞/最近活动全部)已原生化:filter 见 UserActionType。
   onOpenActivity: (username: string, filter: string, title: string) => void = () => {};
   // 全部徽章页已原生化:数据取自 /user-badges/{username}.json。
@@ -1018,6 +1021,8 @@ export struct ProfilePage {
     }
     Log.i(`${LOG_TAG} logout success`);
     this.showToast('已退出登录');
+    // 先本地落地未登录,再广播:顺序不能反。先广播的话,复查结果回来时可能把刚清掉的登录态又写回去。
+    this.onLoggedOut();
     // 会话变化会触发 host webview 重载,先关闭就绪门闩,与登录成功走同一条刷新链路。
     this.bridge.markHostReloading();
     SessionEventBus.notifySessionChanged();

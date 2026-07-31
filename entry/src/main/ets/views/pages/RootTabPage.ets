@@ -635,6 +635,9 @@ export struct RootTabPage {
           onLogoutCleanup: () => {
             return this.pushCoordinator.disableForLogout();
           },
+          onLoggedOut: () => {
+            this.applyLoggedOut();
+          },
           onOpenActivity: (username: string, filter: string, title: string) => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.ACTIVITY, buildActivityRouteParam(username, filter, title)));
           },
@@ -1631,6 +1634,23 @@ export struct RootTabPage {
     const nextDraftCount: number = Math.max(0, draftCount - 1);
     AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY, nextDraftCount);
     Log.i(`${LOG_TAG} draft count updated key=${draftKey} ${draftCount}->${nextDraftCount}`);
+  }
+
+  // 登出已被服务端确认(DELETE /session/{username} 返回 2xx)时的本地清态。
+  // 不等随后的 /session/current.json 复查:那一次若撞上 CF 盾或断网会走「失败保留上一次登录态」
+  // 的兜底,登录态就卡在已经不存在的会话上。DELETE 成功即事实,本地直接落地。
+  // 同时作废进行中的会话检查——它可能是登出前发出的,回来会把旧账号又写回去。
+  private applyLoggedOut(): void {
+    this.sessionCheckSequence++;
+    this.sessionCheckQueued = false;
+    this.lastSessionCheckFailed = false;
+    this.currentUser = undefined;
+    LoginGate.setLoggedIn(false);
+    AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY, 0);
+    this.notificationService.stop();
+    // 登出:清掉自愈基准,让下一个账号登录时重新兑现自己的订阅。
+    this.pushCoordinator.resetReconcileState();
+    Log.i(`${LOG_TAG} logged out locally applied`);
   }
 
   private async checkCurrentUser(): Promise<void> {
