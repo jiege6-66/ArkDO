@@ -93,13 +93,17 @@ function normalizeRawIcon(rawIcon: RawFaIconDefinition): FaIconDefinition | unde
 
 @Component
 export struct FaIconView {
-  icon: FaIconDefinition = {
+  // 必须是 @Prop:普通成员变量只在组件创建时被父组件赋值一次,之后父组件再传新值也不会同步进来。
+  // 多数调用点的图标是定死的,或者挂在 ForEach 上(换 key 就换实例),看不出区别;但只要有一处
+  // 是「同一个 FaIconView 实例换图标」——比如筛选抽屉里那个已选标签 chip、顶栏的分类/标签图标——
+  // 就会出现「文字换了、图标还停在上一个」。
+  @Prop icon: FaIconDefinition = {
     id: '',
     rawfilePath: ''
   };
   // 支持资源色($r),深浅色模式切换时随资源重解析;字符串色值保持兼容。
-  color: ResourceColor = '#6B7280';
-  iconSize: number = FALLBACK_FA_ICON_SIZE;
+  @Prop color: ResourceColor = '#6B7280';
+  @Prop iconSize: number = FALLBACK_FA_ICON_SIZE;
 
   build() {
     Image($rawfile(this.icon.rawfilePath))
