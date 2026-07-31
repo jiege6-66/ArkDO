@@ -1,5 +1,5 @@
 import { Log } from '../services/logging/Log';
-import { AbilityConstant, errorManager, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, errorManager, UIAbility, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
@@ -79,6 +79,12 @@ export default class EntryAbility extends UIAbility {
     this.handlePushNotificationWant(want, 'onNewWant');
   }
 
+  // 系统配置变化(切深浅色、定时深色触发、字号等)。颜色模式转给 ThemeManager 刷新 appIsDark——
+  // 资源色靠限定符自动翻转,但非资源染色(高亮底色、公式位图)只认这个布尔。
+  onConfigurationUpdate(newConfig: Configuration): void {
+    ThemeManager.applyConfiguration(newConfig);
+  }
+
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
     HoldingHandManager.destroy();
@@ -116,6 +122,9 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    // 回前台补读一次颜色模式:后台期间(或熄屏时定时深色触发)的变化未必有 onConfigurationUpdate,
+    // 补这一手保证前台首帧的 appIsDark 一定与资源色一致。
+    ThemeManager.applyConfiguration(this.context.config);
     AppStateEventBus.notifyForegroundChanged(true);
     HoldingHandManager.resume();
   }

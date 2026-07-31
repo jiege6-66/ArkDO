@@ -23,5 +23,19 @@ export default function themeManagerTest() {
       expect(ThemeManager.parseMode('')).assertEqual(ThemeMode.SYSTEM);
       expect(ThemeManager.parseMode('unknown')).assertEqual(ThemeMode.SYSTEM);
     });
+
+    // 强制主题不看生效模式;跟随系统才透传。透传这一条是深色高亮 BUG 的回归点:
+    // 生效模式为深色时 appIsDark 必须为 true,否则非资源染色会错用浅色。
+    it('resolvesForcedModeRegardlessOfEffectiveColorMode', 0, () => {
+      expect(ThemeManager.resolveIsDark(ThemeMode.DARK, false)).assertTrue();
+      expect(ThemeManager.resolveIsDark(ThemeMode.DARK, true)).assertTrue();
+      expect(ThemeManager.resolveIsDark(ThemeMode.LIGHT, true)).assertFalse();
+      expect(ThemeManager.resolveIsDark(ThemeMode.LIGHT, false)).assertFalse();
+    });
+
+    it('followsEffectiveColorModeInSystemMode', 0, () => {
+      expect(ThemeManager.resolveIsDark(ThemeMode.SYSTEM, true)).assertTrue();
+      expect(ThemeManager.resolveIsDark(ThemeMode.SYSTEM, false)).assertFalse();
+    });
   });
 }
