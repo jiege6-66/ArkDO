@@ -15,6 +15,24 @@ export interface SaveTopicDraftInput {
   typingTimeMs: number;
 }
 
+/**
+ * 保存编辑草稿的入参。
+ *
+ * draftKey 与回帖草稿**同为 topic_<主题id>** —— 这是官方的行为(controllers/topic.js 里
+ * editPost 传的就是 topic.draft_key),不是我们偷懒。代价是同一主题下编辑草稿会顶掉回帖草稿,
+ * 好处是与网页版互通:手机上改一半,网页版打开同一帖能接着改。
+ */
+export interface SaveEditDraftInput {
+  draftKey: string;
+  sequence: number;
+  categoryId: number;
+  reply: string;
+  postId: number;
+  originalText: string;
+  composerTimeMs: number;
+  typingTimeMs: number;
+}
+
 // 保存回帖草稿的入参。draftKey 形如 topic_<主题id>;categoryId 是主题所属分类。
 export interface SaveReplyDraftInput {
   draftKey: string;
@@ -40,6 +58,22 @@ interface ReplyDraftData {
   locale: string;
   reply_to_post_number: number | null;
   reply_to_user: object | null;
+}
+
+// 编辑草稿的 data 内层结构。相对回帖草稿多 postId 与 original_text,action 为 'edit'
+// (对齐官方 composer 的 _draft_serializer)。恢复时正是靠这三样把它认出来并开成编辑态。
+interface EditDraftData {
+  reply: string;
+  action: string;
+  categoryId: number | null;
+  tags: string[];
+  archetypeId: string;
+  metaData: object | null;
+  composerTime: number;
+  typingTime: number;
+  locale: string;
+  postId: number;
+  original_text: string;
 }
 
 // data 字段内层结构(POST 时序列化成 JSON 串再 URL 编码)。
@@ -95,6 +129,9 @@ interface DiscourseDraftData {
   action?: string;
   title?: string;
   categoryId?: number | null;
+  // 编辑草稿专属(action==='edit'):被编辑楼 id 与开始编辑时的服务端原文。
+  postId?: number;
+  original_text?: string;
   // 新主题草稿里 tags 是对象数组 {id,name};其余类型多为空数组。兼容字符串数组。
   tags?: (DiscourseDraftTag | string)[];
 }
@@ -131,6 +168,24 @@ export class DraftService {
       locale: '',
       reply_to_post_number: input.replyToPostNumber !== undefined ? input.replyToPostNumber : null,
       reply_to_user: null
+    };
+    return this.postDraft(input.draftKey, input.sequence, JSON.stringify(data));
+  }
+
+  /** 保存编辑草稿。与回帖草稿同 key,靠 data 里的 action='edit' + postId 区分。 */
+  async saveEditDraft(input: SaveEditDraftInput): Promise<NetworkResult<number>> {
+    const data: EditDraftData = {
+      reply: input.reply,
+      action: DraftAction.EDIT,
+      categoryId: input.categoryId >= 0 ? input.categoryId : null,
+      tags: [],
+      archetypeId: 'regular',
+      metaData: null,
+      composerTime: Math.max(0, Math.round(input.composerTimeMs)),
+      typingTime: Math.max(0, Math.round(input.typingTimeMs)),
+      locale: '',
+      postId: input.postId,
+      original_text: input.originalText
     };
     return this.postDraft(input.draftKey, input.sequence, JSON.stringify(data));
   }
@@ -306,6 +361,12 @@ export class DraftService {
     if (typeof source.topic_id === 'number') {
       draft.topicId = source.topic_id;
     }
+    // 编辑草稿:两个字段缺一不可 —— 缺 postId 不知道改哪一楼,缺 original_text 就失去了
+    // 409 冲突比对的基线。任缺其一都不认作编辑草稿,宁可退化成普通草稿也不能开成半残的编辑态。
+    if (typeof data.postId === 'number' && data.postId > 0 && typeof data.original_text === 'string') {
+      draft.postId = data.postId;
+      draft.originalText = data.original_text;
+    }
     // 分类:优先 data.categoryId(续写要用),回退顶层 category_id。
     if (typeof data.categoryId === 'number') {
       draft.categoryId = data.categoryId;
@@ -335,6 +396,9 @@ export class DraftService {
     }
     if (action === DraftAction.PRIVATE_MESSAGE) {
       return DraftAction.PRIVATE_MESSAGE;
+    }
+    if (action === DraftAction.EDIT) {
+      return DraftAction.EDIT;
     }
     return DraftAction.OTHER;
   }

@@ -22,6 +22,11 @@ export interface Draft {
   // 标签带 id:续写时要用 id 做联想 refine,回存草稿也要写回 {id,name}。
   tags: DraftTagRef[];
   reply: string;
+  // 编辑草稿专属:被编辑的楼层 id。没有它就没法知道这份草稿要改回哪一楼。
+  postId?: number;
+  // 编辑草稿专属:开始编辑时那份服务端原文。保存时原样回传作 original_text,
+  // 让服务端比对出「草稿期间这楼被别处改过」并回 409,而不是静默覆盖。
+  originalText?: string;
 }
 
 // 草稿里的标签引用。放在模型层(而非服务层)供两边共用,避免 model↔service 循环引用。
@@ -34,6 +39,8 @@ export enum DraftAction {
   NEW_TOPIC = 'createTopic',
   REPLY = 'reply',
   PRIVATE_MESSAGE = 'privateMessage',
+  // 编辑已有楼层。与回帖共用 topic_<id> 这一个 draft_key(官方如此),靠本字段区分。
+  EDIT = 'edit',
   OTHER = 'other'
 }
 

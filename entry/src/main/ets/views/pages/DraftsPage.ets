@@ -47,6 +47,9 @@ export struct DraftsPage {
   onOpenTopic: (topicId: number, title: string) => void = () => {};
   // 回帖草稿续写 → 进主题详情并自动弹回复框、回填草稿正文;发表成功后详情页据 key/序号删该草稿。
   onOpenTopicWithDraft: (topicId: number, title: string, draftReply: string, draftKey: string, sequence: number) => void = () => {};
+  // 续写编辑草稿:比上面多带被编辑楼 id 与原文基线,详情页据此开成编辑态而不是回复态。
+  onOpenTopicWithEditDraft: (topicId: number, title: string, draftReply: string, draftKey: string,
+    sequence: number, postId: number, originalText: string) => void = () => {};
   // 新主题/私信草稿暂无原生续写 → 兜底走站内 Web 草稿页。
   onOpenWeb: (url: string, title: string) => void = () => {};
 
@@ -310,6 +313,9 @@ export struct DraftsPage {
     if (action === DraftAction.PRIVATE_MESSAGE) {
       return '私信';
     }
+    if (action === DraftAction.EDIT) {
+      return '编辑';
+    }
     return '草稿';
   }
 
@@ -390,7 +396,16 @@ export struct DraftsPage {
       this.openComposerForDraft(item);
       return;
     }
-    if (item.action === DraftAction.REPLY && item.topicId !== undefined) {
+    // 编辑草稿必须走编辑那条路。它长得像回帖草稿(同 key、同样有 topicId 和正文),但内容是
+    // 某一楼的**旧原文** —— 一旦当成回帖打开并发送,等于把自己的旧内容重发成新楼。
+    // 所以这里判在回帖分支之前,且要求 postId/originalText 齐备,缺了就宁可落到最后的网页兜底。
+    if (item.action === DraftAction.EDIT) {
+      if (item.topicId !== undefined && item.postId !== undefined && item.originalText !== undefined) {
+        this.onOpenTopicWithEditDraft(item.topicId, item.displayTitle, item.reply, item.draftKey,
+          item.sequence, item.postId, item.originalText);
+        return;
+      }
+    } else if (item.action === DraftAction.REPLY && item.topicId !== undefined) {
       // 带上草稿正文:落地后详情页自动弹回复框并回填,不用用户再点一次「回复」。
       // 这里的 title 是给详情页当页面标题用的,取 displayTitle(回帖草稿它就是所回主题的标题)。
       this.onOpenTopicWithDraft(item.topicId, item.displayTitle, item.reply, item.draftKey, item.sequence);

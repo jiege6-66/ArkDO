@@ -40,6 +40,10 @@ export interface TopicDetailRouteParam {
   draftReply?: string;
   draftKey?: string;
   draftSequence?: number;
+  // 续写的是**编辑草稿**时带上:要改回哪一楼 + 开始编辑时的服务端原文(作 409 比对基线)。
+  // 两者齐备详情页才会开成编辑态;缺任一律按普通回帖草稿处理,绝不会把编辑内容发成新楼。
+  draftEditPostId?: number;
+  draftEditOriginalText?: string;
 }
 
 export interface ProfileRouteParam {
@@ -312,6 +316,21 @@ export function buildTopicDetailDraftRouteParam(topicId: number, title: string,
     draftReply: draftReply,
     draftKey: draftKey,
     draftSequence: draftSequence
+  };
+}
+
+// 续写编辑草稿:比回帖草稿多带被编辑楼 id 与原文基线。
+export function buildTopicDetailEditDraftRouteParam(topicId: number, title: string,
+  draftReply: string, draftKey: string, draftSequence: number,
+  postId: number, originalText: string): TopicDetailRouteParam {
+  return {
+    topicId: topicId,
+    title: title,
+    draftReply: draftReply,
+    draftKey: draftKey,
+    draftSequence: draftSequence,
+    draftEditPostId: postId,
+    draftEditOriginalText: originalText
   };
 }
 

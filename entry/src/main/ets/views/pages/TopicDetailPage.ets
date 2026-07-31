@@ -214,6 +214,16 @@ export struct TopicDetailPage {
   @State private composerPlaceholder: string = '回复当前话题';
   // boost 输入目标楼 id:0 = 当前浮层是普通回复;>0 = 当前浮层是给该楼发 boost。
   @State private boostTargetPostId: number = 0;
+  // 正在编辑的楼层 id(0=不在编辑态)。与 boostTargetPostId 一样,输入浮层靠它区分本次提交走哪条链路。
+  @State private editingPostId: number = 0;
+  // 打开编辑框时服务端给的那份 raw。保存时原样回传作 original_text —— 服务端拿它跟当前 raw 比,
+  // 不一致就 409,从而挡下「编辑期间这楼被别处改过」的覆盖。别拿用户改后的文本充数,那等于自己关掉了这道闸。
+  private editingOriginalRaw: string = '';
+  // 正在为哪一楼取原文(0=没有)。取原文要走网络,期间在该楼铅笔处转圈,并挡住连点。
+  @State private editLoadingPostId: number = 0;
+  // 编辑框里改到一半的正文。与 pendingReplyText 分开:两者共用同一个 draft_key,混用会互相污染。
+  private pendingEditText: string = '';
+  private editDraftTimer: number = -1;
   // 帖子列表滚动控制器:供「回复别人」指示器 / 被回复列表「跳到帖子」按 postNumber 定位楼层。
   private scroller: Scroller = new Scroller();
   param: TopicDetailRouteParam = {
@@ -442,6 +452,10 @@ export struct TopicDetailPage {
           onReply: (targetPost: TopicPost) => {
             this.openComposerForPost(targetPost);
           },
+          onEdit: (targetPost: TopicPost) => {
+            this.openComposerForEdit(targetPost);
+          },
+          editLoading: this.editLoadingPostId === post.id,
           onAddBoost: (targetPost: TopicPost) => {
             this.openComposerForBoost(targetPost);
           },
@@ -866,7 +880,8 @@ export struct TopicDetailPage {
       CommentInputBar({
         placeholder: this.composerPlaceholder,
         // boost 是「起飞」「感谢佬」这类短文本,放开最短字数下限;普通回复仍用默认 16。
-        minChars: this.boostTargetPostId > 0 ? 1 : 16,
+        // 编辑时不设最短字数:原文本来就可能很短,拿新回复的 16 字下限去卡编辑会让人改不动。
+        minChars: this.boostTargetPostId > 0 || this.editingPostId > 0 ? 1 : 16,
         // boost 服务端上限 16 字,超了只回 {"failed":"FAILED"} 的 422;回复不限(NO_MAX_CHARS)。
         maxChars: this.boostTargetPostId > 0 ? BOOST_MAX_CHARS : NO_MAX_CHARS,
         // 普通回复与 Boost 都在底部输入条直接显示表情图片 Span，并按一个字符计数。
@@ -874,10 +889,19 @@ export struct TopicDetailPage {
         richEmojiMode: true,
         spaceBeforeSelectedEmoji: this.boostTargetPostId > 0,
         // 带回上次未发出的内容。boost 与回复各自独立;boost 还要再按楼区分。
-        initialText: this.boostTargetPostId > 0
-          ? (this.pendingBoostByPostId.get(this.boostTargetPostId) ?? '')
-          : this.pendingReplyText,
+        initialText: this.editingPostId > 0
+          ? this.editingOriginalRaw
+          : (this.boostTargetPostId > 0
+            ? (this.pendingBoostByPostId.get(this.boostTargetPostId) ?? '')
+            : this.pendingReplyText),
         onTextChange: (text: string) => {
+          // 编辑态存的是**编辑草稿**(action='edit'),不能倒进「未发出的回复」那个抽屉 ——
+          // 两者共用同一个 draft_key,混写会让下次点回复冒出某楼的旧原文。
+          if (this.editingPostId > 0) {
+            this.pendingEditText = text;
+            this.scheduleEditDraftSave();
+            return;
+          }
           // 内联条一关就卸载,内容只存在于它的 @State,必须实时同步到页面级暂存。
           if (this.boostTargetPostId > 0) {
             // boost:按楼存,不落服务端草稿。
@@ -890,10 +914,9 @@ export struct TopicDetailPage {
         onClose: () => {
           AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, false);
           this.showComposer = false;
-          this.replyTargetPostNumber = 0;
-          this.boostTargetPostId = 0;
+          this.resetComposerModes();
         },
-        // 展开按钮:仅普通回复显示(boost 短文本无需全屏编辑)。
+        // 展开按钮:仅普通回复显示(boost 短文本无需全屏编辑)。编辑态同样放行 —— 要改的往往是长文。
         showExpand: this.boostTargetPostId <= 0,
         // 一镜到底展开:把已输入文本带进全屏编辑器,由 openFullComposer 在同一 animateTo 里
         // 关内联条、开全屏面板(几何配对生长)。保留 replyTargetPostNumber 供全屏提交读。
@@ -901,7 +924,10 @@ export struct TopicDetailPage {
           this.openFullComposer(currentText, keyboardHeight);
         },
         onSubmit: (text: string, typingMs: number, composerMs: number): Promise<boolean> => {
-          // boost 模式走 createBoost;否则走普通回复。
+          // 三条链路:编辑走 updatePost,boost 走 createBoost,其余是普通回复。
+          if (this.editingPostId > 0) {
+            return this.submitEdit(text);
+          }
           if (this.boostTargetPostId > 0) {
             return this.submitBoost(text);
           }
@@ -921,9 +947,14 @@ export struct TopicDetailPage {
         placeholder: this.composerFullPlaceholder,
         initialText: this.composerInitialText,
         initialKeyboardHeight: this.composerInitialKb,
-        minChars: 16,
-        // 全屏编辑器的正文同样同步到页面暂存 + 服务端草稿(关掉不丢)。
+        minChars: this.editingPostId > 0 ? 1 : 16,
+        // 全屏编辑器的正文同样同步到页面暂存 + 服务端草稿(关掉不丢)。编辑态除外,理由同内联条。
         onTextChange: (text: string) => {
+          if (this.editingPostId > 0) {
+            this.pendingEditText = text;
+            this.scheduleEditDraftSave();
+            return;
+          }
           this.pendingReplyText = text;
           this.scheduleReplyDraftSave();
         },
@@ -932,6 +963,10 @@ export struct TopicDetailPage {
           this.closeFullComposer();
         },
         onSubmit: (raw: string, typingMs: number, composerMs: number): Promise<boolean> => {
+          // 从编辑态展开成全屏后,提交仍必须走编辑链路 —— 漏了这一分支就会把改动发成一条新回复。
+          if (this.editingPostId > 0) {
+            return this.submitEdit(raw);
+          }
           // 复用内联回复链路:成功即 appendPosts 追加新楼,返回 true 由 ComposerPage 触发关闭。
           return this.submitReply(raw, typingMs, composerMs);
         }
@@ -952,8 +987,7 @@ export struct TopicDetailPage {
     if (!LoginGate.ensureLoggedIn()) {
       return;
     }
-    this.boostTargetPostId = 0;
-    this.replyTargetPostNumber = 0;
+    this.resetComposerModes();
     this.composerPlaceholder = '回复当前话题';
     AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
@@ -965,11 +999,110 @@ export struct TopicDetailPage {
     if (!LoginGate.ensureLoggedIn()) {
       return;
     }
-    this.boostTargetPostId = 0;
+    this.resetComposerModes();
     this.replyTargetPostNumber = post.postNumber;
     this.composerPlaceholder = `回复${this.resolveAuthorName(post)}`;
     AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
+  }
+
+  /**
+   * 点铅笔:编辑该楼。
+   *
+   * 列表接口只回 cooked HTML 不回 Markdown 原文,所以必须先 GET /posts/{id}.json 取 raw
+   * 才能把编辑框填上 —— 拿 cooked 反推 Markdown 是不可能做对的。这一趟顺带取到的也是最新原文,
+   * 正好作为乐观并发的基线存进 editingOriginalRaw。
+   *
+   * 取原文期间不先把浮层开起来:开一个空框再异步填字,用户会以为内容丢了。
+   */
+  /**
+   * 点铅笔:取原文 → 直接展开全屏编辑器。
+   *
+   * 不走底部单行输入条:要改的往往是整段正文,单行条既看不全也不好定位光标;而且编辑必然是
+   * 「已有一整段文字」的场景,和回复那种「从空白起手随手写两句」的姿势不一样。
+   *
+   * 列表接口只回 cooked HTML 不回 Markdown 原文,所以必须先 GET /posts/{id}.json —— 拿 cooked
+   * 反推 Markdown 是做不对的。这一趟要走网络,故先转圈:不给反馈的话用户会以为点了没反应而连点。
+   */
+  private async openComposerForEdit(post: TopicPost): Promise<void> {
+    if (!LoginGate.ensureLoggedIn()) {
+      return;
+    }
+    if (this.editLoadingPostId > 0) {
+      return;
+    }
+    this.editLoadingPostId = post.id;
+    const result: NetworkResult<string> = await new TopicService(this.bridge).getPostRaw(post.id);
+    this.editLoadingPostId = 0;
+    if (!result.success || result.data === undefined) {
+      this.showComposerToast('读取原文失败,请稍后重试', 2000);
+      return;
+    }
+    this.resetComposerModes();
+    this.editingPostId = post.id;
+    this.editingOriginalRaw = result.data;
+    this.composerHeaderTitle = '编辑';
+    this.composerFullPlaceholder = '编辑这条回复';
+    this.composerInitialText = result.data;
+    this.pendingEditText = result.data;
+    // 没有内联条可作几何配对的起点(编辑是直接开全屏),键盘起始高度按 0 走普通淡入。
+    this.composerInitialKb = 0;
+    AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
+    this.showFullComposer = true;
+  }
+
+  /**
+   * 保存编辑。成功后就地把新的 cooked/raw 写回该楼,不整页重载 —— 重载会把用户滚动位置冲掉。
+   * 409 是编辑冲突(这楼在你打开编辑框之后被改过),要单独说清楚,不能混进「保存失败」里:
+   * 前者要用户重新打开编辑看最新内容,后者重试即可。
+   */
+  private async submitEdit(text: string): Promise<boolean> {
+    const postId: number = this.editingPostId;
+    const topicId: number = this.detail?.id ?? 0;
+    if (postId <= 0 || topicId <= 0) {
+      return false;
+    }
+    const result: NetworkResult<TopicPost> =
+      await new TopicService(this.bridge).updatePost(postId, topicId, text, this.editingOriginalRaw);
+    if (result.success && result.data) {
+      this.applyEditedPost(result.data);
+      // 已经存进服务端的编辑草稿要删掉,否则改完发出去了草稿列表里还挂着一条。
+      if (this.editDraftTimer !== -1) {
+        clearTimeout(this.editDraftTimer);
+        this.editDraftTimer = -1;
+      }
+      if (this.replyDraftPersisted) {
+        await this.deleteReplyDraft();
+      }
+      this.pendingEditText = '';
+      this.editingPostId = 0;
+      this.editingOriginalRaw = '';
+      this.showToastAfterComposerClose('已保存', 2000);
+      return true;
+    }
+    if (result.statusCode === 409) {
+      this.showComposerToast('这条回复已被改动,请重新打开编辑', 2500);
+      return false;
+    }
+    this.showComposerToast('保存失败,请稍后重试', 2000);
+    return false;
+  }
+
+  // 把编辑后的楼层写回列表。TopicPost 是 @Observed,改字段即由 @ObjectLink 精准重渲染那一行,
+  // 不必动 DataSource(换实例反而会让整列重建)。
+  private applyEditedPost(updated: TopicPost): void {
+    const posts: TopicPost[] = this.dataSource.getAll();
+    for (let index: number = 0; index < posts.length; index++) {
+      const post: TopicPost = posts[index];
+      if (post.id !== updated.id) {
+        continue;
+      }
+      post.cookedHtml = updated.cookedHtml;
+      post.plainText = updated.plainText;
+      post.updatedAt = updated.updatedAt;
+      post.canEdit = updated.canEdit;
+      return;
+    }
   }
 
   // 点火箭:给该楼发 boost,占位文字「发一个 boost…」。
@@ -978,11 +1111,27 @@ export struct TopicDetailPage {
     if (!LoginGate.ensureLoggedIn()) {
       return;
     }
-    this.replyTargetPostNumber = 0;
+    this.resetComposerModes();
     this.boostTargetPostId = post.id;
     this.composerPlaceholder = '发一个 boost…';
     AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
+  }
+
+  /**
+   * 输入浮层的三种模式(普通回复 / boost / 编辑)互斥。每个入口先调它清干净再设自己那一个,
+   * 每个出口也统一调它。
+   *
+   * 之所以要集中:模式是三个独立字段散在五个开关处,谁漏一处就串台 —— 加编辑这一模式时就漏过,
+   * 表现是编辑完关掉、再点右下角回复,浮层仍停在编辑态并带出被编辑楼的原文。
+   */
+  private resetComposerModes(): void {
+    this.replyTargetPostNumber = 0;
+    this.boostTargetPostId = 0;
+    this.editingPostId = 0;
+    this.editingOriginalRaw = '';
+    this.pendingEditText = '';
+    this.composerHeaderTitle = '回复';
   }
 
   // 作者昵称:displayName(来自 API name)优先,回退 username,再回退占位。
@@ -1003,6 +1152,49 @@ export struct TopicDetailPage {
   // 保留 replyTargetPostNumber(全屏提交仍走 submitReply 读它);boost 不展开(showExpand=false)。
   // 回帖草稿自动存:停止输入 2 秒后发一次(与发新主题同节奏)。draft_key = topic_<主题id>,
   // 同一主题只有一条草稿,不会越存越多。
+  /**
+   * 编辑草稿自动保存。与回帖草稿同一个 draft_key(topic_<id>)——这是官方行为,
+   * 代价是同主题下编辑草稿会顶掉回帖草稿,好处是与网页版互通。
+   *
+   * 复用 replyDraftSequence 这一个序号,正因为两者是同一条草稿:各存各的序号,
+   * 交替保存时必有一方拿着过期序号被服务端拒。
+   */
+  private scheduleEditDraftSave(): void {
+    if (this.editDraftTimer !== -1) {
+      clearTimeout(this.editDraftTimer);
+    }
+    this.editDraftTimer = setTimeout(() => {
+      this.editDraftTimer = -1;
+      this.saveEditDraftNow();
+    }, REPLY_DRAFT_SAVE_DEBOUNCE_MS);
+  }
+
+  private async saveEditDraftNow(): Promise<void> {
+    if (!this.detail || this.replyDraftSaving || this.editingPostId <= 0) {
+      return;
+    }
+    // 没改动就别存:一进编辑框就存一条内容等于原文的草稿,会平白顶掉用户的回帖草稿。
+    if (this.pendingEditText === this.editingOriginalRaw || this.pendingEditText.trim().length === 0) {
+      return;
+    }
+    this.replyDraftSaving = true;
+    const result: NetworkResult<number> = await new DraftService(this.bridge).saveEditDraft({
+      draftKey: `topic_${this.detail.id}`,
+      sequence: this.replyDraftSequence,
+      categoryId: this.detail.categoryId !== undefined ? this.detail.categoryId : -1,
+      reply: this.pendingEditText,
+      postId: this.editingPostId,
+      originalText: this.editingOriginalRaw,
+      composerTimeMs: 0,
+      typingTimeMs: 0
+    });
+    this.replyDraftSaving = false;
+    if (result.success && result.data !== undefined) {
+      this.replyDraftSequence = result.data;
+      this.replyDraftPersisted = true;
+    }
+  }
+
   private scheduleReplyDraftSave(): void {
     if (this.replyDraftTimer !== -1) {
       clearTimeout(this.replyDraftTimer);
@@ -1079,6 +1271,22 @@ export struct TopicDetailPage {
       return;
     }
     this.draftComposerOpened = true;
+    // 编辑草稿要开成编辑态。它和回帖草稿共用 topic_<id> 这个 key、正文字段也一样,
+    // 唯一的区别就是路由带没带 postId + 原文基线 —— 判在回帖之前,漏判的后果是把某楼的旧原文
+    // 当成新回复发出去。两者缺一就当普通草稿处理,宁可退化也不开半残的编辑态。
+    const editPostId: number | undefined = this.param.draftEditPostId;
+    const editOriginal: string | undefined = this.param.draftEditOriginalText;
+    if (editPostId !== undefined && editPostId > 0 && editOriginal !== undefined) {
+      this.resetComposerModes();
+      this.editingPostId = editPostId;
+      this.editingOriginalRaw = editOriginal;
+      this.composerHeaderTitle = '编辑';
+      this.composerFullPlaceholder = '编辑这条回复';
+      this.replyDraftSequence = this.param.draftSequence ?? 0;
+      this.replyDraftPersisted = this.detail !== undefined && this.param.draftKey === `topic_${this.detail.id}`;
+      this.openFullComposer(draftReply, 0);
+      return;
+    }
     // 灌进页面暂存:全屏关掉后再点内联条也能带回这段内容。
     this.pendingReplyText = draftReply;
     // 沿用草稿原序号继续自动存,不然首次保存会因序号过期被拒。
@@ -1091,8 +1299,11 @@ export struct TopicDetailPage {
     this.composerInitialText = currentText;
     this.composerInitialKb = keyboardHeight;
     const replyTo: number = this.replyTargetPostNumber;
-    this.composerHeaderTitle = replyTo > 0 ? `回复 #${replyTo} 楼` : '回复';
-    this.composerFullPlaceholder = replyTo > 0 ? `回复 #${replyTo} 楼…` : '写下你的回复…';
+    // 编辑态展开时不能套用回复文案 —— 标题得留住「编辑」,否则用户以为自己在发新回复。
+    if (this.editingPostId <= 0) {
+      this.composerHeaderTitle = replyTo > 0 ? `回复 #${replyTo} 楼` : '回复';
+      this.composerFullPlaceholder = replyTo > 0 ? `回复 #${replyTo} 楼…` : '写下你的回复…';
+    }
     AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.getUIContext().animateTo({ duration: COMPOSER_ANIM_MS, curve: Curve.Friction }, () => {
       this.showComposer = false;
@@ -1108,7 +1319,7 @@ export struct TopicDetailPage {
     this.getUIContext().animateTo({ duration: COMPOSER_ANIM_MS, curve: Curve.Friction }, () => {
       this.showFullComposer = false;
       this.showComposer = false;
-      this.replyTargetPostNumber = 0;
+      this.resetComposerModes();
     });
   }
 

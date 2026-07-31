@@ -13,7 +13,7 @@ import { CreatePostResponse, CreateReplyPayload, CreateTopicPayload, DiscourseAc
   DiscoursePoll, DiscoursePollOption, DiscoursePollVoteResponse, DiscoursePost, DiscourseReaction,
   DiscourseReactionUser, DiscourseReactionUsersPage, DiscourseSearchPost, DiscourseSearchResponse,
   DiscourseSharedIssueResponse, DiscourseTagFilterResponse, DiscourseTagResult, DiscourseTopic,
-  DiscourseTopicDetail, DiscourseTopicList, DiscourseUser, DiscourseUserBadges,
+  DiscoursePostUpdateResponse, DiscourseTopicDetail, DiscourseTopicList, DiscourseUser, DiscourseUserBadges,
   DiscourseUserBadgeUser } from './TopicApiTypes';
 
 // linux.do shared issue（"俺也一样"）toggle 端点:同一 POST 翻转(点/撤),form body 只带 topic_id。
@@ -719,6 +719,88 @@ export class TopicService {
     };
   }
 
+  /**
+   * 取某楼的 Markdown 原文,供编辑用。GET /posts/{id}.json。
+   *
+   * 列表接口(topic.json / posts.json)只回 cooked HTML 不回 raw,所以点开编辑必须单独取一次;
+   * 顺带这一趟拿到的也是最新的 raw —— 正好当作乐观并发的基线传给 updatePost。
+   */
+  async getPostRaw(postId: number): Promise<NetworkResult<string>> {
+    const response: NetworkResult<string> = await this.bridge.getJson(`/posts/${postId}.json`);
+    if (!response.success) {
+      return this.forwardFailure<string>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, 'Linux.do 读取楼层原文响应为空。');
+    }
+    try {
+      const post: DiscoursePost = JSON.parse(response.data) as DiscoursePost;
+      if (typeof post.raw !== 'string') {
+        return this.unexpectedResponse<string>(response.statusCode, response.challengeState, 'Linux.do 读取楼层原文响应缺少 raw。');
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: post.raw
+      };
+    } catch (error) {
+      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, 'Linux.do 读取楼层原文响应不是有效 JSON。');
+    }
+  }
+
+  /**
+   * 编辑某楼。PUT /posts/{id},form body(对齐抓包):
+   *   post[raw] / post[original_text] / post[topic_id] / post[edit_reason] / post[locale]
+   *
+   * original_text 是**乐观并发的基线**,不是可省的装饰:PostsController#update 里
+   * `original_text.present? && original_text != post.raw` 就直接 409 edit_conflict。
+   * 传它才能在「打开编辑框期间这楼被别处改过」时被服务端拦下,而不是把别人的改动悄悄覆盖掉。
+   *
+   * edit_reason / locale 官方前端也是空串,照发以保持请求形状一致。
+   * 响应外壳是 { post: {...} },与创建接口的裸对象不同。
+   */
+  async updatePost(
+    postId: number,
+    topicId: number,
+    raw: string,
+    originalRaw: string
+  ): Promise<NetworkResult<TopicPost>> {
+    const parts: string[] = [];
+    parts.push('post%5Bedit_reason%5D=');
+    parts.push(`post%5Braw%5D=${encodeURIComponent(raw)}`);
+    parts.push(`post%5Btopic_id%5D=${topicId}`);
+    parts.push(`post%5Boriginal_text%5D=${encodeURIComponent(originalRaw)}`);
+    parts.push('post%5Blocale%5D=');
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    const response: NetworkResult<string> = await this.bridge.putForm(`/posts/${postId}`, parts.join('&'), {
+      notifyChallenge: true,
+      referrer: referrer
+    });
+    if (!response.success) {
+      return this.forwardFailure<TopicPost>(response);
+    }
+    if (response.data === undefined) {
+      return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, 'Linux.do 保存编辑响应为空。');
+    }
+    try {
+      const wrapper: DiscoursePostUpdateResponse = JSON.parse(response.data) as DiscoursePostUpdateResponse;
+      const updated: DiscoursePost | undefined = wrapper.post;
+      const posts: TopicPost[] = updated ? this.mapPosts([updated]) : [];
+      if (posts.length === 0) {
+        return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, 'Linux.do 保存编辑响应缺少楼层数据。');
+      }
+      return {
+        success: true,
+        statusCode: response.statusCode,
+        challengeState: response.challengeState,
+        data: posts[0]
+      };
+    } catch (error) {
+      return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, 'Linux.do 保存编辑响应不是有效 JSON。');
+    }
+  }
+
   // 书签:给某楼加书签。POST /bookmarks.json,form body(对齐抓包):
   // reminder_at=&auto_delete_preference=3&bookmarkable_id=<postId>&bookmarkable_type=Post。
   // 响应 { success:"OK", id:<bookmarkId> };返回 bookmarkId 供后续取消。
@@ -1168,6 +1250,8 @@ export class TopicService {
         typeof statusEmoji === 'string' && statusEmoji.length > 0 ? statusEmoji : undefined;
       const authorId: number | undefined = typeof sourcePost.user_id === 'number' ? sourcePost.user_id : undefined;
       post.badgeIcons = badgeMap && authorId !== undefined ? badgeMap.get(authorId) : undefined;
+      post.yours = sourcePost.yours === true;
+      post.canEdit = sourcePost.can_edit === true;
       posts.push(post);
     }
 

@@ -111,6 +111,11 @@ export class TopicPost {
   statusEmoji?: string;
   // 昵称后展示的徽章图标名数组(顶层 user_badges 按 user_id 解出的 FontAwesome 名,如 far-eye/seedling/hammer)。
   badgeIcons?: string[];
+  // 本楼是否为当前登录用户所发(yours)。自己不能给自己点赞,故为真时详情页把心形按钮换成编辑入口。
+  yours?: boolean;
+  // 是否还能编辑(can_edit)。与 yours 分开两个字段是必要的:过了编辑时限后 yours 仍真、can_edit 转假,
+  // 此时既不该给点赞按钮、也不该给编辑按钮。
+  canEdit?: boolean;
 }
 
 // discourse-solved:被采纳为解决方案的答案楼快照(topic.json 顶层 accepted_answers)。

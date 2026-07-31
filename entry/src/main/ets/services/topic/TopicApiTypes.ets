@@ -199,6 +199,13 @@ export interface DiscoursePost {
   id?: number;
   topic_id?: number;
   post_number?: number;
+  // 本楼是不是当前登录用户发的(PostSerializer#yours)。为真时不能给自己点赞,详情页把心形换成编辑入口。
+  yours?: boolean;
+  // 当前用户能不能改这一楼(PostSerializer#can_edit,走 Guardian)。注意「是我的」不等于「还能改」——
+  // 超过 SiteSetting 的编辑时限后 yours 仍为真而 can_edit 变假。
+  can_edit?: boolean;
+  // 编辑用的 Markdown 原文。只有单帖接口 /posts/{id}.json 会带,列表接口不返回。
+  raw?: string;
   user_id?: number;
   username?: string;
   name?: string;
@@ -356,4 +363,9 @@ export interface DiscourseGroupedSearchResult {
   post_ids?: number[];
   more_full_page_results?: boolean;
   term?: string;
+}
+
+// PUT /posts/{id} 的响应外壳:更新后的整个 post 挂在 post 字段下(与创建接口的裸对象不同)。
+export interface DiscoursePostUpdateResponse {
+  post?: DiscoursePost;
 }

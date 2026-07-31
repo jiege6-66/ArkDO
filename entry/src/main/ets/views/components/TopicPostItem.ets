@@ -106,6 +106,11 @@ export struct TopicPostItem {
   onOpenReactionUsers: (post: TopicPost) => void = () => {};
   // 点该楼回复按钮:把整条 post 上抛给页面,由页面按 postNumber+作者昵称打开定向回复输入框。
   onReply: (post: TopicPost) => void = () => {};
+  // 点编辑(铅笔):进入本楼的编辑态。不接这条线的场景(如个人主页的帖子列表)不出现铅笔 ——
+  // 否则那里会冒出一个点了没反应的按钮。
+  onEdit?: (post: TopicPost) => void = undefined;
+  // 正在为本楼取原文:铅笔换成转圈,并挡住再次点击。取原文要走网络,不给反馈用户会连点。
+  @Prop editLoading: boolean = false;
   // 点火箭:把整条 post 上抛给页面,由页面打开 boost 输入浮层。
   onAddBoost: (post: TopicPost) => void = () => {};
   // 删除自己发的 boost:上抛页面发 DELETE 并从本楼摘掉该条;返回是否成功。
@@ -476,7 +481,16 @@ export struct TopicPostItem {
         // 火箭放置规则:本楼还没有别人的 boost 时,火箭入口跟随在这里、位于回复按钮左边;
         // 一旦本楼已有 boost,火箭改到 boost 列表末尾(见 BoostRow),此处不再显示。
         Row() {
-          this.LikeButton()
+          // 自己的楼一律不给点赞入口(自己赞自己没有意义,服务端 actions_summary 也不放行)。
+          // 那个位置改放编辑,但仅限「还在编辑时限内」且「宿主接了 onEdit」;两者有一不满足就留空,
+          // 不塞一个点不动的按钮。
+          if (this.post.yours === true) {
+            if (this.canEditInline()) {
+              this.EditButton()
+            }
+          } else {
+            this.LikeButton()
+          }
           if (this.canAddBoost() && !this.hasBoosts()) {
             this.RocketButton(38, 0)
           }
@@ -682,6 +696,41 @@ export struct TopicPostItem {
         }
       }
     })
+  }
+
+  // 编辑按钮:38x38,占的是点赞按钮那个位置(自己的楼没有点赞入口)。图标 pencil。
+  @Builder
+  private EditButton() {
+    Button({ type: ButtonType.Normal, stateEffect: true }) {
+      // 与未点赞的空心心同一个 token:铅笔占的就是心心那个位子,同色才不会显得比邻座重一档。
+      // 浅色 #BDBDBD、深色 #5C626B —— 写死色值的话深色底上会偏亮。
+      if (this.editLoading) {
+        LoadingProgress()
+          .width(16)
+          .height(16)
+          .color($r('app.color.icon_muted'))
+      } else {
+        FaIconView({ icon: this.faIcon('pencil'), color: $r('app.color.icon_muted'), iconSize: 16 })
+      }
+    }
+    .width(38)
+    .height(38)
+    .padding(0)
+    .backgroundColor(Color.Transparent)
+    .borderRadius(10)
+    .onClick(() => {
+      if (this.editLoading) {
+        return;
+      }
+      const handler: ((post: TopicPost) => void) | undefined = this.onEdit;
+      if (handler !== undefined) {
+        handler(this.post);
+      }
+    })
+  }
+
+  private canEditInline(): boolean {
+    return this.post.canEdit === true && this.onEdit !== undefined;
   }
 
   // 回复按钮:38x38,点击打开定向回复输入框(占位「回复<本楼作者>」),图标 reply。
