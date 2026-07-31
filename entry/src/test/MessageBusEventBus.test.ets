@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
+  extractMessageBusCategoryId,
   extractMessageBusTopicId,
   MessageBusEvent,
   MessageBusEventBus,
@@ -42,6 +43,19 @@ export default function messageBusEventBusTest() {
       ))).assertUndefined();
       expect(extractMessageBusTopicId(parseMessageBusEvent(
         '{"type":"message","channel":"/latest","messageId":5,"data":{"topic_id":375,"message_type":"whatever"}}'
+      ))).assertUndefined();
+    });
+
+    it('extractsCategoryIdFromPayload', 0, () => {
+      expect(extractMessageBusCategoryId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":8,"data":{"topic_id":9,"message_type":"latest","payload":{"category_id":98}}}'
+      ))).assertEqual(98);
+      // payload 整个缺席(服务端未开标签/字段变动),或 category_id 非法 → undefined,由调用方从严处理。
+      expect(extractMessageBusCategoryId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":9,"data":{"topic_id":9,"message_type":"latest"}}'
+      ))).assertUndefined();
+      expect(extractMessageBusCategoryId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":10,"data":{"topic_id":9,"message_type":"latest","payload":{"category_id":0}}}'
       ))).assertUndefined();
     });
 

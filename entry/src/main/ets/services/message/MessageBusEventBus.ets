@@ -12,9 +12,22 @@ export interface MessageBusPresenceUser {
   avatar_template?: string;
 }
 
+// /latest、/new、/unread 三个频道消息里的 payload(topic_tracking_state.rb 的 publish_* 方法)。
+// 频道本身是全局的、不随当前列表的筛选条件变,要不要算进当前列表全靠这里的字段自行比对。
+// tags 只给 id 不给名字,且受服务端 SiteSetting.tagging_enabled 控制,可能整个缺席。
+export interface MessageBusTopicTag {
+  id?: number;
+}
+
+export interface MessageBusTopicPayload {
+  category_id?: number;
+  tags?: MessageBusTopicTag[];
+}
+
 export interface MessageBusData {
   topic_id?: number;
   message_type?: string;
+  payload?: MessageBusTopicPayload;
   // /presence/<channel> 频道 payload(presence_channel.rb:335-347)：谁进入/离开"正在回复"。
   entering_users?: MessageBusPresenceUser[];
   leaving_user_ids?: number[];
@@ -90,6 +103,18 @@ export function extractMessageBusTopicId(event: MessageBusEvent | undefined): nu
     return undefined;
   }
   return Math.floor(topicId);
+}
+
+// 取该消息所属版块 id。拿不到(payload 缺席或字段非法)回 undefined,由调用方决定宽松还是从严。
+export function extractMessageBusCategoryId(event: MessageBusEvent | undefined): number | undefined {
+  if (!event || event.type !== 'message' || !event.data || !event.data.payload) {
+    return undefined;
+  }
+  const categoryId: number | undefined = event.data.payload.category_id;
+  if (categoryId === undefined || !Number.isFinite(categoryId) || categoryId <= 0) {
+    return undefined;
+  }
+  return Math.floor(categoryId);
 }
 
 // 从 /topic/<id> 频道事件里取"新建帖子"的 post id：仅 type==='created' 且 data.id 为正整数时返回。

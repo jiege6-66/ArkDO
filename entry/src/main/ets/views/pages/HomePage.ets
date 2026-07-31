@@ -16,6 +16,7 @@ import { LoadStateView } from '../components/LoadStateView';
 import { TopicReadState, TopicReadStateEventBus } from '../../services/session/TopicReadStateEventBus';
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import {
+  extractMessageBusCategoryId,
   extractMessageBusTopicId,
   MessageBusEvent,
   MessageBusEventBus
@@ -23,6 +24,7 @@ import {
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicDataSource } from '../../services/topic/TopicDataSource';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
+import { FeedKey } from '../../services/site/FeedPrefs';
 import {
   cloneTopicListQuery,
   createDefaultTopicListQuery,
@@ -47,6 +49,7 @@ import {
   createHomeIncomingTopicsState,
   HomeIncomingTopicsState,
   homeIncomingTopicsCount,
+  incomingTopicMatchesCategory,
   removeIncomingTopicsSnapshot,
   snapshotHomeIncomingTopics
 } from '../../services/home/HomeIncomingTopicsController';
@@ -1476,13 +1479,16 @@ export struct HomePage {
     if (!this.realtimeTopicsEnabled) {
       return;
     }
-    // MessageBus 的 /latest 频道推的是全站最新,只有条件全默认时它才和当前列表说的是同一件事;
-    // 一旦限定了版块或标签,推来的新帖多半根本不属于当前列表,插进去就是错的。
-    if (event.channel !== '/latest' || !isDefaultTopicListQuery(this.listQuery)) {
+    if (event.channel !== '/latest' || !this.acceptsIncomingTopics()) {
       return;
     }
     const topicId: number | undefined = extractMessageBusTopicId(event);
     if (topicId === undefined) {
+      return;
+    }
+    // 频道是全局的,推来的可能是任何版块的帖子;限定了版块就得按 payload 自己比一次。
+    if (!incomingTopicMatchesCategory(
+      this.categories, this.listQuery.category, extractMessageBusCategoryId(event))) {
       return;
     }
     const previousCount: number = this.incomingTopicsPromptCount();
@@ -1494,6 +1500,17 @@ export struct HomePage {
     if (previousCount === 0 && this.incomingTopicsPromptCount() > 0) {
       this.expandIncomingTopicsPrompt();
     }
+  }
+
+  /**
+   * 当前条件下要不要接 /latest 的实时提示。两条限制都来自「我们只订了 /latest 这一个频道」:
+   *  · 排序必须是「最新」—— 未读/新主题各有自己的频道(/unread/{user_id}、/new),没订就没数据
+   *  · 不能限定标签 —— payload 只给 tag id,而我们手上的标签常常只有名字(列表接口不回 id),
+   *    比不了。宁可停掉提示,也别拿名字去猜。
+   * 版块维度能过:payload 带 category_id,见 incomingTopicMatchesCategory。
+   */
+  private acceptsIncomingTopics(): boolean {
+    return this.listQuery.filter === FeedKey.LATEST && this.listQuery.tag === undefined;
   }
 
   private expandIncomingTopicsPrompt(): void {

@@ -1,3 +1,6 @@
+import { TopicCategory } from '../../models/Topic';
+import { CategoryIndex } from '../site/CategoryIndex';
+
 export interface HomeIncomingTopicsState {
   topicIds: number[];
   messageIds: number[];
@@ -70,4 +73,32 @@ export function addIncomingTopicMessage(
 
 export function nextDebugIncomingTopicId(state: HomeIncomingTopicsState): number {
   return 100001 + state.topicIds.length;
+}
+
+/**
+ * 这条 /latest 消息算不算「当前列表的新话题」——版块维度的闸。
+ *
+ * MessageBus 的频道是全局的,不随筛选条件变(见 topic_tracking_state.rb:35-40 那几个常量),
+ * 所以限定了版块时必须自己拿 payload.category_id 比一次。规则对齐官方前端的 notifyIncoming:
+ *  · 没限定版块 → 照单全收
+ *  · 消息版块 == 当前版块 → 收
+ *  · 消息版块的父版块 == 当前版块 → 也收(看父版块时,子版块的新帖同样会出现在列表里)
+ *  · 认不出消息属于哪个版块 → 不收。限定了版块却来路不明,宁可漏报也别把外版块的帖子插进来。
+ */
+export function incomingTopicMatchesCategory(
+  categories: TopicCategory[],
+  scope: TopicCategory | undefined,
+  categoryId: number | undefined
+): boolean {
+  if (scope === undefined) {
+    return true;
+  }
+  if (categoryId === undefined) {
+    return false;
+  }
+  if (categoryId === scope.id) {
+    return true;
+  }
+  const parent: TopicCategory | undefined = CategoryIndex.findParent(categories, categoryId);
+  return parent !== undefined && parent.id === scope.id;
 }
