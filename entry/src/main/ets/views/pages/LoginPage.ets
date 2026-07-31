@@ -1,5 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
+import { common } from '@kit.AbilityKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { CookiePresenceSnapshot } from '../../services/web/WebSessionManager';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
@@ -38,7 +39,7 @@ export struct LoginPage {
     if (data.type !== window.AvoidAreaType.TYPE_KEYBOARD) {
       return;
     }
-    if (px2vp(data.area.bottomRect.height) > 0) {
+    if (this.getUIContext().px2vp(data.area.bottomRect.height) > 0) {
       this.injectKeyboardDismissScript();
     }
   };
@@ -51,7 +52,7 @@ export struct LoginPage {
   private hasSignaledLoginSuccess: boolean = false;
 
   aboutToAppear(): void {
-    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+    window.getLastWindow(this.getUIContext().getHostContext() as common.Context).then((win: window.Window) => {
       this.winClass = win;
       win.on('avoidAreaChange', this.onAvoidAreaChange);
     }).catch(() => {

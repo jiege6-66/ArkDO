@@ -1,4 +1,5 @@
 import webview from '@ohos.web.webview';
+import { common } from '@kit.AbilityKit';
 import { curves, KeyboardAvoidMode } from '@kit.ArkUI';
 import {
   HdsNavigation,
@@ -182,7 +183,7 @@ export struct ComposerPage {
   // 绑定 this 便于 off 注销。键盘避让区变化即键盘高度(本项目已验证有效)。
   private onAvoidAreaChange: (data: window.AvoidAreaOptions) => void = (data: window.AvoidAreaOptions) => {
     if (data.type === window.AvoidAreaType.TYPE_KEYBOARD) {
-      const height: number = px2vp(data.area.bottomRect.height);
+      const height: number = this.getUIContext().px2vp(data.area.bottomRect.height);
       // 用系统输入法面板同款弹簧曲线驱动上移,与键盘逐帧同步(不挂 .animation 于图标父容器)。
       this.getUIContext().animateTo({ curve: curves.interpolatingSpring(0, 1, 342, 38) }, () => {
         this.keyboardHeight = height;
@@ -232,7 +233,7 @@ export struct ComposerPage {
     }
     // 关掉系统整页避让,自己按键盘高度上移底部工具栏(内容区随之收缩),背后不整页跳动。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
-    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+    window.getLastWindow(this.getUIContext().getHostContext() as common.Context).then((win: window.Window) => {
       this.winClass = win;
       win.on('avoidAreaChange', this.onAvoidAreaChange);
     }).catch(() => {

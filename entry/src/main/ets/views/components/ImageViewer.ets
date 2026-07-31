@@ -1,5 +1,5 @@
 import { ImagePreview, PreviewDirection } from '@rv/image-preview';
-import { componentUtils } from '@kit.ArkUI';
+import { componentUtils, UIContext } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { ON_DARK_FG } from '../../common/theme/Palette';
@@ -489,10 +489,11 @@ export struct ImageViewer {
       return;
     }
     try {
+      const ui: UIContext = this.getUIContext();
       const info: componentUtils.ComponentInfo =
-        this.getUIContext().getComponentUtils().getRectangleById(VIEWER_ROOT_ID);
-      this.viewW = px2vp(info.size.width);
-      this.viewH = px2vp(info.size.height);
+        ui.getComponentUtils().getRectangleById(VIEWER_ROOT_ID);
+      this.viewW = ui.px2vp(info.size.width);
+      this.viewH = ui.px2vp(info.size.height);
     } catch (err) {
       this.viewW = 0;
       this.viewH = 0;
@@ -513,13 +514,14 @@ export struct ImageViewer {
       return undefined;
     }
     try {
+      const ui: UIContext = this.getUIContext();
       const info: componentUtils.ComponentInfo =
-        this.getUIContext().getComponentUtils().getRectangleById(heroId);
+        ui.getComponentUtils().getRectangleById(heroId);
       const rect: HeroRect = {
-        x: px2vp(info.windowOffset.x),
-        y: px2vp(info.windowOffset.y),
-        w: px2vp(info.size.width),
-        h: px2vp(info.size.height)
+        x: ui.px2vp(info.windowOffset.x),
+        y: ui.px2vp(info.windowOffset.y),
+        w: ui.px2vp(info.size.width),
+        h: ui.px2vp(info.size.height)
       };
       if (rect.w <= 0 || rect.h <= 0) {
         return undefined;

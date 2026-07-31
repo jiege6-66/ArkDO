@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { common } from '@kit.AbilityKit';
 import {
   HdsNavigation,
   HdsNavigationTitleMode
@@ -1359,11 +1360,16 @@ export struct HomePage {
     this.drawerExpandedIds = next;
   }
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   // 抽屉配置统一重读:站点入口开关 + 要展示的站点。
   // 子页改完 pop 回来不会重建本页,靠每次开抽屉重读 preferences 拿最新值(无需 AppStorage tick)。
   private refreshDrawerPrefs(): void {
-    this.sitesEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
-    this.drawerSites = SitePrefs.drawerSites(getContext(this));
+    this.sitesEntryEnabled = SitePrefs.isEntryEnabled(this.hostContext());
+    this.drawerSites = SitePrefs.drawerSites(this.hostContext());
   }
 
   private closeDrawer(): void {
@@ -1977,7 +1983,7 @@ export struct HomePage {
   private announceAlreadyShown(versionCode: number): boolean {
     try {
       const store: preferences.Preferences =
-        preferences.getPreferencesSync(getContext(this), { name: ANNOUNCE_PREFS_NAME });
+        preferences.getPreferencesSync(this.hostContext(), { name: ANNOUNCE_PREFS_NAME });
       return (store.getSync(ANNOUNCE_SHOWN_CODE_KEY, 0) as number) === versionCode;
     } catch (error) {
       return false;
@@ -1987,7 +1993,7 @@ export struct HomePage {
   private markAnnounceShown(versionCode: number): void {
     try {
       const store: preferences.Preferences =
-        preferences.getPreferencesSync(getContext(this), { name: ANNOUNCE_PREFS_NAME });
+        preferences.getPreferencesSync(this.hostContext(), { name: ANNOUNCE_PREFS_NAME });
       store.putSync(ANNOUNCE_SHOWN_CODE_KEY, versionCode);
       store.flush();
     } catch (error) {

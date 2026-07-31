@@ -1,4 +1,5 @@
 import { Log } from '../../services/logging/Log';
+import { common } from '@kit.AbilityKit';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { SiteDef, SitePrefs } from '../../services/site/SitePrefs';
 import { SiteIconStore } from '../../services/site/SiteIconStore';
@@ -208,10 +209,15 @@ export struct SitesPage {
     this.reload();
   }
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   // 首页每次开抽屉都重读 preferences,故写完即生效,无需通知首页。
   private setDrawerEntryEnabled(enabled: boolean): void {
     this.drawerEntryEnabled = enabled;
-    SitePrefs.setEntryEnabled(getContext(this), enabled);
+    SitePrefs.setEntryEnabled(this.hostContext(), enabled);
   }
 
   // 拖动中不重读:此刻 sites 顺序正被手势改写,冲掉会让拖动的行跳回原位。
@@ -219,8 +225,8 @@ export struct SitesPage {
     if (this.draggingIndex >= 0) {
       return;
     }
-    this.sites = SitePrefs.getSites(getContext(this));
-    this.drawerEntryEnabled = SitePrefs.isEntryEnabled(getContext(this));
+    this.sites = SitePrefs.getSites(this.hostContext());
+    this.drawerEntryEnabled = SitePrefs.isEntryEnabled(this.hostContext());
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -728,7 +734,7 @@ export struct SitesPage {
       if (site.id === id) {
         const urlChanged: boolean = site.url !== url;
         if (urlChanged) {
-          SiteIconStore.remove(getContext(this), id);
+          SiteIconStore.remove(this.hostContext(), id);
         }
         next.push({
           id: id,
@@ -746,7 +752,7 @@ export struct SitesPage {
 
   private handleDelete(id: string): void {
     // 先清图标文件再落列表,免得留下没人认领的孤儿文件。
-    SiteIconStore.remove(getContext(this), id);
+    SiteIconStore.remove(this.hostContext(), id);
     const next: SiteDef[] = [];
     for (let index: number = 0; index < this.sites.length; index++) {
       if (this.sites[index].id !== id) {
@@ -771,7 +777,7 @@ export struct SitesPage {
 
   private persist(sites: SiteDef[]): void {
     this.sites = sites;
-    SitePrefs.setSites(getContext(this), sites);
+    SitePrefs.setSites(this.hostContext(), sites);
   }
 
   // ==================== 拖动排序 ====================
@@ -799,7 +805,7 @@ export struct SitesPage {
   private beginDrag(index: number): void {
     this.hoverIndex = index;
     this.dragOffsetY = 0;
-    animateTo({ duration: 150, curve: Curve.FastOutSlowIn }, () => {
+    this.getUIContext().animateTo({ duration: 150, curve: Curve.FastOutSlowIn }, () => {
       this.draggingIndex = index;
     });
   }
@@ -828,7 +834,7 @@ export struct SitesPage {
       hover = len - 1;
     }
     if (hover !== this.hoverIndex) {
-      animateTo({ duration: 180, curve: Curve.Friction }, () => {
+      this.getUIContext().animateTo({ duration: 180, curve: Curve.Friction }, () => {
         this.hoverIndex = hover;
       });
     }
@@ -841,7 +847,7 @@ export struct SitesPage {
     }
     const from: number = this.draggingIndex;
     const to: number = this.hoverIndex;
-    animateTo({
+    this.getUIContext().animateTo({
       duration: 180,
       curve: Curve.FastOutSlowIn,
       onFinish: () => this.commitReorder(from, to)

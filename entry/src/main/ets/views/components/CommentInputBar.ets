@@ -1,5 +1,6 @@
-import { curves, FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
+import { curves, FrameCallback, KeyboardAvoidMode, UIContext } from '@kit.ArkUI';
 import window from '@ohos.window';
+import { common } from '@kit.AbilityKit';
 import resourceManager from '@ohos.resourceManager';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { EmojiPicker } from './EmojiPicker';
@@ -125,7 +126,7 @@ export struct CommentInputBar {
   private onAvoidAreaChange: (data: window.AvoidAreaOptions) => void = (data: window.AvoidAreaOptions) => {
     if (data.type === window.AvoidAreaType.TYPE_KEYBOARD) {
       // 键盘避让矩形高度 = 键盘顶到屏幕底的遮挡高度；收起时为 0。
-      const height: number = px2vp(data.area.bottomRect.height);
+      const height: number = this.getUIContext().px2vp(data.area.bottomRect.height);
       if (height > 0) {
         this.lastKeyboardHeight = height;
       }
@@ -145,7 +146,8 @@ export struct CommentInputBar {
   aboutToAppear(): void {
     this.appearTimeMs = Date.now();
     // 富文本编辑器必须在解析初始草稿前拿到短码索引，否则首次打开表情面板前无法还原已有表情。
-    const manager: resourceManager.ResourceManager = getContext(this).resourceManager;
+    const manager: resourceManager.ResourceManager =
+      (this.getUIContext().getHostContext() as common.Context).resourceManager;
     ensureEmojiUrlsLoaded(manager);
     // 带回上次未发出的内容(页面暂存的)。
     this.text = this.initialText;
@@ -158,10 +160,10 @@ export struct CommentInputBar {
     // 关闭系统默认整页键盘避让，改为自己按键盘高度上移输入条（背后页面不动）。
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
 
-    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+    window.getLastWindow(this.getUIContext().getHostContext() as common.Context).then((win: window.Window) => {
       this.winClass = win;
       const sysArea: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-      this.bottomInset = px2vp(sysArea.bottomRect.height);
+      this.bottomInset = this.getUIContext().px2vp(sysArea.bottomRect.height);
       // 内联挂载时 getLastWindow 即主窗口，键盘避让事件能稳定收到。
       win.on('avoidAreaChange', this.onAvoidAreaChange);
     }).catch(() => {
@@ -597,8 +599,9 @@ export struct CommentInputBar {
       const layout: LayoutManager = this.richController.getLayoutManager();
       const lineCount: number = layout.getLineCount();
       const lineHeights: number[] = [];
+      const ui: UIContext = this.getUIContext();
       for (let index: number = 0; index < lineCount; index++) {
-        lineHeights.push(px2vp(layout.getLineMetrics(index).height));
+        lineHeights.push(ui.px2vp(layout.getLineMetrics(index).height));
       }
       this.richEditorHeight = commentInputHeightForLineHeights(lineHeights);
     } catch (err) {

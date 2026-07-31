@@ -1,4 +1,5 @@
 import resourceManager from '@ohos.resourceManager';
+import { common } from '@kit.AbilityKit';
 import {
   EmojiGroup,
   EmojiItem,
@@ -50,7 +51,8 @@ export struct EmojiPicker {
   private dataSource: EmojiPickerDataSource = new EmojiPickerDataSource();
 
   aboutToAppear(): void {
-    const manager: resourceManager.ResourceManager = getContext(this).resourceManager;
+    const manager: resourceManager.ResourceManager =
+      (this.getUIContext().getHostContext() as common.Context).resourceManager;
     ensureEmojiUrlsLoaded(manager);
     this.groups = getEmojiGroups();
     if (this.selectedGroupIndex >= this.groups.length) {

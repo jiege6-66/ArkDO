@@ -240,12 +240,12 @@ export struct DiagnosticsSettingsPage {
       this.showToast('日志导出失败,请稍后重试');
       return;
     }
-    DownloadService.openWithSystem(getContext(this) as common.UIAbilityContext, exportPath);
+    DownloadService.openWithSystem(this.getUIContext().getHostContext() as common.UIAbilityContext, exportPath);
   }
 
   private setVerboseLog(isOn: boolean): void {
     this.verboseLog = isOn;
-    FileLogger.setVerbose(getContext(this), isOn);
+    FileLogger.setVerbose(this.getUIContext().getHostContext() as common.Context, isOn);
   }
 
   private confirmClearLog(): void {

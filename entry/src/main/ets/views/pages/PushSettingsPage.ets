@@ -328,9 +328,14 @@ export struct PushSettingsPage {
 
   // ==================== 逻辑 ====================
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   // 中继地址摘要:显示当前实际生效的地址,并标明它来自随包配置还是用户自填。
   private refreshRelaySummary(): void {
-    const context: common.Context = getContext(this);
+    const context: common.Context = this.hostContext();
     const custom: string = readCustomBaseUrl(context);
     const effective: PushRelayConfig = resolvePushRelayConfig(context);
     if (effective.baseUrl.length === 0) {
@@ -342,7 +347,7 @@ export struct PushSettingsPage {
 
   // 同意告知:记住选择,然后继续把推送开起来(此时 needsRelayConsent 已为 false,不会再弹)。
   private acceptRelayConsent(): void {
-    saveRelayConsent(getContext(this), true);
+    saveRelayConsent(this.hostContext(), true);
     this.setPushEnabled(true);
   }
 
@@ -359,7 +364,7 @@ export struct PushSettingsPage {
   }
 
   private applyRelayBaseUrl(baseUrl: string): void {
-    const context: common.Context = getContext(this);
+    const context: common.Context = this.hostContext();
     if (!saveCustomBaseUrl(context, baseUrl)) {
       this.showToast('中继地址无效，需以 https:// 开头');
       return;
@@ -403,7 +408,7 @@ export struct PushSettingsPage {
 
     // 首次用本项目运营的中继开推送前,先把数据流向讲清楚并征得同意。
     // 自建中继的用户不弹(数据只经过他自己的机器);同意过一次就不再打扰。
-    if (isOn && needsRelayConsent(getContext(this))) {
+    if (isOn && needsRelayConsent(this.hostContext())) {
       this.relayConsentDialog.open();
       return;
     }
@@ -689,7 +694,7 @@ struct RelayBaseUrlDialog {
   // 自己读当前值,不由父页注入:CustomDialogController 在字段初始化时就固定了 builder 参数,
   // 外部注入的值会停在构造那一刻,改完再打开会显示旧值。
   aboutToAppear(): void {
-    this.url = readCustomBaseUrl(getContext(this));
+    this.url = readCustomBaseUrl(this.getUIContext().getHostContext() as common.Context);
   }
 
   build() {

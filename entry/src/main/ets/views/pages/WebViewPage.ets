@@ -315,7 +315,7 @@ export struct WebViewPage {
         entities: ['entity.system.browsable'],
         uri: this.currentUrl()
       };
-      (getContext(this) as common.UIAbilityContext).startAbility(want).catch((err: BusinessError) => {
+      (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility(want).catch((err: BusinessError) => {
         Log.i(`${LOG_TAG} open in browser failed code=${err.code} msg=${err.message}`);
         this.showToast('没有可用的浏览器');
       });

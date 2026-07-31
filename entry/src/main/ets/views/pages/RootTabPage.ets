@@ -191,6 +191,11 @@ export struct RootTabPage {
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   aboutToAppear(): void {
     this.ensureIconSymbolsLoaded();
     // 冷启动即在宽屏(平板横屏)时,给空的右详情栏垫上占位(@Watch 只在切换时触发,首值需手动同步)。
@@ -209,11 +214,11 @@ export struct RootTabPage {
         },
         () => {
           // 过盾窗口开始:临时借用 AUTO,让 challenges.cloudflare.com 回退系统 DNS 解出来(不落盘)。
-          DohManager.applyTransientMode(getContext(this), DohResolveMode.AUTO);
+          DohManager.applyTransientMode(this.hostContext(), DohResolveMode.AUTO);
         },
         () => {
           // 过盾结束:还原用户持久化的 DoH 设置(通常 SECURE_ONLY),不让 AUTO 泄漏到正常浏览。
-          DohManager.applyActive(getContext(this));
+          DohManager.applyActive(this.hostContext());
         }
       );
     }
@@ -1313,7 +1318,7 @@ export struct RootTabPage {
     if (!siteId || siteId.length === 0) {
       return;
     }
-    SiteIconStore.save(getContext(this), siteId, favicon);
+    SiteIconStore.save(this.hostContext(), siteId, favicon);
   }
 
   private popNavigation(): void {
@@ -1356,7 +1361,7 @@ export struct RootTabPage {
     // 先暂停插图同步,之后隐藏状态栏的归零事件不落到背景 padding 上。
     ImmersiveWindow.suppressInsetSync(true);
     // 窗口引用先拿着(异步),等入场动效放完再真正动系统栏。
-    window.getLastWindow(getContext(this)).then((win: window.Window) => {
+    window.getLastWindow(this.hostContext()).then((win: window.Window) => {
       this.viewerWindow = win;
     }).catch(() => {});
     // 直接挂载,不套动画:hero 飞入由 ImageViewer 自己跑(它首帧就渲染成源图大小)。

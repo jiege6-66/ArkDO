@@ -8,6 +8,7 @@ import {
 import { ColorMetrics, LengthMetrics } from '@ohos.arkui.node';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
+import { common } from '@kit.AbilityKit';
 import { TopicDetailRouteParam } from '../../navigation/AppRoutes';
 import { PendingPost, Poll, PollVoteResult, PostBoost, ReactionUser, SharedIssueResult, TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { TopicCategory, TopicTag } from '../../models/Topic';
@@ -313,7 +314,7 @@ export struct TopicDetailPage {
 
     // 过盾快捷入口:每次进入新详情先清掉上一个帖子的运行态,只响应本次 timings 的撞盾结果。
     // 这样旧帖曾被盾拦下不会让新帖首帧错误显示图标,且本次失败仍会通过订阅重新亮起。
-    ChallengeShortcutPrefs.load(getContext(this));
+    ChallengeShortcutPrefs.load(this.getUIContext().getHostContext() as common.Context);
     ChallengeShortcutEventBus.reset();
     this.challengeBlocked = false;
     if (!this.unsubscribeChallengeShortcut) {

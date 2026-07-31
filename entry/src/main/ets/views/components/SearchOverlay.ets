@@ -833,7 +833,7 @@ export struct SearchOverlay {
   }
 
   private hostContext(): common.Context {
-    return getContext(this) as common.Context;
+    return this.getUIContext().getHostContext() as common.Context;
   }
 
   private searchIcon(): FaIconDefinition {

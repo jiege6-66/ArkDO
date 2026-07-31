@@ -493,8 +493,13 @@ export struct DohSettingsPage {
 
   // ==================== 数据与交互 ====================
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   private reload(): void {
-    const context: common.Context = getContext(this);
+    const context: common.Context = this.hostContext();
     const servers: DohServer[] = DohManager.getServers(context);
     // 保留已有测速结果:按 id 归并旧行状态,新增项为 IDLE。
     const previous: Map<string, DohRow> = new Map<string, DohRow>();
@@ -518,7 +523,7 @@ export struct DohSettingsPage {
 
   private toggleEnabled(isOn: boolean): void {
     this.dohEnabled = isOn;
-    DohManager.setEnabled(getContext(this), isOn);
+    DohManager.setEnabled(this.hostContext(), isOn);
     this.onDohApplied();
     this.showToast(isOn ? 'DoH 已启用' : 'DoH 已关闭');
   }
@@ -530,7 +535,7 @@ export struct DohSettingsPage {
     this.activeId = id;
     // 换新数组引用,促使 ForEach 按新 key(含选中位)重新比对,选中圆点才会更新。
     this.rows = this.rows.slice();
-    DohManager.setActive(getContext(this), id);
+    DohManager.setActive(this.hostContext(), id);
     // DoH 未启用时仅记录选择(下次开启才生效),不重载宿主也不提示重载,避免误导。
     if (this.dohEnabled) {
       this.onDohApplied();
@@ -542,7 +547,7 @@ export struct DohSettingsPage {
 
   private setMode(mode: DohResolveMode): void {
     this.mode = mode;
-    DohManager.setMode(getContext(this), mode);
+    DohManager.setMode(this.hostContext(), mode);
     // 同上:关闭态改模式不生效,不触发重载。
     if (this.dohEnabled) {
       this.onDohApplied();
@@ -550,7 +555,7 @@ export struct DohSettingsPage {
   }
 
   private handleAdd(name: string, url: string): void {
-    const created: DohServer | undefined = DohManager.addServer(getContext(this), name, url);
+    const created: DohServer | undefined = DohManager.addServer(this.hostContext(), name, url);
     if (created === undefined) {
       this.showToast('添加失败');
       return;
@@ -575,7 +580,7 @@ export struct DohSettingsPage {
         fontColor: $r('app.color.ld_danger'),
         action: () => {
           const wasActive: boolean = this.activeId === server.id;
-          DohManager.removeServer(getContext(this), server.id);
+          DohManager.removeServer(this.hostContext(), server.id);
           this.reload();
           if (wasActive && this.dohEnabled) {
             // 删的是当前项,已回退内置默认并重新下发,需重载宿主(仅启用态)。

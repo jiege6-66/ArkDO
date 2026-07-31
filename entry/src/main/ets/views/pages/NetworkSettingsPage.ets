@@ -220,7 +220,7 @@ export struct NetworkSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.challengeShortcutEnabled = isOn;
-          ChallengeShortcutPrefs.setEnabled(getContext(this), isOn);
+          ChallengeShortcutPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')
@@ -244,15 +244,20 @@ export struct NetworkSettingsPage {
 
   // ==================== 逻辑 ====================
 
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
+  }
+
   // 直接从 DohManager 读当前开关与生效服务器,组装摘要文案;不依赖 @StorageProp 的跨页刷新。
   private refreshDohSummary(): void {
-    const context: common.Context = getContext(this);
+    const context: common.Context = this.hostContext();
     const enabled: boolean = DohManager.isEnabled(context);
     const active: DohServer = DohManager.getActiveServer(context);
     this.dohSummary = enabled ? active.name : '已关闭';
   }
 
   private async loadChallengeShortcutEnabled(): Promise<void> {
-    this.challengeShortcutEnabled = await ChallengeShortcutPrefs.load(getContext(this));
+    this.challengeShortcutEnabled = await ChallengeShortcutPrefs.load(this.hostContext());
   }
 }

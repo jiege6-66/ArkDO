@@ -1,3 +1,4 @@
+import { common } from '@kit.AbilityKit';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { RealtimeTopicsPrefs } from '../../services/realtime/RealtimeTopicsPrefs';
 import { RealtimePostsPrefs } from '../../services/realtime/RealtimePostsPrefs';
@@ -59,6 +60,11 @@ export struct ExperimentalSettingsPage {
     .height('100%')
     .backgroundColor($r('app.color.page_bg_gray'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  // 宿主 Context 收口。getContext(this) 已废弃,统一从 UIContext 取,免得每个调用点各写一遍 cast。
+  private hostContext(): common.Context {
+    return this.getUIContext().getHostContext() as common.Context;
   }
 
   // ==================== Builder ====================
@@ -160,7 +166,7 @@ export struct ExperimentalSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.badgeFilterEnabled = isOn;
-          BadgeFilterPrefs.setEnabled(getContext(this), isOn);
+          BadgeFilterPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')
@@ -192,7 +198,7 @@ export struct ExperimentalSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.realtimeTopicsEnabled = isOn;
-          RealtimeTopicsPrefs.setEnabled(getContext(this), isOn);
+          RealtimeTopicsPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')
@@ -224,7 +230,7 @@ export struct ExperimentalSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.realtimePostsEnabled = isOn;
-          RealtimePostsPrefs.setEnabled(getContext(this), isOn);
+          RealtimePostsPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')
@@ -256,7 +262,7 @@ export struct ExperimentalSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.animatedAvatarEnabled = isOn;
-          AnimatedAvatarPrefs.setEnabled(getContext(this), isOn);
+          AnimatedAvatarPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')
@@ -288,7 +294,7 @@ export struct ExperimentalSettingsPage {
         .selectedColor($r('app.color.ld_accent'))
         .onChange((isOn: boolean) => {
           this.smartReachEnabled = isOn;
-          HoldingHandManager.setEnabled(getContext(this), isOn);
+          HoldingHandManager.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')

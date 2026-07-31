@@ -123,12 +123,15 @@ export class FileLogger {
       return;
     }
     try {
-      FileLogger.unlinkIfExists(FileLogger.currentFilePath());
+      // 单份删不掉只跳过它,不影响其余;当前日志确实删掉了才把计数归零。
+      const currentRemoved: boolean = FileLogger.unlinkIfExists(FileLogger.currentFilePath());
       for (let index: number = 1; index <= MAX_ARCHIVE_FILES; index++) {
         FileLogger.unlinkIfExists(FileLogger.archivePath(index));
       }
       FileLogger.unlinkIfExists(`${FileLogger.logDir}/${EXPORT_FILE_NAME}`);
-      FileLogger.currentFileBytes = 0;
+      if (currentRemoved) {
+        FileLogger.currentFileBytes = 0;
+      }
     } catch (error) {
       hilog.error(HILOG_DOMAIN, 'FileLogger', 'clear failed: %{public}s', JSON.stringify(error));
     }
@@ -213,12 +216,16 @@ export class FileLogger {
     }
   }
 
+  // 单份日志读失败不该毁掉整次导出:记一条错误后跳过它,继续拼下一份。
+  // 缺一段日志远好过一份都拿不到——导出本就是出问题时才用的,这时候更不能因为某个归档损坏就交白卷。
+  // src 提到 try 外声明、进 try 内打开,是为了让 finally 在「开都没开成」时不去关一个 undefined。
   private static appendFileTo(destFd: number, sourcePath: string): void {
-    if (!fs.accessSync(sourcePath)) {
-      return;
-    }
-    const src: fs.File = fs.openSync(sourcePath, fs.OpenMode.READ_ONLY);
+    let src: fs.File | undefined = undefined;
     try {
+      if (!fs.accessSync(sourcePath)) {
+        return;
+      }
+      src = fs.openSync(sourcePath, fs.OpenMode.READ_ONLY);
       const size: number = fs.statSync(src.fd).size;
       const arrayBuffer: ArrayBuffer = new ArrayBuffer(COPY_BUFFER_BYTES);
       let offset: number = 0;
@@ -231,14 +238,37 @@ export class FileLogger {
         fs.writeSync(destFd, arrayBuffer.slice(0, readLen));
         offset += readLen;
       }
+    } catch (error) {
+      hilog.error(HILOG_DOMAIN, 'FileLogger', 'append %{public}s failed: %{public}s',
+        sourcePath, JSON.stringify(error));
     } finally {
-      fs.closeSync(src);
+      // close 单独兜一层:finally 里抛出的异常不会被上面那个 catch 接住,会顶替掉正常返回往外冒。
+      // 关不掉也没什么可做的——内容已经拼完,句柄最终由进程退出回收,记一条日志即可。
+      if (src !== undefined) {
+        try {
+          fs.closeSync(src);
+        } catch (error) {
+          hilog.error(HILOG_DOMAIN, 'FileLogger', 'close %{public}s failed: %{public}s',
+            sourcePath, JSON.stringify(error));
+        }
+      }
     }
   }
 
-  private static unlinkIfExists(path: string): void {
-    if (fs.accessSync(path)) {
-      fs.unlinkSync(path);
+  // 某一份删不掉不该中断整轮清理(clear 要删 1 份当前 + N 份归档 + 1 份导出),
+  // 也不该中断 rotate 的轮转:轮转里紧接着的 renameSync 本就会覆盖同名目标,删不掉不影响结果。
+  // 返回「该路径现在确定不存在了」:删成了、或本就没有,都算 true;只有删失败才 false。
+  // clear 靠它决定要不要把 currentFileBytes 归零——文件还在却把计数清了,轮转阈值就会算错。
+  private static unlinkIfExists(path: string): boolean {
+    try {
+      if (fs.accessSync(path)) {
+        fs.unlinkSync(path);
+      }
+      return true;
+    } catch (error) {
+      hilog.error(HILOG_DOMAIN, 'FileLogger', 'unlink %{public}s failed: %{public}s',
+        path, JSON.stringify(error));
+      return false;
     }
   }
 

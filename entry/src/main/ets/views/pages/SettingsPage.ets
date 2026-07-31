@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
-import { bundleManager } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import { FAB_GLASS_ENABLED_STORAGE_KEY, FabGlassPrefs } from '../../common/ui/FabGlassPrefs';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -329,7 +329,7 @@ export struct SettingsPage {
   // ==================== 外观 ====================
 
   private setThemeMode(mode: ThemeMode): void {
-    ThemeManager.setMode(getContext(this), mode);
+    ThemeManager.setMode(this.getUIContext().getHostContext() as common.Context, mode);
   }
 
   private getThemeModeLabel(): string {
@@ -344,7 +344,7 @@ export struct SettingsPage {
 
   // 玻璃效果开关:写盘 + 同步 AppStorage 镜像,首页/详情页 FAB 经 @StorageProp 即时响应,无需重启。
   private setFabGlassEnabled(enabled: boolean): void {
-    FabGlassPrefs.setEnabled(getContext(this), enabled);
+    FabGlassPrefs.setEnabled(this.getUIContext().getHostContext() as common.Context, enabled);
   }
 
   // ==================== 辅助 ====================
