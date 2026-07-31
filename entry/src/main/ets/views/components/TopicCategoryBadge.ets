@@ -16,6 +16,12 @@ export struct TopicCategoryBadge {
     textColor: 'FFFFFF'
   };
   parentCategory?: TopicCategory;
+  // 点徽章按该分类筛选。默认关:多数场景(详情页头、书签/搜索等列表)徽章只是展示,
+  // 点击应当照旧穿透到整行去打开帖子。
+  @Prop tappable: boolean = false;
+  onTap: () => void = () => {};
+
+  @State private pressed: boolean = false;
 
   build() {
     Row() {
@@ -55,6 +61,25 @@ export struct TopicCategoryBadge {
     .height(18)
     .alignItems(VerticalAlign.Center)
     .margin({ right: 8 })
+    .opacity(this.tappable && this.pressed ? 0.6 : 1)
+    // 不可点时整个徽章不参与命中测试,触摸原样落到外层整行(即「点这里也是打开帖子」)。
+    // 少了这一句,下面那个 onClick 会把点击吃掉,所有只是展示分类的页面都会变成点徽章毫无反应。
+    .hitTestBehavior(this.tappable ? HitTestMode.Default : HitTestMode.None)
+    .onTouch((event: TouchEvent) => {
+      if (!this.tappable) {
+        return;
+      }
+      if (event.type === TouchType.Down) {
+        this.pressed = true;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressed = false;
+      }
+    })
+    .onClick(() => {
+      if (this.tappable) {
+        this.onTap();
+      }
+    })
   }
 
   private getIcon(): FaIconDefinition | undefined {

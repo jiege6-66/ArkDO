@@ -10,8 +10,12 @@ export struct TopicMetadataBadges {
   category?: TopicCategory;
   parentCategory?: TopicCategory;
   tags: TopicTag[] = [];
-  // 接了这条线的场景(首页列表)标签徽章可点=按该标签筛选;不接则徽章保持纯展示。
+  // 徽章可点=点它按该分类/标签筛选。由「点分类/标签快速筛选」开关驱动,
+  // @Prop 而非普通成员:开关是运行时能翻转的,普通变量只在创建时赋值一次。
+  // 不接回调的场景(详情页头、书签/搜索等列表)即便传 true 也仍是纯展示。
+  @Prop badgesTappable: boolean = false;
   onTagClick?: (tag: TopicTag) => void = undefined;
+  onCategoryClick?: (category: TopicCategory) => void = undefined;
   // 标签行实际宽度与视口宽度:两者比出「装不装得下」。
   // Row 上有 minWidth:'100%',故内容宽恒 ≥ 视口宽,只需判大于。
   @State private contentWidth: number = 0;
@@ -23,14 +27,21 @@ export struct TopicMetadataBadges {
         if (this.category) {
           TopicCategoryBadge({
             category: this.category as TopicCategory,
-            parentCategory: this.parentCategory
+            parentCategory: this.parentCategory,
+            tappable: this.badgesTappable && this.onCategoryClick !== undefined,
+            onTap: () => {
+              const handler: ((category: TopicCategory) => void) | undefined = this.onCategoryClick;
+              if (handler !== undefined && this.category !== undefined) {
+                handler(this.category as TopicCategory);
+              }
+            }
           })
         }
 
         ForEach(this.tags, (tag: TopicTag) => {
           TopicTagBadge({
             tag: tag,
-            tappable: this.onTagClick !== undefined,
+            tappable: this.badgesTappable && this.onTagClick !== undefined,
             onTap: () => {
               const handler: ((tag: TopicTag) => void) | undefined = this.onTagClick;
               if (handler !== undefined) {

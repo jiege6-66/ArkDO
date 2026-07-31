@@ -2,6 +2,7 @@ import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { RealtimeTopicsPrefs } from '../../services/realtime/RealtimeTopicsPrefs';
 import { RealtimePostsPrefs } from '../../services/realtime/RealtimePostsPrefs';
 import { AnimatedAvatarPrefs } from '../../services/avatar/AnimatedAvatarPrefs';
+import { BadgeFilterPrefs } from '../../services/home/BadgeFilterPrefs';
 import { HoldingHandManager } from '../../common/utils/HoldingHandManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
@@ -28,6 +29,8 @@ export struct ExperimentalSettingsPage {
   @State private animatedAvatarEnabled: boolean = true;
   // 智感握姿开关(默认关),进页时从 HoldingHandManager 读取。
   @State private smartReachEnabled: boolean = false;
+  // 点分类/标签快速筛选开关(默认关),进页时从 preferences 载入。
+  @State private badgeFilterEnabled: boolean = false;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -35,6 +38,7 @@ export struct ExperimentalSettingsPage {
     this.realtimePostsEnabled = RealtimePostsPrefs.isEnabled();
     this.animatedAvatarEnabled = AnimatedAvatarPrefs.isEnabled();
     this.smartReachEnabled = HoldingHandManager.isEnabled();
+    this.badgeFilterEnabled = BadgeFilterPrefs.isEnabled();
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -74,6 +78,8 @@ export struct ExperimentalSettingsPage {
           this.AnimatedAvatarCell()
           this.HairlineInset()
           this.SmartReachCell()
+          this.HairlineInset()
+          this.BadgeFilterCell()
         }
         .cardStyle()
 
@@ -124,6 +130,41 @@ export struct ExperimentalSettingsPage {
     .height('100%')
     .backgroundColor(Color.Transparent)
     .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  // 点分类/标签快速筛选:开着时首页帖子行上的徽章可点,点了等同于在抽屉里选中该条件再点「查看结果」。
+  // 默认关 —— 徽章开着就会从整行手里抢走点击,而整行点击是「打开帖子」这个最高频动作,
+  // 误触的代价不对称。
+  @Builder
+  private BadgeFilterCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.funnel'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('点分类/标签快速筛选')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('点首页帖子上的分类或标签,立即按它筛选列表')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.badgeFilterEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.badgeFilterEnabled = isOn;
+          BadgeFilterPrefs.setEnabled(getContext(this), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
   }
 
   @Builder

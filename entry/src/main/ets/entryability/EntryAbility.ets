@@ -23,6 +23,7 @@ import { loadPushRelayConfigFromRawContent, PUSH_RELAY_CONFIG_RAWFILE } from '..
 import { pushService } from '@kit.PushKit';
 import { HoldingHandManager } from '../common/utils/HoldingHandManager';
 import { RealtimeTopicsPrefs } from '../services/realtime/RealtimeTopicsPrefs';
+import { BadgeFilterPrefs } from '../services/home/BadgeFilterPrefs';
 import { RealtimePostsPrefs } from '../services/realtime/RealtimePostsPrefs';
 import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
 import { AnimatedAvatarPrefs } from '../services/avatar/AnimatedAvatarPrefs';
@@ -49,6 +50,7 @@ export default class EntryAbility extends UIAbility {
     // 「实时更新话题」开关：读盘并种入 AppStorage 镜像，须早于宿主 webview 与首页挂载，
     // 保证首个 onPageEnd 的注入决策拿到正确值(默认关⇒不注入长轮询)。
     RealtimeTopicsPrefs.load(this.context);
+    BadgeFilterPrefs.load(this.context);
     // 「帖子实时更新」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)。
     RealtimePostsPrefs.load(this.context);
     // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，

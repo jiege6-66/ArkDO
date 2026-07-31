@@ -13,7 +13,8 @@ export struct TopicTagBadge {
   // 此时徽章仍是纯展示,点击照旧落到外层整行的点击上。
   onTap: () => void = () => {};
   // 可点时给按下反馈,不可点时保持静止——手感本身就是「这里能不能点」的提示。
-  tappable: boolean = false;
+  // @Prop:开关是运行时能翻转的,普通成员变量只在创建时赋值一次,同步不进来。
+  @Prop tappable: boolean = false;
 
   @State private pressed: boolean = false;
 

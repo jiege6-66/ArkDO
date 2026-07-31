@@ -27,8 +27,11 @@ export struct TopicListItem {
   category?: TopicCategory;
   parentCategory?: TopicCategory;
   onTopicClick: (topic: Topic) => void = () => {};
-  // 点标签徽章按该标签筛选。不传则徽章保持纯展示(其它列表页照旧,点哪儿都是打开帖子)。
+  // 分类/标签徽章可点=点它按该条件筛选,由首页的「点分类/标签快速筛选」开关驱动。
+  // 其它列表页不接这两条线,徽章照旧是纯展示,点哪儿都是打开帖子。
+  @Prop badgesTappable: boolean = false;
   onTagClick?: (tag: TopicTag) => void = undefined;
+  onCategoryClick?: (category: TopicCategory) => void = undefined;
   // 有未读回复时整行点击走这里:直跳详情页第一条未读楼(无未读则走 onTopicClick 从头打开)。
   onUnreadBadgeClick: (topic: Topic) => void = () => {};
   // 搜索场景高亮词(空格拆分的普通关键词):在 searchBlurb 摘要里把命中词染色。普通 feed 传空。
@@ -169,7 +172,9 @@ export struct TopicListItem {
                   category: this.category,
                   parentCategory: this.parentCategory,
                   tags: this.topic.tags,
-                  onTagClick: this.onTagClick
+                  badgesTappable: this.badgesTappable,
+                  onTagClick: this.onTagClick,
+                  onCategoryClick: this.onCategoryClick
                 })
                 .layoutWeight(1)
               } else {

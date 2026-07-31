@@ -56,6 +56,7 @@ import {
 import { ComposerPage } from './ComposerPage';
 import { LoginGate } from '../../services/session/LoginGate';
 import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/RealtimeTopicsPrefs';
+import { BADGE_FILTER_ENABLED_STORAGE_KEY } from '../../services/home/BadgeFilterPrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
 import { SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
@@ -251,6 +252,8 @@ export struct HomePage {
   // 「实时更新话题」开关。关闭(默认)时忽略事件、隐藏提示；运行中翻转由 @Watch 中和残留态。
   @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeTopicsEnabledChanged')
   private realtimeTopicsEnabled: boolean = false;
+  // 「点分类/标签快速筛选」开关(实验性功能页,默认关)。开着时帖子行上的徽章可点。
+  @StorageProp(BADGE_FILTER_ENABLED_STORAGE_KEY) private badgeFilterEnabled: boolean = false;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
   private smartReachLeftHanded: boolean = false;
@@ -680,8 +683,12 @@ export struct HomePage {
               onIncomingInsertMeasured: (topicId: number, height: number) => {
                 this.handleIncomingInsertMeasured(topicId, height);
               },
+              badgesTappable: this.badgeFilterEnabled,
               onTagClick: (tag: TopicTag) => {
                 this.handleTagClick(tag);
+              },
+              onCategoryClick: (category: TopicCategory) => {
+                this.handleCategoryClick(category);
               },
               onTopicClick: (selectedTopic: Topic) => {
                 // 点击即清除蓝点(乐观已读);未读徽标待返回时由详情页结算的真实未读数同步。
@@ -1404,8 +1411,16 @@ export struct HomePage {
     this.resetAndReload();
   }
 
-  // 点帖子卡片上的标签徽章:在当前条件之上加这个标签(标签单选,已选中同一个则忽略)。
-  // 保留版块与排序而不是清空重来——在某版块里看到感兴趣的标签,想要的多半是「这个版块下的这个标签」。
+  /**
+   * 点帖子行上的分类/标签徽章 = 把它加进当前条件,等同于在抽屉里选中它再点「查看结果」。
+   * 只改被点的那一维,其余原样保留(在「未读」里点分类,得到的是「该分类的未读」)。
+   *
+   * 已经在按它筛选时静默忽略:列表不会有任何变化,重发一次请求纯属浪费,
+   * 弹个「已经在看了」的提示反而像是出了错。
+   *
+   * 保留其它维度是可证明安全的:被点的这条帖子本身就同时满足新旧两个条件,
+   * 所以叠加后的列表至少包含它,不会筛出个空列表。
+   */
   private handleTagClick(tag: TopicTag): void {
     if (this.listQuery.tag !== undefined && this.listQuery.tag.name === tag.name) {
       return;
@@ -1413,8 +1428,21 @@ export struct HomePage {
     const next: TopicListQuery = cloneTopicListQuery(this.listQuery);
     next.tag = tag;
     this.listQuery = next;
-    // 顶栏此刻多半已随滚动收起,摘要行看不见,所以给一句 toast 交代刚发生了什么。
+    // 顶栏此刻多半已随滚动收起,副行看不见,所以给一句 toast 交代刚发生了什么。
     this.showToast(`已按标签「${tag.name}」筛选`);
+    this.resetAndReload();
+  }
+
+  // 徽章上写的是帖子自己的(叶子)分类,所以在看父版块时点子版块的徽章就是收窄到子版块 ——
+  // 徽章写着「福利羊毛」点了却没反应,只会显得坏掉。
+  private handleCategoryClick(category: TopicCategory): void {
+    if (this.listQuery.category !== undefined && this.listQuery.category.id === category.id) {
+      return;
+    }
+    const next: TopicListQuery = cloneTopicListQuery(this.listQuery);
+    next.category = category;
+    this.listQuery = next;
+    this.showToast(`已按分类「${category.name}」筛选`);
     this.resetAndReload();
   }
 
