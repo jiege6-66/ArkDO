@@ -88,6 +88,10 @@ struct AcceptedAnswerCard {
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private ln: boolean = false;
   // 折叠态:自身 @State 驱动显隐才稳(纯父级传入的 deep 变更重渲染不可靠)。
   @State private collapsed: boolean = false;
+  // 「阅读更多」跳转进行中:答案楼不在已加载窗口时,页面要重开窗口(整趟网络请求),
+  // 期间文字前挂转圈并吞掉重复点击,否则用户点下去几秒无任何反馈,只当没响应。
+  // 目标楼已加载时页面同步滚动、Promise 当帧即 resolve,转圈不会真的闪出来。
+  @State private jumping: boolean = false;
   answer: AcceptedAnswer = new AcceptedAnswer();
   // 是否在卡顶画分隔线:多解时非首卡为 true,与上一张答案隔开。
   showDivider: boolean = false;
@@ -175,13 +179,32 @@ struct AcceptedAnswerCard {
           }
           .width('100%')
 
-          Text('阅读更多')
-            .fontSize(15)
-            .fontColor($r('app.color.ld_accent'))
-            .margin({ top: 12 })
-            .onClick(() => {
-              this.onJumpToPost(this.answer.postNumber);
-            })
+          // 跳楼入口:目标楼未加载时页面要重开窗口(网络请求),故文字前留转圈槽位。
+          // 与楼层里「跳到帖子」同款反馈(见 TopicPostItem.JumpToPost)。
+          Row({ space: 6 }) {
+            if (this.jumping) {
+              LoadingProgress()
+                .width(14)
+                .height(14)
+                .color($r('app.color.ld_accent'))
+            }
+            Text('阅读更多')
+              .fontSize(15)
+              .fontColor($r('app.color.ld_accent'))
+          }
+          .alignItems(VerticalAlign.Center)
+          .margin({ top: 12 })
+          .onClick(() => {
+            if (this.jumping) {
+              return; // 重开窗口在飞行中,重复点会被页面的 isRewindowing 静默吞掉,这里先行拦下
+            }
+            this.jumping = true;
+            this.onJumpToPost(this.answer.postNumber).then(() => {
+              this.jumping = false;
+            }).catch(() => {
+              this.jumping = false;
+            });
+          })
         }
         .width('100%')
         .padding({ left: 14, right: 14, bottom: 14 })
