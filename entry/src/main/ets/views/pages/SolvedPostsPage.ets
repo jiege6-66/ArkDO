@@ -82,6 +82,9 @@ export struct SolvedPostsPage {
     })
     .bindToScrollable([this.scroller])
     .titleMode(HdsNavigationTitleMode.MINI)
+    // 只当标题栏容器用,不参与分栏(分栏由 RootTabPage 根 Navigation 负责)。默认 Auto 会在
+    // 宽度 ≥600vp 时自切 Split——平板横屏右详情栏就会多出一条可拖的分割线,菜单也被挤到线左边。
+    .mode(NavigationMode.Stack)
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')
     .height('100%')
