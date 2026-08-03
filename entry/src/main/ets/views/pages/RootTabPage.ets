@@ -95,6 +95,14 @@ const SWIPE_SETTLE_CURVE: Curve = Curve.Friction;
 // 首页视差(对齐系统默认转场的观感):个人中心滑到底时,首页左移自身宽度的这个比例。
 // 与个人中心的位移共用同一个 progress,天然同步。0 即关掉视差。
 const SWIPE_PARALLAX_RATIO: number = 0.25;
+// ===== 宽屏双栏(Split)的左栏宽度 =====
+// 初始宽度;用户拖动分割线后在 [MIN, MAX] 内变化(当前不落盘,冷启回到这个值)。
+const SPLIT_NAV_BAR_WIDTH: number = 420;
+// 下限须 ≥ 分区抽屉宽度(288),否则抽屉滑出会溢进右详情栏,留点余量取 320。
+const SPLIT_NAV_BAR_MIN_WIDTH: number = 320;
+const SPLIT_NAV_BAR_MAX_WIDTH: number = 560;
+// 右详情栏最小宽度(ArkUI 默认也是 360):设备不够宽时它会反过来夹住左栏的实际上限。
+const SPLIT_MIN_CONTENT_WIDTH: number = 360;
 
 enum RootSheet {
   NONE = 0,
@@ -427,10 +435,17 @@ export struct RootTabPage {
     // 显式驱动分栏:仅宽屏(平板横屏)双栏 Split,手机 / 平板竖屏单栏 Stack。
     // 不用默认 Auto——其 520vp 阈值会把平板竖屏也切成双栏。手机恒 Stack,与现状一致。
     .mode(this.appIsWide ? NavigationMode.Split : NavigationMode.Stack)
-    // 左列表栏宽(仅 Split 生效,Stack/手机下忽略):
+    // 左列表栏初始宽(仅 Split 生效,Stack/手机下忽略):
     //  ① 调宽列表,读着不挤;② 须 ≥ 分区抽屉宽度(288),否则抽屉滑出会溢进右详情栏。
-    //  想微调列表宽度只改这一个数即可。
-    .navBarWidth(420)
+    //  想微调列表默认宽度只改这一个数即可。
+    .navBarWidth(SPLIT_NAV_BAR_WIDTH)
+    // 拖拽条默认关闭(enableDragBar 默认 false),不开这行分割线就只是条装饰线,按不动。
+    .enableDragBar(true)
+    // 拖拽范围。不显式给的话默认是 [240, min(40%组件宽, 432)]:下限 240 比抽屉(288)还窄,
+    // 拖到底抽屉会溢进右栏;上限被 432 截断,从 420 起步只剩 12vp 余量,拖了跟没拖一样。
+    .navBarWidthRange([SPLIT_NAV_BAR_MIN_WIDTH, SPLIT_NAV_BAR_MAX_WIDTH])
+    // 右详情栏的最小宽:窄屏宽屏设备上由它反过来夹住导航栏,避免正文被挤到没法读。
+    .minContentWidth(SPLIT_MIN_CONTENT_WIDTH)
     .navDestination(this.NavDestinationBuilder)
     // 只接管「手势闸打开 + PUSH + 目标是 PROFILE」这一种;其余一律返回 undefined 走系统默认,
     // 不影响其他页面的转场。搜索 Flow 不进主 Navigation,不在这里处理。
