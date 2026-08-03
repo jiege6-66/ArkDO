@@ -5,6 +5,11 @@
     "color": "#F7941D"
   },
   {
+    "tagName": "抽奖",
+    "iconId": "gift",
+    "color": "#F7941D"
+  },
+  {
     "tagName": "纯水",
     "iconId": "faucet",
     "color": "#f7941d"

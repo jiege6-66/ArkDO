@@ -4,6 +4,7 @@ import { RealtimeTopicsPrefs } from '../../services/realtime/RealtimeTopicsPrefs
 import { RealtimePostsPrefs } from '../../services/realtime/RealtimePostsPrefs';
 import { AnimatedAvatarPrefs } from '../../services/avatar/AnimatedAvatarPrefs';
 import { BadgeFilterPrefs } from '../../services/home/BadgeFilterPrefs';
+import { LotteryTipPrefs } from '../../services/topic/LotteryTipPrefs';
 import { HoldingHandManager } from '../../common/utils/HoldingHandManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
@@ -32,6 +33,8 @@ export struct ExperimentalSettingsPage {
   @State private smartReachEnabled: boolean = false;
   // 点分类/标签快速筛选开关(默认关),进页时从 preferences 载入。
   @State private badgeFilterEnabled: boolean = false;
+  // 抽奖帖提醒开关(默认开),进页时从 preferences 载入。
+  @State private lotteryTipEnabled: boolean = true;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -40,6 +43,7 @@ export struct ExperimentalSettingsPage {
     this.animatedAvatarEnabled = AnimatedAvatarPrefs.isEnabled();
     this.smartReachEnabled = HoldingHandManager.isEnabled();
     this.badgeFilterEnabled = BadgeFilterPrefs.isEnabled();
+    this.lotteryTipEnabled = LotteryTipPrefs.isEnabled();
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -86,6 +90,8 @@ export struct ExperimentalSettingsPage {
           this.SmartReachCell()
           this.HairlineInset()
           this.BadgeFilterCell()
+          this.HairlineInset()
+          this.LotteryTipCell()
         }
         .cardStyle()
 
@@ -295,6 +301,40 @@ export struct ExperimentalSettingsPage {
         .onChange((isOn: boolean) => {
           this.smartReachEnabled = isOn;
           HoldingHandManager.setEnabled(this.hostContext(), isOn);
+        })
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
+  }
+
+  // 抽奖帖提醒:默认开。这是唯一的持久化逃生口 —— 提醒卡本身不记「看过了」,每进一个抽奖帖
+  // 都展开显示,因为它挡的是「永久禁言」这种不可逆后果,记忆一次就沉默的代价不对称。
+  @Builder
+  private LotteryTipCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Column() {
+        Text('抽奖帖提醒')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text('进入带「抽奖」标签的帖子时,提示论坛的抽奖回复规则')
+          .fontSize(12)
+          .fontColor($r('app.color.text_faint'))
+          .width('100%')
+          .margin({ top: 2 })
+      }
+      .layoutWeight(1)
+      .margin({ left: 14 })
+      .alignItems(HorizontalAlign.Start)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.lotteryTipEnabled })
+        .selectedColor($r('app.color.ld_accent'))
+        .onChange((isOn: boolean) => {
+          this.lotteryTipEnabled = isOn;
+          LotteryTipPrefs.setEnabled(this.hostContext(), isOn);
         })
     }
     .width('100%')

@@ -73,6 +73,9 @@ export struct CommentInputBar {
   onClose: () => void = () => {};
   // 输入框占位文字：回复话题为「回复当前话题」，回复某楼为「回复<昵称>」，由页面传入。
   placeholder: string = '写下你的评论…';
+  // 输入条上方的一行提醒（空串=不显示）。目前只有抽奖帖用：提醒不拦截，抬眼就能看见，
+  // 比弹窗确认打扰小得多，也不会像内容自检那样误伤正常回复。
+  hintText: string = '';
   // 正文最短字数：少于该值不允许提交。评论默认 16（对齐 Discourse 最短回复），
   // boost 这类短文本由页面传入更小的值（如 1）。
   minChars: number = 16;
@@ -649,184 +652,212 @@ export struct CommentInputBar {
         })
 
       // 底部输入条：按键盘高度手动上移到键盘上方。
-      Row({ space: 8 }) {
-        // 展开按钮：仅普通回复显示（boost 短文本无需全屏编辑）。点击上抛当前文本，
-        // 由页面关闭内联浮层、压入全屏 Markdown 编辑器无缝接续。
-        if (this.showExpand) {
-          Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
-              .fontSize(20)
-              .fontColor([$r('app.color.icon_secondary')])
+      // 外层 Column 承载「提醒行 + 输入行」两层，背景/模糊/上移/一镜到底全部挂在它身上——
+      // 提醒行必须待在同一个可见节点内，否则它既拿不到输入条的模糊背板，也不会跟着键盘一起移动。
+      Column() {
+        // 抽奖帖这类场景的一行提醒，压在输入行正上方（页面不传则整行不渲染）。
+        if (this.hintText.length > 0) {
+          Row() {
+            FaIconView({
+              icon: this.hintIcon(),
+              color: $r('app.color.warning'),
+              iconSize: 12
+            })
+              .margin({ right: 6 })
+
+            Text(this.hintText)
+              .fontSize(12)
+              .lineHeight(17)
+              .fontColor($r('app.color.warning'))
+              .layoutWeight(1)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
-          .width(40)
-          .height(40)
-          .backgroundColor($r('app.color.immersive_input_field_bg'))
-          .onClick(() => {
-            this.onExpand(this.text, this.showEmojiKeyboard ? this.emojiPanelHeight : this.keyboardHeight);
-          })
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .padding({ left: 2, right: 2, bottom: 8 })
         }
 
-        // 圆角输入容器：内放多行输入框。内边距全部放到 TextArea 上，让光标离圆角足够远、
-        // 竖向留足空间；clip(false) 杜绝子内容被圆角裁切。
-        Column() {
-          if (this.richEmojiMode) {
-            Stack({ alignContent: Alignment.TopStart }) {
-              RichEditor({ controller: this.richController })
-                .id(INPUT_FOCUS_ID)
-                .width('100%')
-                .height('100%')
-                .backgroundColor(Color.Transparent)
-                .barState(BarState.Off)
-                .padding({
-                  left: 12,
-                  right: 12,
-                  top: COMMENT_INPUT_PADDING_TOP,
-                  bottom: COMMENT_INPUT_PADDING_BOTTOM
-                })
-                .defaultFocus(true)
-                .enterKeyType(EnterKeyType.NEW_LINE)
-                .aboutToIMEInput((value: RichEditorInsertValue): boolean => {
-                  return this.canInsertBoostText(value);
-                })
-                .onDidChange((rangeBefore: TextRange, rangeAfter: TextRange) => {
-                  this.syncBoostText();
-                })
-                .onSelectionChange((range: RichEditorRange) => {
-                  // 失焦收起系统键盘时可能上报空选区；表情面板期间保留最后一个有效光标位置。
-                  if (!this.showEmojiKeyboard) {
-                    this.selectionStart = range.start !== undefined ? range.start : 0;
-                    this.selectionEnd = range.end !== undefined ? range.end : this.selectionStart;
-                  }
-                })
-                .onReady(() => {
-                  this.richController.setTypingStyle({
-                    fontSize: 16,
-                    fontColor: $r('app.color.text_primary'),
-                    lineHeight: COMMENT_INPUT_LINE_HEIGHT,
-                    halfLeading: COMMENT_INPUT_HALF_LEADING
-                  });
-                  this.hydrateBoostEditor();
-                })
-                .onClick(() => {
-                  if (this.showEmojiKeyboard) {
-                    this.showSystemKeyboard();
-                  }
-                })
+        Row({ space: 8 }) {
+          // 展开按钮：仅普通回复显示（boost 短文本无需全屏编辑）。点击上抛当前文本，
+          // 由页面关闭内联浮层、压入全屏 Markdown 编辑器无缝接续。
+          if (this.showExpand) {
+            Button({ type: ButtonType.Circle, stateEffect: true }) {
+              SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+                .fontSize(20)
+                .fontColor([$r('app.color.icon_secondary')])
+            }
+            .width(40)
+            .height(40)
+            .backgroundColor($r('app.color.immersive_input_field_bg'))
+            .onClick(() => {
+              this.onExpand(this.text, this.showEmojiKeyboard ? this.emojiPanelHeight : this.keyboardHeight);
+            })
+          }
 
-              if (shouldShowCommentInputPlaceholder(this.text)) {
-                Text(this.placeholder)
+          // 圆角输入容器：内放多行输入框。内边距全部放到 TextArea 上，让光标离圆角足够远、
+          // 竖向留足空间；clip(false) 杜绝子内容被圆角裁切。
+          Column() {
+            if (this.richEmojiMode) {
+              Stack({ alignContent: Alignment.TopStart }) {
+                RichEditor({ controller: this.richController })
+                  .id(INPUT_FOCUS_ID)
                   .width('100%')
-                  .height(INPUT_MIN_HEIGHT)
+                  .height('100%')
+                  .backgroundColor(Color.Transparent)
+                  .barState(BarState.Off)
                   .padding({
                     left: 12,
                     right: 12,
                     top: COMMENT_INPUT_PADDING_TOP,
                     bottom: COMMENT_INPUT_PADDING_BOTTOM
                   })
-                  .fontSize(16)
-                  .lineHeight(COMMENT_INPUT_LINE_HEIGHT)
-                  .halfLeading(COMMENT_INPUT_HALF_LEADING)
-                  .fontColor($r('app.color.text_tertiary'))
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .hitTestBehavior(HitTestMode.None)
+                  .defaultFocus(true)
+                  .enterKeyType(EnterKeyType.NEW_LINE)
+                  .aboutToIMEInput((value: RichEditorInsertValue): boolean => {
+                    return this.canInsertBoostText(value);
+                  })
+                  .onDidChange((rangeBefore: TextRange, rangeAfter: TextRange) => {
+                    this.syncBoostText();
+                  })
+                  .onSelectionChange((range: RichEditorRange) => {
+                    // 失焦收起系统键盘时可能上报空选区；表情面板期间保留最后一个有效光标位置。
+                    if (!this.showEmojiKeyboard) {
+                      this.selectionStart = range.start !== undefined ? range.start : 0;
+                      this.selectionEnd = range.end !== undefined ? range.end : this.selectionStart;
+                    }
+                  })
+                  .onReady(() => {
+                    this.richController.setTypingStyle({
+                      fontSize: 16,
+                      fontColor: $r('app.color.text_primary'),
+                      lineHeight: COMMENT_INPUT_LINE_HEIGHT,
+                      halfLeading: COMMENT_INPUT_HALF_LEADING
+                    });
+                    this.hydrateBoostEditor();
+                  })
+                  .onClick(() => {
+                    if (this.showEmojiKeyboard) {
+                      this.showSystemKeyboard();
+                    }
+                  })
+
+                if (shouldShowCommentInputPlaceholder(this.text)) {
+                  Text(this.placeholder)
+                    .width('100%')
+                    .height(INPUT_MIN_HEIGHT)
+                    .padding({
+                      left: 12,
+                      right: 12,
+                      top: COMMENT_INPUT_PADDING_TOP,
+                      bottom: COMMENT_INPUT_PADDING_BOTTOM
+                    })
+                    .fontSize(16)
+                    .lineHeight(COMMENT_INPUT_LINE_HEIGHT)
+                    .halfLeading(COMMENT_INPUT_HALF_LEADING)
+                    .fontColor($r('app.color.text_tertiary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .hitTestBehavior(HitTestMode.None)
+                }
               }
+                .width('100%')
+                .height(this.richEditorHeight)
+            } else {
+              TextArea({ text: $$this.text, placeholder: this.placeholder, controller: this.textController })
+                .id(INPUT_FOCUS_ID)
+                .width('100%')
+                .backgroundColor(Color.Transparent)
+                // 纯文本回退模式保留原来的上下 10vp 内边距，避免光标被圆角裁切。
+                .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+                .fontSize(16)
+                // 行高 24 + 上下 padding 各 10 = 44，单行自然高度仍保持原有触控与光标空间。
+                .lineHeight(24)
+                .fontColor($r('app.color.text_primary'))
+                .placeholderColor($r('app.color.text_tertiary'))
+                .defaultFocus(true)
+                .enterKeyType(EnterKeyType.NEW_LINE)
+                .constraintSize({ minHeight: INPUT_MIN_HEIGHT, maxHeight: INPUT_MAX_HEIGHT })
+                .onTextSelectionChange((start: number, end: number) => {
+                  this.selectionStart = start;
+                  this.selectionEnd = end;
+                })
+                .onWillDelete((value: DeleteValue): boolean => {
+                  return this.onWillDeleteText(value);
+                })
+                .onChange((value: string) => {
+                  if (this.firstTypeTimeMs === 0 && value.length > 0) {
+                    this.firstTypeTimeMs = Date.now();
+                  }
+                  // 实时上抛给页面暂存:关掉输入条时组件卸载,不上抛内容就没了。
+                  this.onTextChange(value);
+                  this.warnIfOverMaxChars();
+                })
+                .onClick(() => {
+                  if (this.showEmojiKeyboard) {
+                    this.showSystemKeyboard();
+                  }
+                })
             }
-              .width('100%')
-              .height(this.richEditorHeight)
-          } else {
-            TextArea({ text: $$this.text, placeholder: this.placeholder, controller: this.textController })
-              .id(INPUT_FOCUS_ID)
-              .width('100%')
-              .backgroundColor(Color.Transparent)
-              // 纯文本回退模式保留原来的上下 10vp 内边距，避免光标被圆角裁切。
-              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-              .fontSize(16)
-              // 行高 24 + 上下 padding 各 10 = 44，单行自然高度仍保持原有触控与光标空间。
-              .lineHeight(24)
-              .fontColor($r('app.color.text_primary'))
-              .placeholderColor($r('app.color.text_tertiary'))
-              .defaultFocus(true)
-              .enterKeyType(EnterKeyType.NEW_LINE)
-              .constraintSize({ minHeight: INPUT_MIN_HEIGHT, maxHeight: INPUT_MAX_HEIGHT })
-              .onTextSelectionChange((start: number, end: number) => {
-                this.selectionStart = start;
-                this.selectionEnd = end;
-              })
-              .onWillDelete((value: DeleteValue): boolean => {
-                return this.onWillDeleteText(value);
-              })
-              .onChange((value: string) => {
-                if (this.firstTypeTimeMs === 0 && value.length > 0) {
-                  this.firstTypeTimeMs = Date.now();
-                }
-                // 实时上抛给页面暂存:关掉输入条时组件卸载,不上抛内容就没了。
-                this.onTextChange(value);
-                this.warnIfOverMaxChars();
-              })
-              .onClick(() => {
-                if (this.showEmojiKeyboard) {
-                  this.showSystemKeyboard();
-                }
-              })
           }
-        }
-        .layoutWeight(1)
-        .backgroundColor($r('app.color.immersive_input_field_bg'))
-        .borderRadius(8)
-        .clip(false)
+          .layoutWeight(1)
+          .backgroundColor($r('app.color.immersive_input_field_bg'))
+          .borderRadius(8)
+          .clip(false)
 
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          // 条件分支会在面板状态变化时重建图标节点，避免普通成员参数保留旧图片资源。
-          if (this.showEmojiKeyboard) {
-            FaIconView({
-              icon: this.emojiToggleIcon(true),
-              color: $r('app.color.icon_secondary'),
-              iconSize: 18
-            })
-          } else {
-            FaIconView({
-              icon: this.emojiToggleIcon(false),
-              color: $r('app.color.icon_secondary'),
-              iconSize: 18
-            })
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            // 条件分支会在面板状态变化时重建图标节点，避免普通成员参数保留旧图片资源。
+            if (this.showEmojiKeyboard) {
+              FaIconView({
+                icon: this.emojiToggleIcon(true),
+                color: $r('app.color.icon_secondary'),
+                iconSize: 18
+              })
+            } else {
+              FaIconView({
+                icon: this.emojiToggleIcon(false),
+                color: $r('app.color.icon_secondary'),
+                iconSize: 18
+              })
+            }
           }
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.immersive_input_field_bg'))
-        .focusable(false)
-        .accessibilityText(this.showEmojiKeyboard ? '切换到键盘' : '选择表情')
-        .onClick(() => {
-          this.toggleEmojiKeyboard();
-        })
+          .width(40)
+          .height(40)
+          .backgroundColor($r('app.color.immersive_input_field_bg'))
+          .focusable(false)
+          .accessibilityText(this.showEmojiKeyboard ? '切换到键盘' : '选择表情')
+          .onClick(() => {
+            this.toggleEmojiKeyboard();
+          })
 
-        // 回复按钮：圆形、蓝底。提交中显示白色 loading 转圈，否则显示白色 reply 图标。
-        // 未达最短字数或提交中时降透明度提示不可用，重复点击由 submit() 内部拦截。
-        Button({ type: ButtonType.Circle, stateEffect: true }) {
-          if (this.isSubmitting) {
-            LoadingProgress()
-              .width(22)
-              .height(22)
-              .color(ON_DARK_FG)
-          } else {
-            FaIconView({
-              icon: this.replyIcon(),
-              color: ON_DARK_FG,
-              iconSize: 18
-            })
+          // 回复按钮：圆形、蓝底。提交中显示白色 loading 转圈，否则显示白色 reply 图标。
+          // 未达最短字数或提交中时降透明度提示不可用，重复点击由 submit() 内部拦截。
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            if (this.isSubmitting) {
+              LoadingProgress()
+                .width(22)
+                .height(22)
+                .color(ON_DARK_FG)
+            } else {
+              FaIconView({
+                icon: this.replyIcon(),
+                color: ON_DARK_FG,
+                iconSize: 18
+              })
+            }
           }
+          .width(40)
+          .height(40)
+          .backgroundColor(REPLY_BLUE)
+          .opacity(this.canSubmit() ? 1 : 0.5)
+          .onClick(() => {
+            this.submit();
+          })
         }
-        .width(40)
-        .height(40)
-        .backgroundColor(REPLY_BLUE)
-        .opacity(this.canSubmit() ? 1 : 0.5)
-        .onClick(() => {
-          this.submit();
-        })
+        .width('100%')
+        .alignItems(VerticalAlign.Bottom)
       }
       .width('100%')
-      .alignItems(VerticalAlign.Bottom)
       // 键盘弹起：底部内边距只留 8（安全区被键盘遮住）；键盘收起：叠加底部安全区贴 Home 条之上。
       .padding({ left: 12, right: 12, top: 8, bottom: this.activeBottomOffset() > 0 ? 8 : 8 + this.bottomInset })
       // 输入条不是 HDS 组件，无法直接获得标题栏的 systemMaterialEffect。这里在同一个
@@ -886,5 +917,10 @@ export struct CommentInputBar {
     const id: string = commentKeyboardToggleIcon(showEmojiKeyboard);
     const def: FaIconDefinition | undefined = getFaIcon(id);
     return def ? def : { id: id, rawfilePath: `fa_icons/${id}.svg` };
+  }
+
+  private hintIcon(): FaIconDefinition {
+    const def: FaIconDefinition | undefined = getFaIcon('triangle-exclamation');
+    return def ? def : { id: 'triangle-exclamation', rawfilePath: 'fa_icons/triangle-exclamation.svg' };
   }
 }

@@ -155,6 +155,10 @@ export interface TopicDetail {
   // 当前用户是否已收藏该主题(topic.json 顶层 bookmarked)。为真时摘要卡与导航头标题行首
   // 内联灰色书签标记,排在已解决勾选框之前。
   bookmarked?: boolean;
+  // 主题已关闭回复 / 已归档(topic.json 顶层 closed / archived)。抽奖提醒卡据此隐藏 ——
+  // 已开奖的抽奖帖回不了帖,也就没有被举报的风险。
+  closed?: boolean;
+  archived?: boolean;
   // linux.do shared issue（"俺也一样 / 我也遇到"）:一楼下方那枚举手按钮。注意不是 discourse-topic-voting——
   // topic-voting 的 can_vote/user_voted/vote_count 在本站恒为 false/0,真源是下面这组 shared_issue 字段。
   // shared_issue_visible:是否渲染按钮。

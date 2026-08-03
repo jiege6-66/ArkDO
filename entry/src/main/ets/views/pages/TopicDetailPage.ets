@@ -31,9 +31,17 @@ import { PostDataSource } from '../../services/topic/PostDataSource';
 import { PostStreamPager } from '../../services/topic/PostStreamPager';
 import { ReactionUsersPager } from '../../services/topic/ReactionUsersPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
+import { LOTTERY_TIP_ENABLED_STORAGE_KEY } from '../../services/topic/LotteryTipPrefs';
+import {
+  LOTTERY_REPLY_HINT,
+  LOTTERY_REPLY_PLACEHOLDER,
+  LOTTERY_RULES_TOPIC_URL,
+  shouldShowLotteryNotice
+} from '../../services/topic/LotteryTopicRule';
 import { LoadStateView } from '../components/LoadStateView';
 import { TopicDetailHeader } from '../components/TopicDetailHeader';
 import { TopicSummaryCard } from '../components/TopicSummaryCard';
+import { LotteryNoticeCard } from '../components/LotteryNoticeCard';
 import { PendingPostCard } from '../components/PendingPostCard';
 import { TopicPostItem } from '../components/TopicPostItem';
 import { REPLYING_PRESENCE_BAR_HEIGHT, ReplyingPresenceBar } from '../components/ReplyingPresenceBar';
@@ -279,6 +287,8 @@ export struct TopicDetailPage {
   // 「帖子实时更新」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
   @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
   private realtimePostsEnabled: boolean = false;
+  // 「抽奖帖提醒」开关(默认开)。关⇒摘要下方的提醒卡与回复浮层的提醒行都不出现。
+  @StorageProp(LOTTERY_TIP_ENABLED_STORAGE_KEY) private lotteryTipEnabled: boolean = true;
   // 块 2(下行、只读)：真实"正在回复"用户,由 TopicPresenceService 维护后回调写入。
   @State private presenceUsers: User[] = [];
   // Presence 下行服务。bridge 走闭包惰性读取(字段初始化时父注入的 bridge 尚未覆盖默认空壳)。
@@ -416,6 +426,18 @@ export struct TopicDetailPage {
             solved: (this.detail?.acceptedAnswers?.length ?? 0) > 0,
             bookmarked: this.topicBookmarked
           })
+
+          // 抽奖帖提醒:挂在摘要与一楼之间,跟着列表滚走。刻意塞进这个已存在的 ListItem 而不新开
+          // 一项——详情页多处硬依赖「index 0 是摘要、楼层从 index 1 起」的下标算术(已读上报、
+          // 顶栏双层标题切换、向上预取阈值、跳楼定位),多一项就得让这些偏移量随卡片在不在而变。
+          if (this.showsLotteryNotice()) {
+            LotteryNoticeCard({
+              onOpenAnnouncement: () => {
+                // 走站内链接路由:LinkRouter 认得这个形状的 URL,直接开原生详情页而非 WebView。
+                this.onOpenLink(LOTTERY_RULES_TOPIC_URL);
+              }
+            })
+          }
         }
         .width('100%')
       }
@@ -880,6 +902,8 @@ export struct TopicDetailPage {
     if (this.showComposer) {
       CommentInputBar({
         placeholder: this.composerPlaceholder,
+        // 抽奖帖:输入条上方压一行规则提醒(空串则整行不渲染)。只提示不拦截。
+        hintText: this.lotteryReplyHint(),
         // boost 是「起飞」「感谢佬」这类短文本,放开最短字数下限;普通回复仍用默认 16。
         // 编辑时不设最短字数:原文本来就可能很短,拿新回复的 16 字下限去卡编辑会让人改不动。
         minChars: this.boostTargetPostId > 0 || this.editingPostId > 0 ? 1 : 16,
@@ -989,7 +1013,9 @@ export struct TopicDetailPage {
       return;
     }
     this.resetComposerModes();
-    this.composerPlaceholder = '回复当前话题';
+    // 抽奖帖的顶层回复就是「参与抽奖」的那一条,占位文字直接问到点子上;定向回复某楼不改
+    // (那是聊天不是参与,「回复<昵称>」更有用)。
+    this.composerPlaceholder = this.showsLotteryNotice() ? LOTTERY_REPLY_PLACEHOLDER : '回复当前话题';
     AppStorage.setOrCreate(COMPOSER_OVERLAY_VISIBLE_KEY, true);
     this.showComposer = true;
   }
@@ -2227,6 +2253,29 @@ export struct TopicDetailPage {
 
   private getTags(): TopicTag[] {
     return this.detail?.tags ? this.detail.tags : [];
+  }
+
+  // 本帖是否该出抽奖提醒:总开关 + 帖子本身的判定(见 LotteryTopicRule,含「高级推广」排除、
+  // 已关闭/已归档、楼主是自己这几条)。详情未到手时先不显示,免得标签还没解析出来先闪一下。
+  private showsLotteryNotice(): boolean {
+    if (!this.lotteryTipEnabled || this.detail === undefined) {
+      return false;
+    }
+    return shouldShowLotteryNotice({
+      tags: this.getTags(),
+      closed: this.detail.closed === true,
+      archived: this.detail.archived === true,
+      createdById: this.detail.createdById ?? 0,
+      currentUserId: this.currentUser.id
+    });
+  }
+
+  // 回复浮层顶上那行提醒:只给普通回复,boost(短文本,规则管不着)与编辑(改的是已发出的内容)不给。
+  private lotteryReplyHint(): string {
+    if (this.boostTargetPostId > 0 || this.editingPostId > 0) {
+      return '';
+    }
+    return this.showsLotteryNotice() ? LOTTERY_REPLY_HINT : '';
   }
 
   private getSlugLabel(): string {

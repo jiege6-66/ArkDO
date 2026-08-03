@@ -68,6 +68,9 @@ export interface DiscourseTopicDetail {
   // 主题作者(楼主)用户 id:优先 details.created_by.id,回退顶层 user_id。
   user_id?: number;
   bookmarked?: boolean;
+  // 已关闭回复 / 已归档。
+  closed?: boolean;
+  archived?: boolean;
   details?: DiscourseTopicDetailsField;
   // linux.do shared issue（"俺也一样"）:一楼下方举手按钮的真源(非 topic-voting)。
   shared_issue_visible?: boolean;

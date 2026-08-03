@@ -24,6 +24,7 @@ import { pushService } from '@kit.PushKit';
 import { HoldingHandManager } from '../common/utils/HoldingHandManager';
 import { RealtimeTopicsPrefs } from '../services/realtime/RealtimeTopicsPrefs';
 import { BadgeFilterPrefs } from '../services/home/BadgeFilterPrefs';
+import { LotteryTipPrefs } from '../services/topic/LotteryTipPrefs';
 import { RealtimePostsPrefs } from '../services/realtime/RealtimePostsPrefs';
 import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
 import { AnimatedAvatarPrefs } from '../services/avatar/AnimatedAvatarPrefs';
@@ -51,6 +52,9 @@ export default class EntryAbility extends UIAbility {
     // 保证首个 onPageEnd 的注入决策拿到正确值(默认关⇒不注入长轮询)。
     RealtimeTopicsPrefs.load(this.context);
     BadgeFilterPrefs.load(this.context);
+    // 「抽奖帖提醒」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)，
+    // 否则从推送/通知直开抽奖帖时提醒卡会晚一帧才冒出来。
+    LotteryTipPrefs.load(this.context);
     // 「帖子实时更新」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)。
     RealtimePostsPrefs.load(this.context);
     // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，

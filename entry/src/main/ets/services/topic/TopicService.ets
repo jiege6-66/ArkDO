@@ -1077,6 +1077,8 @@ export class TopicService {
       stream: this.mapStream(sourceTopic.post_stream?.stream),
       acceptedAnswers: this.mapAcceptedAnswers(sourceTopic.accepted_answers),
       bookmarked: sourceTopic.bookmarked === true,
+      closed: sourceTopic.closed === true,
+      archived: sourceTopic.archived === true,
       sharedIssueVisible: sourceTopic.shared_issue_visible === true,
       canCreateSharedIssue: sourceTopic.can_create_shared_issue === true,
       userCreatedSharedIssue: sourceTopic.user_created_shared_issue === true,

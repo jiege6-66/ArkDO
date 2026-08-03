@@ -255,6 +255,14 @@
     {
       "name": "fab_shadow",
       "value": "#33000000"
+    },
+    {
+      "name": "lottery_notice_bg",
+      "value": "#FFF8ED"
+    },
+    {
+      "name": "lottery_notice_border",
+      "value": "#F0DDBC"
     }
   ]
 }

@@ -39,6 +39,7 @@ import messageBusScriptTemplateTest from './MessageBusScriptTemplate.test';
 import messageBusEventBusTest from './MessageBusEventBus.test';
 import draftServiceTest from './DraftService.test';
 import topicListQueryTest from './TopicListQuery.test';
+import lotteryTopicRuleTest from './LotteryTopicRule.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -81,4 +82,5 @@ export default function testsuite() {
   messageBusEventBusTest();
   draftServiceTest();
   topicListQueryTest();
+  lotteryTopicRuleTest();
 }
