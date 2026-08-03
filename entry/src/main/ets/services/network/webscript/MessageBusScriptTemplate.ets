@@ -158,7 +158,12 @@ export function buildMessageBusScript(): string {
           clientId: uniqueId(),
           baseUrl: '',
           sharedSessionKey: '',
-          channels: { '/latest': -1 },
+          // 两个常驻频道,首页的实时提示按当前排序二选一(见 HomePage.incomingTopicsChannel):
+          //  · /latest 新建 + 被回复顶起来的,配「最新」(bumped_at 排序)
+          //  · /new    只有新建(publish_new),配「最新发布」(created_at 排序)
+          // /new 不做成按需订阅:它得跟着首页排序增删,而首页一卸载(进详情页)就会退订,回来又没人补订,
+          // 提示条从此不涨。常驻的代价只是 poll body 多一个键 —— /new 比 /latest 安静一个数量级。
+          channels: { '/latest': -1, '/new': -1 },
           seq: 0,
           running: true,
           retryDelayMs: 1000
@@ -182,7 +187,10 @@ export function buildMessageBusScript(): string {
           stage: 'config-ready',
           message: state.baseUrl + ' source=' + pollConfig.source +
             ' sharedSessionKey=' + String(Boolean(state.sharedSessionKey)) +
-            ' userId=' + String(pollConfig.currentUserId)
+            ' userId=' + String(pollConfig.currentUserId) +
+            // 本次循环真正要 poll 的频道全集(常驻 + 动态并入的)。查「某频道收不到消息」时先看这行:
+            // 它没在里面 = 客户端压根没订;在里面却没有对应的 cursor-ready = 服务端不认这个频道。
+            ' channels=' + Object.keys(state.channels).join(',')
         });
         const backoff = async () => {
           const waitMs = state.retryDelayMs;

@@ -83,13 +83,18 @@ export default function topicDataSourceTest() {
       source.registerDataChangeListener(listener);
       source.reset([topic(1, 'one'), topic(2, 'two')]);
       listener.reloads = 0;
+      listener.singleAdds = 0;
 
       const added: number = source.appendUnique([topic(2, 'two duplicate'), topic(3, 'three')]);
 
       expect(added).assertEqual(1);
       expect(source.totalCount()).assertEqual(3);
       expect(source.getAll()[2].id).assertEqual(3);
-      expect(listener.reloads).assertEqual(1);
+      // 分页追加只为新增的那一行发增量通知,不整列 reload ——
+      // reload 会让 LazyForEach 重建所有已建视口项,上拉加载时白白丢掉复用。
+      // (prependOrReplace 不同:它要重排既有行,只能整列 reload,见下一条用例。)
+      expect(listener.singleAdds).assertEqual(1);
+      expect(listener.reloads).assertEqual(0);
     });
 
     it('prependsIncomingTopicsAndReplacesExistingRows', 0, () => {

@@ -31,9 +31,9 @@ export struct ArkWebHost {
   private handledSessionVersion: number = SessionEventBus.getCurrentVersion();
   private unsubscribeSessionChanged?: () => void = undefined;
   private unsubscribeAppState?: () => void = undefined;
-  // MessageBus 长轮询的运行条件 = (已登录 || 「实时更新话题」开) && 前台。
+  // MessageBus 长轮询的运行条件 = (已登录 || 「首页新话题提醒」开) && 前台。
   //  - 登录用户默认需要它承载实时通知(/notification/<id>)；
-  //  - 匿名用户仅在开了「实时话题」时用它承载首页提示条(/latest)；
+  //  - 匿名用户仅在开了「首页新话题提醒」时用它承载首页提示条(/latest、/new)；
   //  - 后台一律停:省电,且与 NotificationService 的前台化轮询保持一致。
   // 任一条件翻转都经 @Watch / 前台订阅走 onMessageBusGateChanged 即时启停。
   @StorageProp(LOGGED_IN_STORAGE_KEY) @Watch('onMessageBusGateChanged')
@@ -134,7 +134,7 @@ export struct ArkWebHost {
         WebSessionManager.saveCookies('ArkWebHost');
         this.bridge.attachController(this.controller);
         this.bridge.markHostReady();
-        // 满足运行条件((已登录||实时话题开)&&前台)才注入长轮询；否则彻底不启动，零后台联网。
+        // 满足运行条件((已登录||首页新话题提醒开)&&前台)才注入长轮询；否则彻底不启动，零后台联网。
         if (this.shouldRunMessageBus()) {
           this.bridge.startMessageBus();
         }

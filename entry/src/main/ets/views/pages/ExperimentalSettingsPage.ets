@@ -16,16 +16,19 @@ import {
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
-// 实验性功能子页:从设置页拆出。收纳「实时更新话题」「智感握姿」两个本地开关,
+// 实验性功能子页:从设置页拆出。收纳「首页新话题提醒」「智感握姿」等本地开关,
 // 纯 preferences 读写,不依赖宿主注入。
+//
+// 两个实时开关的文案都以作用范围打头(「首页…」/「帖子内…」):它们各管一条链路
+// (首页提示条 /latest|/new vs 详情页新楼 /topic/<id>),名字太像会被开错。
 @Component
 export struct ExperimentalSettingsPage {
   // 窗口常驻全屏布局:内容层自行避让状态栏(背景层已天然铺满整屏,含状态栏条)。
   @StorageProp(SYS_TOP_INSET_KEY) private sysTopInset: number = 0;
   onBack: () => void = () => {};
-  // 实时更新话题开关(默认关),进页时从 preferences 载入。
+  // 「首页新话题提醒」开关(默认关),进页时从 preferences 载入。
   @State private realtimeTopicsEnabled: boolean = false;
-  // 帖子实时更新开关(默认关),进页时从 preferences 载入。
+  // 「帖子内新回复提醒」开关(默认关),进页时从 preferences 载入。
   @State private realtimePostsEnabled: boolean = false;
   // 动态头像开关(默认开),进页时从 preferences 载入。
   @State private animatedAvatarEnabled: boolean = true;
@@ -186,11 +189,11 @@ export struct ExperimentalSettingsPage {
         .fontSize(20)
         .fontColor([$r('app.color.text_secondary')])
       Column() {
-        Text('实时更新话题')
+        Text('首页新话题提醒')
           .fontSize(15)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
-        Text('首页实时接收新话题/更新提示')
+        Text('首页顶部提示有新话题,点一下插进列表')
           .fontSize(12)
           .fontColor($r('app.color.text_faint'))
           .width('100%')
@@ -218,11 +221,11 @@ export struct ExperimentalSettingsPage {
         .fontSize(20)
         .fontColor([$r('app.color.text_secondary')])
       Column() {
-        Text('帖子实时更新')
+        Text('帖子内新回复提醒')
           .fontSize(15)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
-        Text('打开帖子后实时接收他人的新回复')
+        Text('看帖时自动接收他人的新回复')
           .fontSize(12)
           .fontColor($r('app.color.text_faint'))
           .width('100%')

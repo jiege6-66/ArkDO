@@ -7,12 +7,12 @@ const LOG_TAG: string = '[ArkDO][RealtimePosts]';
 const PREF_STORE_NAME: string = 'app_settings';
 const PREF_KEY_ENABLED: string = 'realtime_posts_enabled';
 
-/** AppStorage 中「帖子实时更新」开关的 key，供详情页通过 @StorageProp 响应式绑定。 */
+/** AppStorage 中「帖子内新回复提醒」开关的 key，供详情页通过 @StorageProp 响应式绑定。 */
 export const REALTIME_POSTS_ENABLED_STORAGE_KEY: string = 'realtimePostsEnabled';
 
 /**
- * 「帖子实时更新」开关：控制进入帖子详情后是否订阅 /topic/<id> 实时接收他人新回复。
- * 与「实时更新话题」(首页提示条)相互独立。默认关：属实验性功能，需用户在实验性功能里主动开启；
+ * 「帖子内新回复提醒」开关：控制进入帖子详情后是否订阅 /topic/<id> 实时接收他人新回复。
+ * 与「首页新话题提醒」(首页提示条)相互独立。默认关：属实验性功能，需用户在实验性功能里主动开启；
  * 开启后打开帖子期间多订一个临时频道(MessageBus 长轮询本就为通知常驻运行，开销极低)。
  * preferences 持久化 + AppStorage 镜像(响应式即时启停)。
  */

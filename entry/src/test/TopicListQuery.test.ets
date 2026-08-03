@@ -41,6 +41,20 @@ export default function topicListQueryTest() {
       expect(buildTopicListPath(queryOf(FeedKey.TOP), 0)).assertEqual('/top.json');
     });
 
+    // 「最新发布」不是 Discourse 的 filter:走 latest 的路由 + order=created(按 created_at 倒序),
+    // 否则 latest 排的是 bumped_at,老帖被回复就顶上来。四种 scope 都要挂上这个参数。
+    it('最新发布 = latest 路由 + order=created', 0, () => {
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED), 0)).assertEqual('/latest.json?order=created');
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED, DEV), 0))
+        .assertEqual('/c/domestic/98/l/latest.json?order=created');
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED, undefined, TAG_WITH_ID), 0))
+        .assertEqual('/tag/1461-tag/1461/l/latest.json?order=created');
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED, DEV, TAG_WITH_ID), 0))
+        .assertEqual('/tags/c/domestic/98/1461-tag/1461/l/latest.json?order=created');
+      // 路径里不该出现 'created.json' —— 那是个不存在的 filter,服务端会 404。
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED), 0).indexOf('created.json')).assertEqual(-1);
+    });
+
     it('版块 scope 拼 /c/{slug}/{id}/l/{filter}', 0, () => {
       expect(buildTopicListPath(queryOf(FeedKey.LATEST, DEV), 0))
         .assertEqual('/c/domestic/98/l/latest.json');
@@ -82,6 +96,17 @@ export default function topicListQueryTest() {
         .assertEqual('/tags/c/domestic/98/1461-tag/1461/l/latest.json?page=3');
     });
 
+    // order 与 page 同时出现时只能有一个「?」,后面全用「&」接。
+    it('最新发布的分页把 order 与 page 拼在同一个 query 串里', 0, () => {
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED), 2))
+        .assertEqual('/latest.json?order=created&page=2');
+      expect(buildTopicListPath(queryOf(FeedKey.CREATED, DEV), 1))
+        .assertEqual('/c/domestic/98/l/latest.json?order=created&page=1');
+      const path: string = buildTopicListPath(queryOf(FeedKey.CREATED, DEV, TAG_WITH_ID), 3);
+      expect(path).assertEqual('/tags/c/domestic/98/1461-tag/1461/l/latest.json?order=created&page=3');
+      expect(path.indexOf('?')).assertEqual(path.lastIndexOf('?'));
+    });
+
     // ===== 条件比较 / 默认判定 =====
 
     it('默认条件是全站 · 最新 · 无标签', 0, () => {
@@ -104,12 +129,14 @@ export default function topicListQueryTest() {
         queryOf(FeedKey.LATEST, undefined, { name: '三方客户端' }))).assertTrue();
     });
 
-    it('unread / new 需要登录,latest / hot / top 不需要', 0, () => {
+    it('unread / new 需要登录,latest / hot / top / created 不需要', 0, () => {
       expect(filterRequiresLogin(FeedKey.UNREAD)).assertTrue();
       expect(filterRequiresLogin(FeedKey.NEW)).assertTrue();
       expect(filterRequiresLogin(FeedKey.LATEST)).assertFalse();
       expect(filterRequiresLogin(FeedKey.HOT)).assertFalse();
       expect(filterRequiresLogin(FeedKey.TOP)).assertFalse();
+      // created 是纯服务端排序,不看个人已读状态,匿名同样能拉。
+      expect(filterRequiresLogin(FeedKey.CREATED)).assertFalse();
     });
 
     // ===== 顶栏文案 =====
@@ -117,6 +144,9 @@ export default function topicListQueryTest() {
     it('主标题按 版块 → 标签 → 过滤器 取,全默认时回空串', 0, () => {
       expect(topicListPrimaryTitle(createDefaultTopicListQuery())).assertEqual('');
       expect(topicListPrimaryTitle(queryOf(FeedKey.UNREAD))).assertEqual('未读');
+      expect(topicListPrimaryTitle(queryOf(FeedKey.CREATED))).assertEqual('最新发布');
+      // /new.json 回的是「未读 + 从没打开过」的合集,按 bumped_at 排,叫「新主题」名实不符。
+      expect(topicListPrimaryTitle(queryOf(FeedKey.NEW))).assertEqual('未读新帖');
       expect(topicListPrimaryTitle(queryOf(FeedKey.LATEST, DEV))).assertEqual('开发调优');
       // 顶栏会在名字前面画标签图标,所以标题本身不带 # 之类的前缀修饰。
       expect(topicListPrimaryTitle(queryOf(FeedKey.LATEST, undefined, TAG_NAME_ONLY))).assertEqual('linux');

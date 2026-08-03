@@ -87,7 +87,10 @@ export class TopicService {
     return this.getFeedPage(FeedKey.LATEST, page);
   }
 
-  async getLatestTopicsByIds(topicIds: number[]): Promise<NetworkResult<Topic[]>> {
+  // 按 id 批量取主题(首页实时提示点开后补拉这一批)。
+  // orderByCreated=true 时结果按建帖时间倒序 —— 「最新发布」的列表就是这么排的,补拉回来的这批
+  // 要原样插到表头,顺序得对齐;不带这个参数时服务端按 bumped_at 排,插进去批内顺序就是乱的。
+  async getLatestTopicsByIds(topicIds: number[], orderByCreated: boolean = false): Promise<NetworkResult<Topic[]>> {
     const normalizedIds: number[] = [];
     const seenIds: Set<number> = new Set<number>();
     for (let index: number = 0; index < topicIds.length; index++) {
@@ -107,8 +110,9 @@ export class TopicService {
       };
     }
 
+    const orderSuffix: string = orderByCreated ? '&order=created' : '';
     const pageResult: NetworkResult<TopicPage> =
-      await this.getTopicListPage(`/latest.json?topic_ids=${normalizedIds.join(',')}`, 0);
+      await this.getTopicListPage(`/latest.json?topic_ids=${normalizedIds.join(',')}${orderSuffix}`, 0);
     if (!pageResult.success) {
       return {
         success: false,

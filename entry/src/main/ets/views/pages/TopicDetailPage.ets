@@ -284,7 +284,7 @@ export struct TopicDetailPage {
   // "N 条新回复"提示条：用户不在列表底部时累计，点按跳到首条新楼；在底部则直接追加不计数。
   @State private incomingNewPostCount: number = 0;
   private incomingFirstNewPostNumber: number = 0;
-  // 「帖子实时更新」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
+  // 「帖子内新回复提醒」开关(默认关)。关⇒不订阅 /topic 频道、不处理 created；运行中翻转由 @Watch 即时启停。
   @StorageProp(REALTIME_POSTS_ENABLED_STORAGE_KEY) @Watch('onRealtimePostsToggled')
   private realtimePostsEnabled: boolean = false;
   // 「抽奖帖提醒」开关(默认开)。关⇒摘要下方的提醒卡与回复浮层的提醒行都不出现。
@@ -1475,7 +1475,7 @@ export struct TopicDetailPage {
     this.bridge.subscribeTopicChannel(this.detail.id, position);
   }
 
-  // 「帖子实时更新」开关运行中翻转：开⇒订阅本帖频道 + 启动 Presence；关⇒退订、停 Presence、清提示条。
+  // 「帖子内新回复提醒」开关运行中翻转：开⇒订阅本帖频道 + 启动 Presence；关⇒退订、停 Presence、清提示条。
   private onRealtimePostsToggled(): void {
     if (this.realtimePostsEnabled) {
       this.subscribeTopicChannel();

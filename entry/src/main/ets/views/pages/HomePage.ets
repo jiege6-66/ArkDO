@@ -18,9 +18,12 @@ import { TopicReadState, TopicReadStateEventBus } from '../../services/session/T
 import { NotificationEventBus, NotificationSnapshot } from '../../services/notification/NotificationEventBus';
 import {
   extractMessageBusCategoryId,
+  extractMessageBusCreatedAt,
   extractMessageBusTopicId,
+  LATEST_TOPICS_CHANNEL,
   MessageBusEvent,
-  MessageBusEventBus
+  MessageBusEventBus,
+  NEW_TOPICS_CHANNEL
 } from '../../services/message/MessageBusEventBus';
 import { TopicPage, TopicService } from '../../services/topic/TopicService';
 import { TopicDataSource } from '../../services/topic/TopicDataSource';
@@ -250,7 +253,7 @@ export struct HomePage {
   private incomingInsertMeasuredIds: number[] = [];
   private incomingInsertMeasuredHeight: number = 0;
   private incomingInsertPlayed: boolean = false;
-  // 「实时更新话题」开关。关闭(默认)时忽略事件、隐藏提示；运行中翻转由 @Watch 中和残留态。
+  // 「首页新话题提醒」开关。关闭(默认)时忽略事件、隐藏提示；运行中翻转由 @Watch 中和残留态。
   @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeTopicsEnabledChanged')
   private realtimeTopicsEnabled: boolean = false;
   // 「点分类/标签快速筛选」开关(实验性功能页,默认关)。开着时帖子行上的徽章可点。
@@ -1513,7 +1516,8 @@ export struct HomePage {
     if (!this.realtimeTopicsEnabled) {
       return;
     }
-    if (event.channel !== '/latest' || !this.acceptsIncomingTopics()) {
+    const channel: string | undefined = this.incomingTopicsChannel();
+    if (channel === undefined || event.channel !== channel) {
       return;
     }
     const topicId: number | undefined = extractMessageBusTopicId(event);
@@ -1523,6 +1527,11 @@ export struct HomePage {
     // 频道是全局的,推来的可能是任何版块的帖子;限定了版块就得按 payload 自己比一次。
     if (!incomingTopicMatchesCategory(
       this.categories, this.listQuery.category, extractMessageBusCategoryId(event))) {
+      return;
+    }
+    // 「最新发布」按建帖时间排,比表头还老的帖子插到表头就是错位,直接丢。
+    if (channel === NEW_TOPICS_CHANNEL && !this.isFresherThanListHead(extractMessageBusCreatedAt(event))) {
+      Log.i(`${LOG_TAG} incoming topic dropped as stale topicId=${topicId}`);
       return;
     }
     const previousCount: number = this.incomingTopicsPromptCount();
@@ -1537,14 +1546,41 @@ export struct HomePage {
   }
 
   /**
-   * 当前条件下要不要接 /latest 的实时提示。两条限制都来自「我们只订了 /latest 这一个频道」:
-   *  · 排序必须是「最新」—— 未读/新主题各有自己的频道(/unread/{user_id}、/new),没订就没数据
-   *  · 不能限定标签 —— payload 只给 tag id,而我们手上的标签常常只有名字(列表接口不回 id),
-   *    比不了。宁可停掉提示,也别拿名字去猜。
+   * 当前条件下从哪个频道收实时提示,不收则回 undefined。频道必须与列表的排序键对上,否则提示条
+   * 会报一堆不会出现在列表里(或位置不对)的帖子:
+   *  · 「最新」    → /latest:publish_latest 推的,含新建 + 被回复顶起来的,与 bumped_at 排序一致
+   *  · 「最新发布」→ /new   :publish_new 只在建帖时推一次,回复不进来,与 created_at 排序一致
+   *  · 其余(热门/排行榜/未读/未读新帖)→ 不收:各有自己的算法或个人已读状态,这两个频道都对不上
+   *
+   * 两个频道都由长轮询脚本常驻订阅(MessageBusScriptTemplate),这里只挑当前该听哪一个 ——
+   * 不按排序动态增删频道:首页一卸载(进详情页)就会退订,回来没人补订,提示条从此不涨。
+   *
+   * 另一条限制与频道无关:不能限定标签 —— payload 只给 tag id,而我们手上的标签常常只有名字
+   * (列表接口不回 id),比不了。宁可停掉提示,也别拿名字去猜。
    * 版块维度能过:payload 带 category_id,见 incomingTopicMatchesCategory。
    */
-  private acceptsIncomingTopics(): boolean {
-    return this.listQuery.filter === FeedKey.LATEST && this.listQuery.tag === undefined;
+  private incomingTopicsChannel(): string | undefined {
+    if (this.listQuery.tag !== undefined) {
+      return undefined;
+    }
+    if (this.listQuery.filter === FeedKey.LATEST) {
+      return LATEST_TOPICS_CHANNEL;
+    }
+    return this.listQuery.filter === FeedKey.CREATED ? NEW_TOPICS_CHANNEL : undefined;
+  }
+
+  /**
+   * 这条建帖时间是否新过列表表头。「最新发布」的兜底闸:/new 上万一混进一条老帖
+   * (recover 之类的重新发布路径),按 created_at 直接丢掉,免得它被插到表头。
+   * 两边都是 Discourse 回的 ISO8601 UTC 串(带 Z),同格式定长,按字典序比即可。
+   * 拿不到时间或列表还空着一律放行:宁可多提示一条,也别静默漏掉真的新帖。
+   */
+  private isFresherThanListHead(createdAt: string): boolean {
+    if (createdAt.length === 0 || this.topics.length === 0) {
+      return true;
+    }
+    const head: string = this.topics[0].createdAt ?? '';
+    return head.length === 0 || createdAt >= head;
   }
 
   private expandIncomingTopicsPrompt(): void {
@@ -1734,8 +1770,10 @@ export struct HomePage {
     this.isLoadingIncoming = true;
     const requestEpoch: number = ++this.incomingRequestEpoch;
     Log.i(`${LOG_TAG} incoming topics fetch started count=${snapshot.topicIds.length}`);
+    // 「最新发布」按建帖时间排,补拉这一批也得按同一个键排,否则插到表头后批内顺序是乱的。
     const result: NetworkResult<Topic[]> =
-      await new TopicService(this.bridge).getLatestTopicsByIds(snapshot.topicIds);
+      await new TopicService(this.bridge)
+        .getLatestTopicsByIds(snapshot.topicIds, this.listQuery.filter === FeedKey.CREATED);
     if (requestEpoch !== this.incomingRequestEpoch) {
       return;
     }

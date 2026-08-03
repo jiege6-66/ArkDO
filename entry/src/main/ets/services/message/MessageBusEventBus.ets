@@ -22,6 +22,9 @@ export interface MessageBusTopicTag {
 export interface MessageBusTopicPayload {
   category_id?: number;
   tags?: MessageBusTopicTag[];
+  // /new 频道(publish_new)独有:建帖时间。/latest 的 payload 没有它,只有 bumped_at ——
+  // 这正是「被回复顶起来的老帖」在 /latest 上无法与新帖区分的原因。
+  created_at?: string;
 }
 
 export interface MessageBusData {
@@ -75,6 +78,10 @@ export function parseMessageBusEvent(payload: string): MessageBusEvent | undefin
   }
 }
 
+// 首页实时提示会用到的两个频道。哪个能用取决于当前排序,见 HomePage.incomingTopicsChannel。
+export const LATEST_TOPICS_CHANNEL: string = '/latest';
+export const NEW_TOPICS_CHANNEL: string = '/new';
+
 /**
  * /latest 频道上会计入「新的或更新的话题」的 message_type(白名单)。
  *
@@ -88,14 +95,28 @@ export function parseMessageBusEvent(payload: string): MessageBusEvent | undefin
  * 用白名单而不是「排除 muted/unmuted」的黑名单:将来 Discourse 往这个频道加新类型时,
  * 白名单默认不计、顶多漏报;黑名单会默默把它算成新话题,又变回现在这个 bug。
  */
-const INCOMING_TOPIC_MESSAGE_TYPES: string[] = ['latest', 'new_topic'];
+const LATEST_CHANNEL_MESSAGE_TYPES: string[] = ['latest', 'new_topic'];
+
+/**
+ * /new 频道的白名单:只认 new_topic。
+ *
+ * 「最新发布」按 created_at 排,被回复顶起来的老帖不该进提示条 —— 所以这里绝不能把 'latest' 放进来。
+ * publish_new 只在建帖时推一次(实测 meta 上连续 70 条消息全是 new_topic、highest_post_number 都是 1、
+ * topic_id 零重复),回复走的是 /latest 与 /unread/{user_id},不碰这个频道。
+ */
+const NEW_CHANNEL_MESSAGE_TYPES: string[] = ['new_topic'];
+
+/** 该频道上算「新话题」的 message_type 白名单。未知频道按 /latest 那套处理(更宽松的那个)。 */
+function incomingTopicMessageTypes(channel: string | undefined): string[] {
+  return channel === NEW_TOPICS_CHANNEL ? NEW_CHANNEL_MESSAGE_TYPES : LATEST_CHANNEL_MESSAGE_TYPES;
+}
 
 export function extractMessageBusTopicId(event: MessageBusEvent | undefined): number | undefined {
   if (!event || event.type !== 'message' || !event.data) {
     return undefined;
   }
   const messageType: string | undefined = event.data.message_type;
-  if (messageType === undefined || INCOMING_TOPIC_MESSAGE_TYPES.indexOf(messageType) < 0) {
+  if (messageType === undefined || incomingTopicMessageTypes(event.channel).indexOf(messageType) < 0) {
     return undefined;
   }
   const topicId: number | undefined = event.data.topic_id;
@@ -115,6 +136,15 @@ export function extractMessageBusCategoryId(event: MessageBusEvent | undefined):
     return undefined;
   }
   return Math.floor(categoryId);
+}
+
+// 取该消息的建帖时间(ISO 串,只有 /new 频道的 payload 带)。拿不到回空串,由调用方决定放行还是从严。
+export function extractMessageBusCreatedAt(event: MessageBusEvent | undefined): string {
+  if (!event || event.type !== 'message' || !event.data || !event.data.payload) {
+    return '';
+  }
+  const createdAt: string | undefined = event.data.payload.created_at;
+  return typeof createdAt === 'string' ? createdAt : '';
 }
 
 // 从 /topic/<id> 频道事件里取"新建帖子"的 post id：仅 type==='created' 且 data.id 为正整数时返回。

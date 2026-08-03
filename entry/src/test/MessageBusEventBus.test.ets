@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   extractMessageBusCategoryId,
+  extractMessageBusCreatedAt,
   extractMessageBusTopicId,
   MessageBusEvent,
   MessageBusEventBus,
@@ -66,6 +67,36 @@ export default function messageBusEventBusTest() {
       expect(extractMessageBusTopicId(parseMessageBusEvent(
         '{"type":"message","channel":"/latest","messageId":7,"data":{"topic_id":42,"message_type":"latest"}}'
       ))).assertEqual(42);
+    });
+
+    // 「最新发布」按 created_at 排,被回复顶起来的老帖不该进提示条。/new 频道上只认 new_topic:
+    // 万一将来 Discourse 往这个频道也发 latest,白名单会直接把它挡掉。
+    it('rejectsBumpedTopicOnNewChannel', 0, () => {
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/new","messageId":20,"data":{"topic_id":41,"message_type":"new_topic"}}'
+      ))).assertEqual(41);
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/new","messageId":21,"data":{"topic_id":42,"message_type":"latest"}}'
+      ))).assertUndefined();
+      // 同一条 latest 消息在 /latest 上照旧计入 —— 白名单是按频道分的,不是全局收紧。
+      expect(extractMessageBusTopicId(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":22,"data":{"topic_id":42,"message_type":"latest"}}'
+      ))).assertEqual(42);
+    });
+
+    // created_at 只有 /new 的 payload 带(publish_new);/latest 只有 bumped_at,取不到回空串。
+    it('extractsCreatedAtFromNewChannelPayload', 0, () => {
+      expect(extractMessageBusCreatedAt(parseMessageBusEvent(
+        '{"type":"message","channel":"/new","messageId":23,"data":{"topic_id":9,"message_type":"new_topic",' +
+        '"payload":{"category_id":6,"created_at":"2026-08-03T13:53:40.102Z"}}}'
+      ))).assertEqual('2026-08-03T13:53:40.102Z');
+      expect(extractMessageBusCreatedAt(parseMessageBusEvent(
+        '{"type":"message","channel":"/latest","messageId":24,"data":{"topic_id":9,"message_type":"latest",' +
+        '"payload":{"category_id":6,"bumped_at":"2026-08-03T15:00:32.598Z"}}}'
+      ))).assertEqual('');
+      expect(extractMessageBusCreatedAt(parseMessageBusEvent(
+        '{"type":"message","channel":"/new","messageId":25,"data":{"topic_id":9,"message_type":"new_topic"}}'
+      ))).assertEqual('');
     });
 
     it('publishesValidPayloadToSubscribersOnly', 0, () => {

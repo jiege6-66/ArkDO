@@ -6,7 +6,9 @@ export default function messageBusScriptTemplateTest() {
     it('buildsLatestLongPollWithRequiredHeaders', 0, () => {
       const script: string = buildMessageBusScript();
 
-      expect(script).assertContain("channels: { '/latest': -1 }");
+      // 两个都得是常驻频道:/latest 配「最新」,/new 配「最新发布」。
+      // /new 曾按排序动态增删,但首页一卸载(进详情页)就退订、回来没人补订,提示条从此不涨,故改常驻。
+      expect(script).assertContain("channels: { '/latest': -1, '/new': -1 }");
       expect(script).assertContain("new URL('message-bus/'");
       expect(script).assertContain("'X-Requested-With': 'XMLHttpRequest'");
       expect(script).assertContain("'Dont-Chunk': 'true'");

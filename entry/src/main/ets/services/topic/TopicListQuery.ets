@@ -14,6 +14,10 @@ import { FeedDef, FeedKey, FeedPrefs } from '../site/FeedPrefs';
  *  · 标签      → `/tag/{tSlug}/{tId}/l/{filter}.json`
  *  · 版块+标签 → `/tags/c/{cSlug}/{cId}/{tSlug}/{tId}/l/{filter}.json`
  *
+ * 「最新发布」(FeedKey.CREATED)是个例外:Discourse 没有按发布时间的 filter,它走 latest 的路径
+ * 再挂 `order=created`(TopicQuery::SORTABLE_MAPPING 把 created 映射到 created_at)。四种 scope
+ * 与分页都支持,匿名可用。见 feedFilterSegment / feedQuerySuffix。
+ *
  * 标签只能有一个:linux.do 的标签过滤不支持多选。Discourse core 另有 `/tags/intersection/a/b`
  * 走多标签,但那条路由既没有 `/l/{filter}` 变体、语义又被强制成「同时包含」,这里不用。
  */
@@ -57,7 +61,8 @@ export function sameTopicListQuery(a: TopicListQuery, b: TopicListQuery): boolea
 
 /**
  * 该过滤器是否需要登录。Discourse.filters 里除 latest/top/hot 外都要会话;
- * 本项目暴露的 5 个入口里,unread 与 new 属于此列。
+ * 本项目暴露的 6 个入口里,只有 unread 与 new 属于此列 ——
+ * created 走的是 latest 路由(纯服务端排序,不看个人已读状态),匿名同样能拉。
  */
 export function filterRequiresLogin(filter: string): boolean {
   return filter === FeedKey.UNREAD || filter === FeedKey.NEW;
@@ -82,26 +87,51 @@ function tagSegment(tag: TopicTag): string {
 }
 
 /**
+ * 落到 URL 里的那一段 filter 名。除「最新发布」外都是 key 本身;
+ * 「最新发布」没有对应的 Discourse filter,借 latest 的路由,靠 order 参数换排序键。
+ */
+function feedFilterSegment(filter: string): string {
+  return filter === FeedKey.CREATED ? FeedKey.LATEST : filter;
+}
+
+/**
+ * query 串。order 与 page 都可能出现,必须在一处统一拼 —— 各自带 `?` 会拼出两个问号。
+ * page 从 0 起,0 即首页、不带参数。
+ */
+function feedQuerySuffix(filter: string, page: number): string {
+  const params: string[] = [];
+  if (filter === FeedKey.CREATED) {
+    // ascending 不写:Discourse 对 order 默认降序,正是「新发的在前」。
+    params.push('order=created');
+  }
+  if (page > 0) {
+    params.push(`page=${page}`);
+  }
+  return params.length > 0 ? `?${params.join('&')}` : '';
+}
+
+/**
  * 按条件拼出主题列表的请求路径。page 从 0 起(0 即首页,不带 page 参数)。
  *
  * 注意 id 形式的标签路由带 `format: :json` 约束,`.json` 后缀不能省。
  */
 export function buildTopicListPath(query: TopicListQuery, page: number): string {
-  const suffix: string = page > 0 ? `?page=${page}` : '';
+  const segment: string = feedFilterSegment(query.filter);
+  const suffix: string = feedQuerySuffix(query.filter, page);
   const tag: TopicTag | undefined = query.tag;
   const category: TopicCategory | undefined = query.category;
 
   if (tag !== undefined && category !== undefined) {
-    return `/tags/c/${categorySegment(category)}/${tagSegment(tag)}/l/${query.filter}.json${suffix}`;
+    return `/tags/c/${categorySegment(category)}/${tagSegment(tag)}/l/${segment}.json${suffix}`;
   }
   if (tag !== undefined) {
-    return `/tag/${tagSegment(tag)}/l/${query.filter}.json${suffix}`;
+    return `/tag/${tagSegment(tag)}/l/${segment}.json${suffix}`;
   }
   if (category !== undefined) {
-    return `/c/${categorySegment(category)}/l/${query.filter}.json${suffix}`;
+    return `/c/${categorySegment(category)}/l/${segment}.json${suffix}`;
   }
   // 全站是唯一不带 /l/ 前缀的 scope:/latest.json、/hot.json、/unread.json…
-  return `/${query.filter}.json${suffix}`;
+  return `/${segment}.json${suffix}`;
 }
 
 function filterLabel(filter: string): string {

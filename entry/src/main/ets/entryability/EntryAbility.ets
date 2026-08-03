@@ -48,14 +48,14 @@ export default class EntryAbility extends UIAbility {
     // 响应式断点监听:决定平板横屏双栏 / 竖屏单栏,须早于首页渲染写入初始值。手机恒为非宽屏。
     BreakpointManager.init();
     HoldingHandManager.init(this.context);
-    // 「实时更新话题」开关：读盘并种入 AppStorage 镜像，须早于宿主 webview 与首页挂载，
+    // 「首页新话题提醒」开关：读盘并种入 AppStorage 镜像，须早于宿主 webview 与首页挂载，
     // 保证首个 onPageEnd 的注入决策拿到正确值(默认关⇒不注入长轮询)。
     RealtimeTopicsPrefs.load(this.context);
     BadgeFilterPrefs.load(this.context);
     // 「抽奖帖提醒」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)，
     // 否则从推送/通知直开抽奖帖时提醒卡会晚一帧才冒出来。
     LotteryTipPrefs.load(this.context);
-    // 「帖子实时更新」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)。
+    // 「帖子内新回复提醒」开关：读盘并种入 AppStorage 镜像，须早于详情页挂载(默认开)。
     RealtimePostsPrefs.load(this.context);
     // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，
     // 保证首帧 FAB 就按正确样式渲染(默认关⇒当前透明样式)。

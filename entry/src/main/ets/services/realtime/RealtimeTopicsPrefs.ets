@@ -7,11 +7,11 @@ const LOG_TAG: string = '[ArkDO][RealtimeTopics]';
 const PREF_STORE_NAME: string = 'app_settings';
 const PREF_KEY_ENABLED: string = 'realtime_topics_enabled';
 
-/** AppStorage 中「实时更新话题」开关的 key，供宿主 webview 与首页通过 @StorageProp 响应式绑定。 */
+/** AppStorage 中「首页新话题提醒」开关的 key，供宿主 webview 与首页通过 @StorageProp 响应式绑定。 */
 export const REALTIME_TOPICS_ENABLED_STORAGE_KEY: string = 'realtimeTopicsEnabled';
 
 /**
- * 「实时更新话题」开关的持久化 + AppStorage 响应式镜像。默认关：该功能会常驻后台长轮询，
+ * 「首页新话题提醒」开关的持久化 + AppStorage 响应式镜像。默认关：该功能会常驻后台长轮询，
  * 并非所有用户都需要。preferences 负责跨冷启动持久化；AppStorage 镜像让宿主 webview 的注入
  * 决策与首页提示条能即时响应开关翻转（@StorageProp + @Watch），无需重启。
  */
