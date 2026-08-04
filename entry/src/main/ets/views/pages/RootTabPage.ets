@@ -96,13 +96,14 @@ const SWIPE_SETTLE_CURVE: Curve = Curve.Friction;
 // 与个人中心的位移共用同一个 progress,天然同步。0 即关掉视差。
 const SWIPE_PARALLAX_RATIO: number = 0.25;
 // ===== 宽屏双栏(Split)的左栏宽度 =====
-// 初始宽度;用户拖动分割线后在 [MIN, MAX] 内变化(当前不落盘,冷启回到这个值)。
-const SPLIT_NAV_BAR_WIDTH: number = 420;
+// 左栏宽 = 窗口宽的一半,再夹进 [320, 420]。不写死绝对值是因为两种宽屏形态尺寸差一倍:
+//  · 平板横屏(1440vp)→ 720 封顶 420,与此前写死的值一致;
+//  · 折叠屏展开(内屏 ≈741vp)→ 370,左右基本对半,分割线正好落在折痕上。
+//    写死 420 的话右栏只剩 321,读正文很挤。
+const SPLIT_NAV_BAR_RATIO: number = 0.5;
 // 下限须 ≥ 分区抽屉宽度(288),否则抽屉滑出会溢进右详情栏,留点余量取 320。
 const SPLIT_NAV_BAR_MIN_WIDTH: number = 320;
-const SPLIT_NAV_BAR_MAX_WIDTH: number = 560;
-// 右详情栏最小宽度(ArkUI 默认也是 360):设备不够宽时它会反过来夹住左栏的实际上限。
-const SPLIT_MIN_CONTENT_WIDTH: number = 360;
+const SPLIT_NAV_BAR_MAX_WIDTH: number = 420;
 
 enum RootSheet {
   NONE = 0,
@@ -120,6 +121,9 @@ export struct RootTabPage {
   // 宽屏标志(平板横屏 / 大屏):驱动 Navigation 双栏 Split;手机、平板竖屏恒为 false 走单栏 Stack。
   // @Watch 在宽<->窄切换(旋转)时同步右栏空占位:进宽屏且空栈时垫占位,回窄屏时移除占位。
   @StorageProp(APP_IS_WIDE_STORAGE_KEY) @Watch('onWideChanged') private appIsWide: boolean = false;
+  // 双栏左列表栏宽度(vp)。由 onAreaChange 按窗口宽度算,见 SPLIT_NAV_BAR_RATIO;
+  // 首帧尺寸还没进来时先用上限(平板横屏的取值),避免闪一下窄栏。
+  @State private splitNavBarWidth: number = SPLIT_NAV_BAR_MAX_WIDTH;
   // 图片浏览器提到根级渲染:双栏下必须盖满整窗(否则只占右详情栏),旋转时随根 Stack 重排。
   // 由详情页经 onOpenImages 回调冒泡上来触发,统一在这里开关。
   @State private showImageViewer: boolean = false;
@@ -396,10 +400,17 @@ export struct RootTabPage {
     .height('100%')
     .backgroundColor($r('app.color.page_bg'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    // 根 Stack 铺满整窗,其实测宽度即窗口宽度:布局驱动断点,首帧与旋转/分屏都会触发。
-    // 宽度过阈值(840vp)→ appIsWide 置真 → Navigation 切双栏。比 mediaquery 更可靠。
+    // 根 Stack 铺满整窗,其实测尺寸即窗口尺寸:布局驱动断点,首帧与旋转/分屏/折叠都会触发。
+    // 判定规则见 BreakpointManager.applySize(平板横屏 / 折叠屏展开 → 双栏)。比 mediaquery 更可靠。
     .onAreaChange((_oldValue: Area, newValue: Area) => {
-      BreakpointManager.applyWidth(newValue.width as number);
+      const widthVp: number = newValue.width as number;
+      BreakpointManager.applySize(widthVp, newValue.height as number);
+      const navBarWidth: number = Math.min(
+        Math.max(Math.round(widthVp * SPLIT_NAV_BAR_RATIO), SPLIT_NAV_BAR_MIN_WIDTH),
+        SPLIT_NAV_BAR_MAX_WIDTH);
+      if (navBarWidth !== this.splitNavBarWidth) {
+        this.splitNavBarWidth = navBarWidth;
+      }
     })
     .bindSheet($$this.isSheetVisible, this.RootSheetBuilder, {
       // CF 交互式挑战需要尽量完整的视口(半屏+圆角+露底会被 Turnstile 视作可疑),且过盾中途
@@ -435,17 +446,18 @@ export struct RootTabPage {
     // 显式驱动分栏:仅宽屏(平板横屏)双栏 Split,手机 / 平板竖屏单栏 Stack。
     // 不用默认 Auto——其 520vp 阈值会把平板竖屏也切成双栏。手机恒 Stack,与现状一致。
     .mode(this.appIsWide ? NavigationMode.Split : NavigationMode.Stack)
-    // 左列表栏初始宽(仅 Split 生效,Stack/手机下忽略):
-    //  ① 调宽列表,读着不挤;② 须 ≥ 分区抽屉宽度(288),否则抽屉滑出会溢进右详情栏。
-    //  想微调列表默认宽度只改这一个数即可。
-    .navBarWidth(SPLIT_NAV_BAR_WIDTH)
-    // 拖拽条默认关闭(enableDragBar 默认 false),不开这行分割线就只是条装饰线,按不动。
-    .enableDragBar(true)
-    // 拖拽范围。不显式给的话默认是 [240, min(40%组件宽, 432)]:下限 240 比抽屉(288)还窄,
-    // 拖到底抽屉会溢进右栏;上限被 432 截断,从 420 起步只剩 12vp 余量,拖了跟没拖一样。
-    .navBarWidthRange([SPLIT_NAV_BAR_MIN_WIDTH, SPLIT_NAV_BAR_MAX_WIDTH])
-    // 右详情栏的最小宽:窄屏宽屏设备上由它反过来夹住导航栏,避免正文被挤到没法读。
-    .minContentWidth(SPLIT_MIN_CONTENT_WIDTH)
+    // 左列表栏宽(仅 Split 生效,Stack/手机下忽略):随窗口宽度算,见 SPLIT_NAV_BAR_RATIO。
+    //
+    // 这里刻意只设 navBarWidth 一个属性,navBarWidthRange / minContentWidth / enableDragBar
+    // 一个都不能加——设了其中任一个,分割线就变成可拖的(enableDragBar 只多给一个可见把手,
+    // 不是拖拽的总开关)。而拖拽改宽度走的是「只改宽度、跳过重排」的路径
+    //   (HiLog: Text Relayout: No relayout required → generatePaintRegion: paragraph is not formatted),
+    // 左栏里的 Text 会留在未重排状态,之后一转屏,绘制阶段拿过期 paragraph 调
+    // SPText::ParagraphImpl::GeneratePaintRegion 直接 SIGTRAP 崩溃(四次崩溃栈完全一致)。
+    // 这是系统文字引擎的缺陷,ArkTS 侧没有干净的规避手段(拿不到拖拽回调,也无法手动触发重排)。
+    // 右栏最小宽度由上面的 clamp 自己保证(左栏最多占一半且封顶 420),不必再靠 minContentWidth。
+    // 要可调宽度就走设置项 + 状态驱动 navBarWidth 的正常 measure 路径。
+    .navBarWidth(this.splitNavBarWidth)
     .navDestination(this.NavDestinationBuilder)
     // 只接管「手势闸打开 + PUSH + 目标是 PROFILE」这一种;其余一律返回 undefined 走系统默认,
     // 不影响其他页面的转场。搜索 Flow 不进主 Navigation,不在这里处理。
