@@ -1171,8 +1171,8 @@ export struct RootTabPage {
       onTopicClick: (topic: Topic) => {
         this.selectTopicFromMaster(topic.id, topic.slug, topic.title);
       },
-      onOpenTopicById: (topicId: number) => {
-        this.selectTopicFromMaster(topicId);
+      onOpenTopicById: (topicId: number, postNumber?: number) => {
+        this.selectTopicFromMaster(topicId, undefined, undefined, postNumber, postNumber !== undefined);
       },
       onOpenTopicAtPost: (topic: Topic, postNumber: number) => {
         this.selectTopicFromMaster(topic.id, topic.slug, topic.title, postNumber);

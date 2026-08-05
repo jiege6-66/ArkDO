@@ -74,7 +74,11 @@ import {
   getTagIcon,
   resolveBadgeAssetUrl
 } from '../components/TopicBadgeUtils';
-import { VersionAnnouncement, VersionAnnouncementService } from '../../services/announce/VersionAnnouncement';
+import {
+  AnnouncementScanResult,
+  VersionAnnouncement,
+  VersionAnnouncementService
+} from '../../services/announce/VersionAnnouncement';
 import { bundleManager } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { FrameCallback } from '@kit.ArkUI';
@@ -116,6 +120,9 @@ const DRAWER_REBOUND_MS: number = 220;
 const DRAWER_SETTLE_CURVE: Curve = Curve.Friction;
 // 版本公告弹窗:true=每次启动都弹(调试用);false=同一版本只弹一次(上线值)。
 const ANNOUNCE_ALWAYS_SHOW: boolean = false;
+// 调试用:把自身 versionCode 减去这个数,好让公告帖里最新那楼变成"更高版本",
+// 用来在本地验证新版本提示(本机版本号通常就是帖子里最高的,不减看不到该分支)。上线值必须是 0。
+const ANNOUNCE_DEBUG_VERSION_OFFSET: number = 0;
 // 诊断关键字:hilog / DevEco Log 里搜 ANNOUNCE_DIAG 看公告全链路日志。
 const ANNOUNCE_DIAG: string = '[ArkDO][ANNOUNCE_DIAG]';
 // 记「已弹过的 versionCode」的偏好 key(全项目共用 'app_settings' 库)。
@@ -301,8 +308,8 @@ export struct HomePage {
   // 否则 16vp 的底边距会把它压在导航指示条上。
   @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
   onTopicClick: (topic: Topic) => void = () => {};
-  // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。
-  onOpenTopicById: (topicId: number) => void = () => {};
+  // 按帖子 ID 直接跳转详情(通用入口,不依赖完整 Topic 对象)。带楼号时落地即定位并高亮该楼。
+  onOpenTopicById: (topicId: number, postNumber?: number) => void = () => {};
   // 点未读徽标:带目标楼号打开详情,直接定位到第一条未读楼。
   onOpenTopicAtPost: (topic: Topic, postNumber: number) => void = () => {};
   // 抽屉「我的站点」标题行:打开站点管理页。
@@ -330,6 +337,11 @@ export struct HomePage {
   // 版本公告弹层:命中当前 versionCode 的回复后展示其正文。
   @State private announceVisible: boolean = false;
   @State private announceCooked: string = '';
+  // 弹层标题:本版更新 or 新版本提示。
+  @State private announceTitle: string = '本次更新';
+  // >0 表示这是「发现新版本」模式,底部长出跳转按钮,点了去公告帖对应楼层看完整更新内容。
+  @State private announceJumpPost: number = 0;
+  private announceJumpTopicId: number = 0;
   // 本次页面挂载是否已发起过公告检查(每次冷启动只查一次,不随下拉刷新/切源重复)。
   private announceChecked: boolean = false;
 
@@ -979,10 +991,11 @@ export struct HomePage {
   }
 
   // 版本公告弹层:标题 + 命中回复的完整富文本正文(含 [vXXXX] 版本号,超长可滚动)。
+  // 「发现新版本」模式下底部多一枚按钮,跳公告帖对应楼层看完整更新内容。
   @Builder
   private AnnouncementSheet() {
     Column() {
-      Text('本次更新')
+      Text(this.announceTitle)
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
@@ -1007,6 +1020,19 @@ export struct HomePage {
         scrollForward: NestedScrollMode.SELF_FIRST,
         scrollBackward: NestedScrollMode.SELF_FIRST
       })
+
+      if (this.announceJumpPost > 0) {
+        Button('查看完整更新内容', { type: ButtonType.Capsule, stateEffect: true })
+          .width('100%')
+          .height(44)
+          .fontSize(15)
+          .fontColor(Color.White)
+          .backgroundColor($r('app.color.ld_accent'))
+          .margin({ top: 16 })
+          .onClick(() => {
+            this.openAnnouncePost();
+          })
+      }
     }
     .width('100%')
     .padding({ left: 20, right: 20, bottom: 24 })
@@ -1983,7 +2009,7 @@ export struct HomePage {
     this.checkVersionAnnouncement();
   }
 
-  // 首页就绪后拉版本公告:用当前 versionCode 从公告帖末尾往前匹配 [v<code>] 那条回复弹出。
+  // 首页就绪后扫版本公告帖,一趟拿两件事:本版更新内容([v当前code] 那楼)、有没有更高版本可升级。
   // 冷启动只查一次;桥是父组件注入的 @Prop,服务必须在此惰性创建(字段初始化器会捕获空壳默认 bridge)。
   private async checkVersionAnnouncement(): Promise<void> {
     Log.i(`${ANNOUNCE_DIAG} 触发检查 isArkWebReady=${this.isArkWebReady} 本次挂载已查过=${this.announceChecked}`);
@@ -1998,30 +2024,64 @@ export struct HomePage {
       Log.w(`${ANNOUNCE_DIAG} versionCode 读取失败,跳过`);
       return;
     }
-    if (!ANNOUNCE_ALWAYS_SHOW && this.announceAlreadyShown(versionCode)) {
-      Log.i(`${ANNOUNCE_DIAG} 该版本已弹过,跳过(改 ALWAYS_SHOW=true 可强制弹)`);
+    // 本版公告已弹过、且不是来找新版本的,才能整趟跳过——新版本检查每次冷启动都要做,
+    // 否则装着旧包的用户永远收不到升级提示。
+    const currentPending: boolean = ANNOUNCE_ALWAYS_SHOW || !this.announceAlreadyShown(versionCode);
+
+    const service: VersionAnnouncementService = new VersionAnnouncementService(this.bridge);
+    const scan: AnnouncementScanResult = await service.scan(versionCode);
+
+    // 新版本提示优先:两个弹层不能同时上,而"有新版可升级"比"本版更新了啥"更该先看到。
+    // 不做持久化去重——只要还没升级,每次冷启动都提醒一次(本方法自带的 announceChecked 保证
+    // 一次启动内只弹一次,下拉刷新/切源不会重复)。升上去后 newer 自然为 null,提醒随之消失。
+    const newer: VersionAnnouncement | null = scan.newer;
+    if (newer) {
+      Log.i(`${ANNOUNCE_DIAG} 弹出新版本提示 v${newer.versionCode} 楼号=${newer.postNumber}`);
+      this.announceTitle = '发现新版本';
+      this.announceCooked = newer.cookedHtml;
+      this.announceJumpTopicId = newer.topicId;
+      this.announceJumpPost = newer.postNumber;
+      this.announceVisible = true;
+      // 本版公告的已弹标记这次不写:下次冷启动补弹,不会被升级提示吞掉。
       return;
     }
 
-    const service: VersionAnnouncementService = new VersionAnnouncementService(this.bridge);
-    const announcement: VersionAnnouncement | null = await service.fetchForVersion(versionCode);
+    if (!currentPending) {
+      Log.i(`${ANNOUNCE_DIAG} 该版本已弹过且无新版本,跳过(改 ALWAYS_SHOW=true 可强制弹)`);
+      return;
+    }
+    const announcement: VersionAnnouncement | null = scan.current;
     if (!announcement) {
       Log.i(`${ANNOUNCE_DIAG} 无匹配公告,不弹窗`);
       return;
     }
     Log.i(`${ANNOUNCE_DIAG} 弹出公告 楼号=${announcement.postNumber}`);
+    this.announceTitle = '本次更新';
     this.announceCooked = announcement.cookedHtml;
+    this.announceJumpPost = 0;
     this.announceVisible = true;
     if (!ANNOUNCE_ALWAYS_SHOW) {
       this.markAnnounceShown(versionCode);
     }
   }
 
+  // 新版本提示里的按钮:关掉弹层,跳到公告帖对应楼层看完整更新内容。
+  private openAnnouncePost(): void {
+    const topicId: number = this.announceJumpTopicId;
+    const postNumber: number = this.announceJumpPost;
+    if (topicId <= 0 || postNumber <= 0) {
+      return;
+    }
+    this.announceVisible = false;
+    this.onOpenTopicById(topicId, postNumber);
+  }
+
   private readVersionCode(): number {
     try {
       const info: bundleManager.BundleInfo =
         bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      return info.versionCode;
+      // 调试偏移,上线值为 0(见常量注释)。
+      return info.versionCode - ANNOUNCE_DEBUG_VERSION_OFFSET;
     } catch (error) {
       Log.w(`${LOG_TAG} 读取 versionCode 失败: ${JSON.stringify(error)}`);
       return 0;
@@ -2048,6 +2108,7 @@ export struct HomePage {
       Log.w(`${LOG_TAG} 记录已弹版本失败: ${JSON.stringify(error)}`);
     }
   }
+
 
   private syncSessionVersion(): void {
     this.handleSessionChanged(SessionEventBus.getCurrentVersion());
