@@ -12,7 +12,7 @@ import window from '@ohos.window';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { ImmersiveWindow } from '../../common/utils/ImmersiveWindow';
 import { Topic } from '../../models/Topic';
-import { User } from '../../models/User';
+import { SidebarTag, User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { ChallengeRecoveryCoordinator } from '../../services/challenge/ChallengeRecoveryCoordinator';
 import { ChallengeRecoveryEventBus } from '../../services/challenge/ChallengeRecoveryEventBus';
@@ -36,6 +36,7 @@ import { image } from '@kit.ImageKit';
 import { DohManager, DohResolveMode } from '../../services/network/DohManager';
 import { NetworkResult, NetworkErrorCode, ChallengeState } from '../../services/network/NetworkTypes';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
+import { CurrentUserEventBus } from '../../services/session/CurrentUserEventBus';
 import { LoginGate } from '../../services/session/LoginGate';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { ArkWebHost } from '../components/ArkWebHost';
@@ -151,6 +152,12 @@ export struct RootTabPage {
   // 用这个独立单调计数专门驱动「真就绪后重拉列表」,与 UI 解锁标志解耦。
   @State private hostReadyEpoch: number = 0;
   @State private currentUser?: User = undefined;
+  // 侧栏自选的标签与版块(current_user.sidebar_tags / sidebar_category_ids),首页筛选抽屉用。
+  // 独立于 currentUser 持有,不是图省事:它有两个更新源——会话检查(权威,会改登录态)与通知轮询
+  // 的静默快照(绝不能碰登录态)。单独存这两份,轮询那条路就不必去复制/合并整个 User,
+  // 也就没有「哪天 User 加了字段忘了同步」的坑。
+  @State private sidebarTags: SidebarTag[] = [];
+  @State private sidebarCategoryIds: number[] = [];
   @State private isCheckingSession: boolean = false;
   @State private hasCheckedSession: boolean = false;
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
@@ -201,6 +208,7 @@ export struct RootTabPage {
   private unsubscribeManualChallenge?: () => void = undefined;
   private unsubscribePushNavigation?: () => void = undefined;
   private unsubscribePushTokenUpdate?: () => void = undefined;
+  private unsubscribeCurrentUser?: () => void = undefined;
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
@@ -286,6 +294,12 @@ export struct RootTabPage {
     if (PushTokenUpdateEventBus.takePending()) {
       this.pushCoordinator.reconcile(true);
     }
+    // 通知轮询顺路带回来的 current_user 快照。
+    if (!this.unsubscribeCurrentUser) {
+      this.unsubscribeCurrentUser = CurrentUserEventBus.subscribe((user: User) => {
+        this.applyCurrentUserSnapshot(user);
+      });
+    }
     this.startNetworkRecoveryWatch();
   }
 
@@ -296,6 +310,10 @@ export struct RootTabPage {
     if (this.unsubscribeChallengeRequired) {
       this.unsubscribeChallengeRequired();
       this.unsubscribeChallengeRequired = undefined;
+    }
+    if (this.unsubscribeCurrentUser) {
+      this.unsubscribeCurrentUser();
+      this.unsubscribeCurrentUser = undefined;
     }
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
@@ -1123,6 +1141,9 @@ export struct RootTabPage {
       hostReadyEpoch: this.hostReadyEpoch,
       accountUser: this.currentUser ?? this.getAnonymousUser(),
       isLoggedIn: this.currentUser !== undefined,
+      // 侧栏自选的标签/版块单独传:它们由会话检查与通知轮询两条链路更新,不跟 accountUser 走同一份状态。
+      sidebarTags: this.sidebarTags,
+      sidebarCategoryIds: this.sidebarCategoryIds,
       isCheckingSession: this.isCheckingSession,
       hasCheckedSession: this.hasCheckedSession,
       onAccountClick: () => {
@@ -1692,6 +1713,7 @@ export struct RootTabPage {
     this.sessionCheckQueued = false;
     this.lastSessionCheckFailed = false;
     this.currentUser = undefined;
+    this.applySidebarPrefs(undefined);
     LoginGate.setLoggedIn(false);
     AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY, 0);
     this.notificationService.stop();
@@ -1729,6 +1751,8 @@ export struct RootTabPage {
       // 连接恢复,复位自愈闸,允许下一段网络故障再自愈一次。
       this.hasSelfHealedNetwork = false;
       this.currentUser = result.data;
+      // 侧栏自选数据跟着这次权威结果走(登出时 result.data 为空 → 一并清空,下一个账号不会看到上一个的)。
+      this.applySidebarPrefs(result.data);
       AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY,
         this.currentUser?.draftCount !== undefined ? this.currentUser.draftCount : 0);
       // 同步全局登录态镜像:供深层页面/楼层动作的写操作闸门(LoginGate)读取。
@@ -1787,6 +1811,33 @@ export struct RootTabPage {
     setTimeout(() => {
       this.checkCurrentUser();
     }, 0);
+  }
+
+  /**
+   * 通知轮询顺路带回来的 current_user 快照。只取侧栏自选的标签与版块,其余一概不动。
+   *
+   * 三条约束,少一条都会踩到会话链路:
+   *  · **绝不碰登录态**。轮询是静默链路(不走 checkCurrentUser,否则头像每轮闪一次 loading),
+   *    它发现真登出时走 SessionEventBus 让本页重查;这里连 currentUser 都不写。
+   *  · 只在本页已认定登录、且账号 id 对得上时采纳。换号瞬间可能收到旧账号的在途快照,
+   *    id 一对就挡住了。
+   *  · 会话检查在飞时让路:那条链路的结果更权威,不与它抢同一份状态。
+   *
+   * 未读数不在这里处理:它有自己的总线(NotificationEventBus),轮询早就发过了。
+   * 草稿数也不碰:删草稿是本地乐观递减的,服务端那个值可能还是删之前的缓存(见 handleDraftDeleted)。
+   */
+  private applyCurrentUserSnapshot(user: User): void {
+    const current: User | undefined = this.currentUser;
+    if (current === undefined || this.isCheckingSession || current.id !== user.id) {
+      return;
+    }
+    this.applySidebarPrefs(user);
+  }
+
+  // 侧栏自选数据落地。两条链路(会话检查 / 静默快照)共用,数组整体替换才能触发 @State 更新。
+  private applySidebarPrefs(user?: User): void {
+    this.sidebarTags = user?.sidebarTags !== undefined ? user.sidebarTags : [];
+    this.sidebarCategoryIds = user?.sidebarCategoryIds !== undefined ? user.sidebarCategoryIds : [];
   }
 
   // 下拉刷新时的会话补查:仅在上次检查失败(状态可能不真实)时重查一次,正常情况零开销。

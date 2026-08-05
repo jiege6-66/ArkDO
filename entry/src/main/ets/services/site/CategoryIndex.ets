@@ -114,6 +114,64 @@ export class CategoryIndex {
     return result;
   }
 
+  /**
+   * 「我的版块」置顶组的取值与排序:对齐 Discourse 网页版侧栏。
+   *
+   * 官方实现在 frontend/discourse/app/components/sidebar/common/categories-section.gjs 的 sortedCategories,
+   * 分三步且顺序不能颠倒:
+   *   ① 取**全站**版块。fixed_category_positions 为 false 时按名字排,为 true 时保持 /site.json 的顺序
+   *      (即 site.rb 的 `.order(:position)`,后台拖出来的那个顺序)
+   *   ② Category.sortCategories(models/category.js) 把子版块紧跟到各自父版块后面
+   *   ③ 最后才按 sidebar 的 id 过滤
+   * 先过滤再排会丢掉第 ② 步的父子归组,所以必须在全集上排完再筛。
+   *
+   * 第 ① 步这里**不排名字**:linux.do 把 fixed_category_positions 打开了。实测网页版侧栏是
+   * 开发调优 → 国产替代 → 前沿快讯,既非拼音序(国<开<前)也非码点序(前<国<开),只可能是 position 序。
+   * 这个开关是 client setting,只在网页预载的 HTML 里,/site.json 与 /session/current.json 都没有,
+   * App 读不到——所以按 linux.do 的实际取值写死。好处是与下面那棵版块树同源同序(它也吃 /site.json 顺序)。
+   *
+   * 与官方的一处有意偏差:父版块也被勾选时,这里丢掉它下面同样被勾选的子版块——
+   * 抽屉的置顶组是可展开的树(子版块从父版块的箭头里出来),两处都列会重复一次。
+   */
+  static sidebarOrdered(categories: TopicCategory[], sidebarIds: number[]): TopicCategory[] {
+    if (sidebarIds.length === 0 || categories.length === 0) {
+      return [];
+    }
+    const flattened: TopicCategory[] = [];
+    CategoryIndex.appendWithChildren(categories, undefined, flattened);
+
+    const result: TopicCategory[] = [];
+    for (let index: number = 0; index < flattened.length; index++) {
+      const category: TopicCategory = flattened[index];
+      if (sidebarIds.indexOf(category.id) < 0 || CategoryIndex.isUncategorized(category)) {
+        continue;
+      }
+      // 父版块也在选中集里:该子版块交给父版块的展开箭头去显示。
+      if (category.parentCategoryId !== undefined && sidebarIds.indexOf(category.parentCategoryId) >= 0) {
+        continue;
+      }
+      result.push(category);
+    }
+    return result;
+  }
+
+  // Category.sortCategories 的等价实现:深度优先展开,同层顺序保持传入顺序。
+  // parentId 为 undefined 即从顶级开始。
+  private static appendWithChildren(
+    categories: TopicCategory[],
+    parentId: number | undefined,
+    out: TopicCategory[]
+  ): void {
+    for (let index: number = 0; index < categories.length; index++) {
+      const category: TopicCategory = categories[index];
+      if (category.parentCategoryId !== parentId) {
+        continue;
+      }
+      out.push(category);
+      CategoryIndex.appendWithChildren(categories, category.id, out);
+    }
+  }
+
   static hasChildren(categories: TopicCategory[], parentId: number): boolean {
     for (let index: number = 0; index < categories.length; index++) {
       if (categories[index].parentCategoryId === parentId) {

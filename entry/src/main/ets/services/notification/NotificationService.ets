@@ -4,6 +4,7 @@ import { AuthService } from '../auth/AuthService';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { AppStateEventBus } from '../session/AppStateEventBus';
 import { SessionEventBus } from '../session/SessionEventBus';
+import { CurrentUserEventBus } from '../session/CurrentUserEventBus';
 import { NotificationEventBus } from './NotificationEventBus';
 import { MarkReadByTopicResult, NotificationApi } from './NotificationApi';
 import { MessageBusData, MessageBusEvent, MessageBusEventBus } from '../message/MessageBusEventBus';
@@ -133,6 +134,10 @@ export class NotificationService {
       unread: user.unreadNotifications !== undefined ? user.unreadNotifications : 0,
       highPriority: user.unreadHighPriorityNotifications !== undefined ? user.unreadHighPriorityNotifications : 0
     });
+    // 响应里除未读数之外的东西(侧栏自选标签/版块…)顺路转给根页面,别白扔:
+    // 这一次请求已经发了,不转的话用户在网页端改完侧栏得等到下次冷启动才生效。
+    // 采纳与否由订阅方决定,这里不碰登录态——登出仍走上面那条 SessionEventBus。
+    CurrentUserEventBus.publish(user);
   }
 
   private handleForegroundChanged(isForeground: boolean): void {

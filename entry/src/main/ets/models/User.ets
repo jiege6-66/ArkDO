@@ -1,3 +1,15 @@
+/**
+ * 侧栏自选标签的一项(current_user.sidebar_tags,即网页版侧栏「标签」分区点「编辑」挑出来的那批)。
+ *
+ * 字段与 TopicTag 完全一致,却在这里另立一份:models 里 Topic 单向 import User,反过来再引就成了循环依赖。
+ * 用于列表筛选时由 CategoryDrawer 转成 TopicTag(带 id+slug,正好拼得出最稳的 /tag/{slug}/{id} 路由)。
+ */
+export interface SidebarTag {
+  id?: number;
+  name: string;
+  slug?: string;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -17,4 +29,8 @@ export interface User {
   unreadHighPriorityNotifications?: number;
   // 未发出的草稿数(current_user.draft_count),个人中心草稿角标用。
   draftCount?: number;
+  // 侧栏自选的标签与版块(current_user.sidebar_tags / sidebar_category_ids),在网页版侧栏点「编辑」维护。
+  // 首页筛选抽屉把它们各自置顶,省得在几百个标签、几十个版块里翻;空数组=没配置过,抽屉照旧只给热门标签。
+  sidebarTags?: SidebarTag[];
+  sidebarCategoryIds?: number[];
 }

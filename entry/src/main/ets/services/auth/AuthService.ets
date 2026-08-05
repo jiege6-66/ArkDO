@@ -1,4 +1,5 @@
-import { User } from '../../models/User';
+import { SidebarTag, User } from '../../models/User';
+import { NameCollator } from '../../common/utils/NameCollator';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
@@ -23,6 +24,19 @@ interface DiscourseCurrentUser {
   // unread_notifications 只数 high_priority=FALSE,会漏掉私信,不能用于角标。
   all_unread_notifications_count?: number;
   draft_count?: number;
+  // 侧栏自选的标签与版块。CurrentUserSerializer 里由 UserSidebarMixin 提供:
+  // sidebar_tags = 用户 SidebarSectionLink 里 linkable_type='Tag' 的那些,已按话题数倒序、已按可见性过滤;
+  // sidebar_category_ids 同理(且已与用户可见版块求过交集)。tagging_enabled 关掉时前者整个不出现。
+  sidebar_tags?: DiscourseSidebarTag[];
+  sidebar_category_ids?: number[];
+}
+
+// SidebarTagSerializer:id/name/slug/description/pm_only。description 暂不用(抽屉一行放不下)。
+interface DiscourseSidebarTag {
+  id?: number;
+  name?: string;
+  slug?: string;
+  pm_only?: boolean;
 }
 
 export class AuthService {
@@ -85,7 +99,9 @@ export class AuthService {
             ? sourceUser.all_unread_notifications_count
             : (typeof sourceUser.unread_notifications === 'number' ? sourceUser.unread_notifications : 0),
           unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0,
-          draftCount: typeof sourceUser.draft_count === 'number' ? sourceUser.draft_count : 0
+          draftCount: typeof sourceUser.draft_count === 'number' ? sourceUser.draft_count : 0,
+          sidebarTags: this.mapSidebarTags(sourceUser.sidebar_tags),
+          sidebarCategoryIds: this.mapSidebarCategoryIds(sourceUser.sidebar_category_ids)
         }
       };
     } catch (error) {
@@ -111,6 +127,42 @@ export class AuthService {
       challengeState: response.challengeState,
       data: true
     };
+  }
+
+  /**
+   * 侧栏自选标签。做三件事:字段校验、丢掉私信专用标签(pm_only 在公开列表里筛不出任何东西,
+   * 与标签联想的处理一致)、**按名字排序**。
+   *
+   * 排序不是我们自己加的规则:服务端给的是话题数倒序(serialize_tags 的 `order(topic_count desc)`),
+   * 但网页版在前端把它按名字重排了(frontend/discourse/app/models/user.js 的 sidebarTags getter
+   * `sort((a, b) => a.name.localeCompare(b.name))`),侧栏看到的就是名字序。这里跟着排才对得上。
+   * 放在这层而不是渲染时排:每次会话检查只排一次,抽屉每帧 build 都排就浪费了。
+   */
+  private mapSidebarTags(sourceTags?: DiscourseSidebarTag[]): SidebarTag[] {
+    if (sourceTags === undefined) {
+      return [];
+    }
+    const tags: SidebarTag[] = [];
+    for (let index: number = 0; index < sourceTags.length; index++) {
+      const item: DiscourseSidebarTag = sourceTags[index];
+      if (item.pm_only === true || typeof item.name !== 'string' || item.name.length === 0) {
+        continue;
+      }
+      tags.push({
+        id: typeof item.id === 'number' ? item.id : undefined,
+        name: item.name,
+        slug: typeof item.slug === 'string' && item.slug.length > 0 ? item.slug : undefined
+      });
+    }
+    tags.sort((left: SidebarTag, right: SidebarTag) => NameCollator.compare(left.name, right.name));
+    return tags;
+  }
+
+  private mapSidebarCategoryIds(sourceIds?: number[]): number[] {
+    if (sourceIds === undefined) {
+      return [];
+    }
+    return sourceIds.filter((id: number) => typeof id === 'number' && id > 0);
   }
 
   private forwardFailure(response: NetworkResult<string>): NetworkResult<User | undefined> {

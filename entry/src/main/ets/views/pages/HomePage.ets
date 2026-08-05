@@ -5,7 +5,7 @@ import {
   HdsNavigationTitleMode
 } from '@kit.UIDesignKit';
 import { AppConstants } from '../../common/constants/AppConstants';
-import { User } from '../../models/User';
+import { SidebarTag, User } from '../../models/User';
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { TopicListItem } from '../components/TopicListItem';
 import { UserAvatar } from '../components/UserAvatar';
@@ -276,6 +276,9 @@ export struct HomePage {
   @Prop @Watch('handleHostReadyEpoch') hostReadyEpoch: number = 0;
   @Prop accountUser: User = { id: 0, username: '' };
   @Prop isLoggedIn: boolean = false;
+  // 侧栏自选的标签/版块,透传给筛选抽屉置顶。宿主(RootTabPage)持有:会话检查与通知轮询都会刷新它。
+  @Prop sidebarTags: SidebarTag[] = [];
+  @Prop sidebarCategoryIds: number[] = [];
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
   onAccountClick: () => void = () => {};
@@ -562,6 +565,10 @@ export struct HomePage {
             isArkWebReady: this.isArkWebReady,
             categories: this.categories,
             isLoggedIn: this.isLoggedIn,
+            // 侧栏自选的标签/版块:来自 /session/current.json,会话检查与通知轮询都会更新(不另发请求)。
+            // 没登录或没在网页版配置过就是空数组,抽屉自行退回原来的热门标签。
+            myTags: this.sidebarTags,
+            myCategoryIds: this.sidebarCategoryIds,
             sitesEntryEnabled: this.sitesEntryEnabled,
             sites: this.drawerSites,
             // 草稿与生效值都提到本页持有:抽屉内容按需卸载后,编辑中的选择不能跟着一起丢。
