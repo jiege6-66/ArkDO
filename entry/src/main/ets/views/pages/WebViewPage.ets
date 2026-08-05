@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { image } from '@kit.ImageKit';
-import { common, Want } from '@kit.AbilityKit';
+import { common, OpenLinkOptions } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
@@ -295,11 +295,14 @@ export struct WebViewPage {
   }
 
   private copyLink(): void {
-    const link: string = this.currentUrl();
+    this.copyToClipboard(this.currentUrl(), '链接已复制');
+  }
+
+  private copyToClipboard(link: string, okMessage: string): void {
     try {
       const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, link);
       pasteboard.getSystemPasteboard().setData(data).then(() => {
-        this.showToast('链接已复制');
+        this.showToast(okMessage);
       }).catch((err: BusinessError) => {
         Log.i(`${LOG_TAG} copy link failed code=${err.code}`);
         this.showToast('复制失败');
@@ -311,28 +314,49 @@ export struct WebViewPage {
   }
 
   // 逃生口:DoH 治不了的封锁交给系统浏览器(用户那边可能有代理)。
+  //
+  // 走 openLink(API 12 起官方推荐的开链入口):它先试 App Linking(域名已被某 App 认领
+  // 就直接进那个 App),没认领再按隐式 Want 交给浏览器。原先直接 startAbility 隐式 Want
+  // 只有后半段。两条路在"设备上一个浏览器都没有"时都会失败——系统选择器会自己弹一句
+  // 「暂无可用打开方式」(模拟器通常就没有浏览器),此时别让用户走进死胡同,把链接复制走。
   private openInBrowser(): void {
+    const link: string = this.currentUrl();
+    // 非 http(s) 地址(about:blank、data:、chrome-error:// 等)没有任何浏览器会认领,
+    // 送进去只会换来一句「暂无可用打开方式」。加载失败时引擎给的就常是这类地址。
+    if (!this.isBrowsableLink(link)) {
+      Log.i(`${LOG_TAG} open in browser skipped, not a http(s) link=${link}`);
+      this.showToast('当前页面地址无法用浏览器打开');
+      return;
+    }
     try {
-      const want: Want = {
-        action: 'ohos.want.action.viewData',
-        entities: ['entity.system.browsable'],
-        uri: this.currentUrl()
-      };
-      (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility(want).catch((err: BusinessError) => {
-        Log.i(`${LOG_TAG} open in browser failed code=${err.code} msg=${err.message}`);
-        this.showToast('没有可用的浏览器');
-      });
+      const options: OpenLinkOptions = { appLinkingOnly: false };
+      (this.getUIContext().getHostContext() as common.UIAbilityContext).openLink(link, options)
+        .catch((err: BusinessError) => {
+          Log.i(`${LOG_TAG} open link failed code=${err.code} msg=${err.message}`);
+          this.fallbackToCopy(link);
+        });
     } catch (error) {
-      Log.i(`${LOG_TAG} open in browser threw: ${JSON.stringify(error)}`);
-      this.showToast('没有可用的浏览器');
+      Log.i(`${LOG_TAG} open link threw: ${JSON.stringify(error)}`);
+      this.fallbackToCopy(link);
     }
   }
 
+  // 拉不起浏览器时的兜底:与其只报错,不如把链接塞进剪贴板,用户还能自己找地方粘。
+  private fallbackToCopy(link: string): void {
+    this.copyToClipboard(link, '未找到可用浏览器,链接已复制');
+  }
+
+  private isBrowsableLink(link: string): boolean {
+    const lower: string = link.toLowerCase();
+    return lower.startsWith('http://') || lower.startsWith('https://');
+  }
+
   // 当前地址:页面可能已经跳转过(OAuth 回跳尤其如此),复制/外开要以引擎的实际地址为准。
+  // 引擎在加载失败时会给出 about:blank 之类的占位地址,那种情况退回外部传入的原始 url。
   private currentUrl(): string {
     try {
       const current: string = this.controller.getUrl();
-      return current && current.length > 0 ? current : this.url;
+      return this.isBrowsableLink(current) ? current : this.url;
     } catch (error) {
       return this.url;
     }
