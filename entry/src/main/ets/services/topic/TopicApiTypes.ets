@@ -239,6 +239,18 @@ export interface DiscoursePost {
   polls?: DiscoursePoll[];
   polls_votes?: Record<string, string[]>;
   can_vote?: boolean;
+  // 本楼正文里各链接的被点击次数(PostSerializer#link_counts)。
+  link_counts?: DiscourseLinkCount[];
+}
+
+// link_counts 的一项。url 与 cooked 里的 href 同源(站内链接也是绝对地址),据此配对挂角标。
+// reflection=true 是「反链」——别的帖引用了本帖,它压根不出现在本楼正文里,只用于话题摘要,须剔除。
+export interface DiscourseLinkCount {
+  url?: string;
+  internal?: boolean;
+  reflection?: boolean;
+  title?: string;
+  clicks?: number;
 }
 
 // PUT/DELETE /polls/vote 的响应外壳:poll 为更新后的投票,vote 为当前用户已投项(撤销时缺省)。

@@ -40,6 +40,7 @@ import messageBusEventBusTest from './MessageBusEventBus.test';
 import draftServiceTest from './DraftService.test';
 import topicListQueryTest from './TopicListQuery.test';
 import lotteryTopicRuleTest from './LotteryTopicRule.test';
+import linkClicksTest from './LinkClicks.test';
 import topicListStyleTest from './TopicListStyle.test';
 
 export default function testsuite() {
@@ -84,5 +85,6 @@ export default function testsuite() {
   draftServiceTest();
   topicListQueryTest();
   lotteryTopicRuleTest();
+  linkClicksTest();
   topicListStyleTest();
 }

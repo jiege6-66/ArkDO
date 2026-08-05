@@ -263,6 +263,14 @@
     {
       "name": "lottery_notice_border",
       "value": "#F0DDBC"
+    },
+    {
+      "name": "link_clicks_bg",
+      "value": "#E6E8EB"
+    },
+    {
+      "name": "link_clicks_fg",
+      "value": "#767676"
     }
   ]
 }

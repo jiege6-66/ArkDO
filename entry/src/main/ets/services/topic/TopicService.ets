@@ -6,6 +6,7 @@ import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/Net
 import { AppConstants } from '../../common/constants/AppConstants';
 import { FeedKey } from '../site/FeedPrefs';
 import { buildTopicListPath, TopicListQuery } from './TopicListQuery';
+import { buildLinkClicks } from './LinkClicks';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 import { CreatePostResponse, CreateReplyPayload, CreateTopicPayload, DiscourseAcceptedAnswer,
   DiscourseBadgeDef, DiscourseBookmarkDeleteResponse, DiscourseBookmarkResponse, DiscourseBoost,
@@ -18,6 +19,9 @@ import { CreatePostResponse, CreateReplyPayload, CreateTopicPayload, DiscourseAc
 
 // linux.do shared issue（"俺也一样"）toggle 端点:同一 POST 翻转(点/撤),form body 只带 topic_id。
 const SHARED_ISSUE_TOGGLE_PATH: string = '/solution/shared_issue';
+
+// 链接点击上报端点(Discourse ClicksController#track)。
+const CLICK_TRACK_PATH: string = '/clicks/track';
 
 // 发表评论/回复的结果:要么直接发布得到新楼层 post,要么进了审核队列(pending)。
 export interface CreateReplyOutcome {
@@ -366,6 +370,16 @@ export class TopicService {
     const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
     // 后台上报不弹 CF 验证页(notifyChallenge:false)。
     return this.bridge.postForm('/topics/timings', body, { notifyChallenge: false, referrer: referrer });
+  }
+
+  // 上报一次正文链接点击(POST /clicks/track,form 三件套 url/post_id/topic_id)。
+  // Discourse 的链接点击数就是靠这条涨的——不报的话 ArkDO 用户点多少次都不计,
+  // 正文角标显示的永远只是网页端的数。作者点自己帖里的链接服务端不计,不必在这里过滤。
+  // 与 timings 同属后台上报:不弹 CF 验证页,失败也不该打扰正在看网页的用户。
+  async trackLinkClick(url: string, postId: number, topicId: number): Promise<NetworkResult<string>> {
+    const body: string = `url=${encodeURIComponent(url)}&post_id=${postId}&topic_id=${topicId}`;
+    const referrer: string = `${AppConstants.BASE_URL}/t/topic/${topicId}`;
+    return this.bridge.postForm(CLICK_TRACK_PATH, body, { notifyChallenge: false, referrer: referrer });
   }
 
   // discourse-reactions:切换某楼的表情回应(点亮/取消/切换)。PUT 空 body,同一楼同一用户只保留一个回应。
@@ -1258,6 +1272,7 @@ export class TopicService {
       post.badgeIcons = badgeMap && authorId !== undefined ? badgeMap.get(authorId) : undefined;
       post.yours = sourcePost.yours === true;
       post.canEdit = sourcePost.can_edit === true;
+      post.linkClicks = buildLinkClicks(cookedHtml, sourcePost.link_counts);
       posts.push(post);
     }
 

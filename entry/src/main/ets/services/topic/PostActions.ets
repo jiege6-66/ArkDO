@@ -179,6 +179,20 @@ export class PostActions {
     return { postBookmarked: false, topicBookmarked: undefined };
   }
 
+  // 正文链接点击埋点:让 ArkDO 用户的点击也计进 Discourse 的链接点击数(正文角标的来源)。
+  // 只报 http(s) 链接——站内路由跳转与本地媒体不是"访问了这个链接"。
+  // 不 await、不回传结果:跳转已经先行发生,埋点成败与用户无关,失败只留一行日志。
+  async trackLinkClick(post: TopicPost, url: string): Promise<void> {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return;
+    }
+    const result: NetworkResult<string> =
+      await new TopicService(this.getBridge()).trackLinkClick(url, post.id, this.resolveTopicId(post));
+    if (!result.success) {
+      Log.i(`${LOG_TAG} track link click failed postId=${post.id} status=${result.statusCode}`);
+    }
+  }
+
   // 主题 id:优先楼层自带,缺失时用页面 detail 兜底。
   private resolveTopicId(post: TopicPost): number {
     return post.topicId !== undefined ? post.topicId : this.getFallbackTopicId();

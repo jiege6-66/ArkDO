@@ -457,6 +457,10 @@ export struct TopicDetailPage {
           onOpenLink: (url: string) => {
             this.onOpenLink(url);
           },
+          onTrackLinkClick: (targetPost: TopicPost, url: string) => {
+            // 纯埋点,不 await:跳转已经发生,统计成败与这次交互无关。
+            this.postActions.trackLinkClick(targetPost, url);
+          },
           onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => {
             this.jumpToQuote(topicId, postNumber, fallbackUrl);
           },

@@ -93,6 +93,9 @@ export struct TopicPostItem {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 正文链接 / onebox 卡片点击继续上抛给页面(由页面经 LinkRouter 判断跳原生详情或通用 WebView)。
   onOpenLink: (url: string) => void = () => {};
+  // 正文里一条真链接被点开时的埋点上抛:页面持有 bridge,由它 POST /clicks/track。
+  // 不接这条线的场景(个人主页帖子列表等)缺省空实现——那里没有 topic 上下文,报了也无意义。
+  onTrackLinkClick: (post: TopicPost, url: string) => void = () => {};
   // 引用卡 arrow-up:同帖滚动定位、跨帖开详情,上抛给页面。
   onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
   // 引用卡取被引用楼层全文:上抛给页面(先翻已加载楼层,没有再打接口),拿不到返回 ''。
@@ -206,6 +209,10 @@ export struct TopicPostItem {
             onResolveQuotedPost: this.onResolveQuotedPost,
             onResolveMedia: this.onResolveMedia,
             polls: this.post.polls ? this.post.polls : [],
+            linkClicks: this.post.linkClicks,
+            onTrackLink: (url: string) => {
+              this.onTrackLinkClick(this.post, url);
+            },
             onVote: (poll: Poll, optionIds: string[]) => {
               return this.onVote(this.post, poll, optionIds);
             },
@@ -564,7 +571,11 @@ export struct TopicPostItem {
                     onOpenLink: this.onOpenLink,
                     onJumpToQuote: this.onJumpToQuote,
                     onResolveQuotedPost: this.onResolveQuotedPost,
-                    onResolveMedia: this.onResolveMedia
+                    onResolveMedia: this.onResolveMedia,
+                    linkClicks: reply.linkClicks,
+                    onTrackLink: (url: string) => {
+                      this.onTrackLinkClick(reply, url);
+                    }
                   })
                     .width('100%')
                     .margin({ top: 6 })

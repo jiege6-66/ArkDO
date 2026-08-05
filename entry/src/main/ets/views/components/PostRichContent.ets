@@ -14,6 +14,7 @@ import { AudioPlayer } from './AudioPlayer';
 import { VideoPlayer } from './VideoPlayer';
 import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
 import { Poll, PollVoteResult } from '../../models/TopicDetail';
+import { clicksForHref } from '../../services/topic/LinkClicks';
 import { PollView } from './PollView';
 import { UserAvatar } from './UserAvatar';
 import { TopicCategoryBadge } from './TopicCategoryBadge';
@@ -31,6 +32,10 @@ const LOG_TAG: string = '[ArkDO][PostRichContent]';
 // 块级图片自带尺寸小于该阈值（如 emoji 20×20、小图标）时按真实尺寸显示，
 // 不撑满栏宽，避免小表情被 .width('100%') 拉成大方块。
 const SMALL_IMAGE_MAX: number = 48;
+// 链接点击数角标的字号与高度。两者分开:高度取正文行高(22)让胶囊与前面的链接文字齐平,
+// 字号比正文(15)小一号,数字不抢戏。圆角与内边距都从高度算出来,嫌大只动这两个值。
+const LINK_CLICKS_BADGE_FONT_SIZE: number = 14;
+const LINK_CLICKS_BADGE_LINE_HEIGHT: number = 22;
 
 // 图片浏览器 hero 转场用的源节点 id 序号：id 必须全 app 唯一，而同一张图 URL 可能同时
 // 出现在多个 post(引用/跨楼层重复贴图)里,单靠 URL 会撞。每个 PostRichContent 实例领一个
@@ -95,6 +100,10 @@ export struct PostRichContent {
   onOpenImages: (images: ViewerImage[], startIndex: number) => void = () => {};
   // 点击正文链接 / onebox 卡片时上抛给页面,由页面经 LinkRouter 判断跳原生详情或通用 WebView。
   onOpenLink: (url: string) => void = () => {};
+  // 点击的是「正文里的一条链接」时额外上抛一次,由页面上报 /clicks/track 让点击数涨起来。
+  // 与 onOpenLink 分开是因为可点的不止链接:灯箱大图、引用卡跳转也走 onOpenLink,
+  // 但官方一律不计入点击数,混在一起会把统计打歪。
+  onTrackLink: (url: string) => void = () => {};
   // 引用卡右上角 arrow-up 点击:跳到被引用楼层。同帖(topicId==当前帖)由页面滚动定位,跨帖走 fallbackUrl 开详情。
   onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
   // 取被引用楼层的全文 cooked:页面先翻已加载楼层,没有再 GET /posts/by_number 拉取。拿不到返回 ''。
@@ -103,6 +112,9 @@ export struct PostRichContent {
   onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 该 post 的投票列表(动态票数/已投项);cooked 里的 POLL 块按 name 关联到这里的 Poll 对象。
   polls: Poll[] = [];
+  // 该 post 各链接的点击数(href → 次数),由 LinkClicks 从 link_counts 建表。缺省=本楼无可展示计数。
+  // 与 polls 同理:属于随 post JSON 变动的动态数据,不能进按 cooked 缓存的解析结果。
+  linkClicks: Map<string, number> | undefined = undefined;
   // 投票/撤销回调上抛给页面做乐观闭环。返回服务端校正结果;null=失败(供 PollView 回滚本地态)。
   onVote: (poll: Poll, optionIds: string[]) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
   onRemoveVote: (poll: Poll) => Promise<PollVoteResult | null> = () => Promise.resolve(null);
@@ -354,6 +366,46 @@ export struct PostRichContent {
     .margin({ top: marginTop })
   }
 
+  // 链接后面的点击数角标(灰底胶囊),对齐官方 span.badge-notification.clicks。0 次不显示。
+  // 前置一个无背景空格 Span:既当外间距,又是这一小段里唯一的可断行点——换行时胶囊整体下移,
+  // 不会出现「数字被拆到下一行」。与话题列表未读数角标同法。
+  //
+  // 胶囊高度要跟前面的链接文字齐平:Span 背景是按自己的行盒画的,不吃外层 Text 的 lineHeight,
+  // 所以这里显式给 LINK_CLICKS_BADGE_LINE_HEIGHT(= 正文行高),背景才撑到整行高而不是缩成一小条。
+  // 字号仍比正文小一号,保持"角标"的观感——放大的是底,不是数字。
+  @Builder
+  private ClicksBadgeSpan(clicks: number) {
+    if (clicks > 0) {
+      Span(' ')
+        .fontSize(LINK_CLICKS_BADGE_FONT_SIZE)
+      Span(` ${clicks} `)
+        .fontSize(LINK_CLICKS_BADGE_FONT_SIZE)
+        .lineHeight(LINK_CLICKS_BADGE_LINE_HEIGHT)
+        .fontColor($r('app.color.link_clicks_fg'))
+        .textBackgroundStyle({
+          color: $r('app.color.link_clicks_bg'),
+          radius: LINK_CLICKS_BADGE_LINE_HEIGHT / 2
+        })
+    }
+  }
+
+  // 同上,组件形态——用在 Row/Column 里(onebox 卡片);行内文本里用 ClicksBadgeSpan。
+  // 这里是真组件,高度直接给死即可,不必绕行盒。
+  @Builder
+  private ClicksBadgeTag(clicks: number) {
+    if (clicks > 0) {
+      Text(`${clicks}`)
+        .fontSize(LINK_CLICKS_BADGE_FONT_SIZE)
+        .fontColor($r('app.color.link_clicks_fg'))
+        .backgroundColor($r('app.color.link_clicks_bg'))
+        .height(LINK_CLICKS_BADGE_LINE_HEIGHT)
+        .borderRadius(LINK_CLICKS_BADGE_LINE_HEIGHT / 2)
+        .textAlign(TextAlign.Center)
+        .padding({ left: 8, right: 8 })
+        .margin({ left: 6 })
+    }
+  }
+
   // baseSize/baseBold:普通文本 Span 的基准字号与加粗。Span 自身属性会覆盖外层 Text,故标题这类
   // 需放大/加粗的容器必须把字号粗细传进来,否则被 Span 写死的 15/Normal 盖掉(标题不生效的根因)。
   @Builder
@@ -422,7 +474,7 @@ export struct PostRichContent {
           .verticalAlign(ImageSpanAlignment.CENTER)
           .margin({ right: 4 })
           .onClick(() => {
-            this.openLink(token.href as string);
+            this.openTrackedLink(token.href as string);
           })
       }
       Span(token.text)
@@ -431,8 +483,9 @@ export struct PostRichContent {
         .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
         .onClick(() => {
-          this.openLink(token.href as string);
+          this.openTrackedLink(token.href as string);
         })
+      this.ClicksBadgeSpan(this.linkClicksOf(token.href))
     } else if (token.type === RichInlineType.CODE || token.code) {
       if (token.spoiler) {
         Span(token.text)
@@ -760,8 +813,9 @@ export struct PostRichContent {
         .decoration({ type: TextDecorationType.Underline, color: accent })
         .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
         .onClick(() => {
-          this.openLink(token.href as string);
+          this.openTrackedLink(token.href as string);
         })
+      this.ClicksBadgeSpan(this.linkClicksOf(token.href))
     } else if (token.type === RichInlineType.CODE || token.code) {
       Span(token.text)
         .fontFamily('monospace')
@@ -1061,13 +1115,22 @@ export struct PostRichContent {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
+            // 整张卡只挂一枚角标(官方在 onebox 里也只挑「最佳链接」挂一次)。放在域名行右端,
+            // 不塞进标题——标题限两行带省略号,长标题会把角标一起省略掉。
+            this.ClicksBadgeTag(this.linkClicksOf(block.href))
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
         }
 
         if (block.title && block.title.length > 0) {
-          Text(block.title)
+          Text() {
+            Span(block.title)
+            // 没有域名行(无 domain 也无 favicon)时角标退回标题末尾,否则这张卡就没地方挂了。
+            if (!this.hasOneboxHeader(block)) {
+              this.ClicksBadgeSpan(this.linkClicksOf(block.href))
+            }
+          }
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.brand'))
@@ -1097,7 +1160,7 @@ export struct PostRichContent {
       .outline({ width: 4, color: $r('app.color.post_content_surface_bg'), radius: 2 })
       .alignItems(HorizontalAlign.Start)
       .onClick(() => {
-        this.openLink(block.href ? block.href : '');
+        this.openTrackedLink(block.href ? block.href : '');
       })
     }
     .width('100%')
@@ -1761,6 +1824,20 @@ export struct PostRichContent {
       return block.src;
     }
     return '';
+  }
+
+  // 取某个链接的点击数,0 表示不挂角标。
+  private linkClicksOf(href: string | undefined): number {
+    return clicksForHref(this.linkClicks, href ? href : '');
+  }
+
+  // 正文里一条真链接被点开:先跳转再埋点(埋点是纯统计,不该让跳转等它)。
+  private openTrackedLink(url: string): void {
+    if (url.length === 0) {
+      return;
+    }
+    this.openLink(url);
+    this.onTrackLink(url);
   }
 
   private openLink(url: string): void {
