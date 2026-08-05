@@ -8,6 +8,8 @@ export enum AppRouteName {
   NETWORK_SETTINGS = 'networkSettings',
   LAB_SETTINGS = 'labSettings',
   DIAGNOSTICS_SETTINGS = 'diagnosticsSettings',
+  // 帖子列表样式(字号/字重/行高/行间距/头像),入口在设置页「外观」组。
+  TOPIC_LIST_STYLE_SETTINGS = 'topicListStyleSettings',
   LEVEL_PROGRESS = 'levelProgress',
   WEB = 'web',
   NOTIFICATIONS = 'notifications',
@@ -96,6 +98,16 @@ export interface LabSettingsRouteParam {
 }
 
 export function buildLabSettingsRouteParam(source: string): LabSettingsRouteParam {
+  return {
+    source: source
+  };
+}
+
+export interface TopicListStyleSettingsRouteParam {
+  source: string;
+}
+
+export function buildTopicListStyleSettingsRouteParam(source: string): TopicListStyleSettingsRouteParam {
   return {
     source: source
   };

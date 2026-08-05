@@ -27,6 +27,7 @@ import { BadgeFilterPrefs } from '../services/home/BadgeFilterPrefs';
 import { LotteryTipPrefs } from '../services/topic/LotteryTipPrefs';
 import { RealtimePostsPrefs } from '../services/realtime/RealtimePostsPrefs';
 import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
+import { TopicListStylePrefs } from '../common/theme/TopicListStylePrefs';
 import { AnimatedAvatarPrefs } from '../services/avatar/AnimatedAvatarPrefs';
 
 const DOMAIN = 0x0000;
@@ -60,6 +61,9 @@ export default class EntryAbility extends UIAbility {
     // 「悬浮按钮玻璃效果」开关：读盘并种入 AppStorage 镜像，须早于首页/详情页 FAB 挂载，
     // 保证首帧 FAB 就按正确样式渲染(默认关⇒当前透明样式)。
     FabGlassPrefs.load(this.context);
+    // 「帖子列表样式」(字号/字重/行高/行间距/头像):读盘并种入 AppStorage 镜像,须早于任何
+    // 帖子列表挂载,保证首帧就按用户设置渲染,不出现「先按默认画一遍再跳成设置值」。
+    TopicListStylePrefs.load(this.context);
     // 「动态头像」开关：读盘并种入 AppStorage 镜像，须早于任何列表挂载——UserAvatar 在
     // aboutToAppear 就要据此决定走原生 Image(可播动图)还是走桥取首帧(静态)。
     AnimatedAvatarPrefs.load(this.context);

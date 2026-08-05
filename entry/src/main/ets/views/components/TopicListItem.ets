@@ -1,6 +1,28 @@
 import { Topic, TopicCategory, TopicTag } from '../../models/Topic';
 import { RelativeTime } from '../../common/utils/RelativeTime';
-import { FONT_BODY_LARGE } from '../../common/theme/Metrics';
+import {
+  avatarGap,
+  AVATAR_SIZE_DEFAULT,
+  blurbGap,
+  clampAvatarSize,
+  inlineIconGap,
+  inlineIconSize,
+  LINE_HEIGHT_RATIO_DEFAULT,
+  metaRowGap,
+  ROW_PADDING_DEFAULT,
+  secondaryFontSize,
+  TITLE_FONT_SIZE_DEFAULT,
+  TITLE_FONT_WEIGHT_DEFAULT,
+  titleLineHeight,
+  TOPIC_LIST_AVATAR_SIZE_KEY,
+  TOPIC_LIST_LINE_HEIGHT_RATIO_KEY,
+  TOPIC_LIST_ROW_PADDING_KEY,
+  TOPIC_LIST_TITLE_FONT_SIZE_KEY,
+  TOPIC_LIST_TITLE_FONT_WEIGHT_KEY,
+  unreadBadgeFontSize,
+  unreadBadgeRadius,
+  unseenDotFontSize
+} from '../../common/theme/TopicListStylePrefs';
 import { TopicMetadataBadges } from './TopicBadges';
 import { UserAvatar } from './UserAvatar';
 import {
@@ -45,7 +67,17 @@ export struct TopicListItem {
   @Prop incomingInsertFadeIn: boolean = false;
   // 仅新增行回传自身实测高度，父组件累加得到插入块总高，用作旧行整块下滑的距离。
   onIncomingInsertMeasured: (topicId: number, height: number) => void = () => {};
+  // 无条件回传本行实测高度。样式设置页据此把预览容器高度贴合内容(行高随设置项变,估不准);
+  // 各真实列表不传,零影响。
+  onMeasured?: (height: number) => void = undefined;
   @StorageProp(APP_IS_DARK_STORAGE_KEY) private appIsDark: boolean = false;
+  // 「帖子列表样式」设置的五个可调值。设置页拖动滑块 → AppStorage 变更 → 三处列表同步重排。
+  // 次要文字、未读药丸、内联图标、内部间距均由这五个值派生,不单独持久化。
+  @StorageProp(TOPIC_LIST_TITLE_FONT_SIZE_KEY) private titleFontSize: number = TITLE_FONT_SIZE_DEFAULT;
+  @StorageProp(TOPIC_LIST_TITLE_FONT_WEIGHT_KEY) private titleFontWeight: number = TITLE_FONT_WEIGHT_DEFAULT;
+  @StorageProp(TOPIC_LIST_LINE_HEIGHT_RATIO_KEY) private lineHeightRatio: number = LINE_HEIGHT_RATIO_DEFAULT;
+  @StorageProp(TOPIC_LIST_ROW_PADDING_KEY) private rowPadding: number = ROW_PADDING_DEFAULT;
+  @StorageProp(TOPIC_LIST_AVATAR_SIZE_KEY) private avatarSize: number = AVATAR_SIZE_DEFAULT;
   @State private incomingHighlightActive: boolean = false;
   private incomingHighlightTimerId: number = -1;
 
@@ -86,8 +118,10 @@ export struct TopicListItem {
     ListItem() {
       Column() {
         Row() {
-          UserAvatar({ user: this.topic.author, avatarSize: 48 })
-            .margin({ right: 8 })
+          // 外套一层 clampAvatarSize:ArkTS 不允许把 @StorageProp 变量直接赋给子组件的普通属性,
+          // 而这一层顺带把可能被改坏的持久化值再钳一次,不是纯粹的语法绕行。
+          UserAvatar({ user: this.topic.author, avatarSize: clampAvatarSize(this.avatarSize) })
+            .margin({ right: avatarGap(this.avatarSize) })
 
           Column() {
           // 未读徽标 / 小蓝点都作为内联 Span 追加在标题文本流末尾,始终贴在最后一行文字后面。
@@ -103,17 +137,17 @@ export struct TopicListItem {
             // 排在已解决勾选框之前。
             if (this.topic.bookmarked === true) {
               ImageSpan($rawfile('fa_icons/bookmark-gray.svg'))
-                .width(15)
-                .height(15)
-                .margin({ right: 5 })
+                .width(this.inlineIconSizeValue())
+                .height(this.inlineIconSizeValue())
+                .margin({ right: inlineIconGap(this.inlineIconSizeValue()) })
                 .verticalAlign(ImageSpanAlignment.CENTER)
             }
             // 已解决:标题行首内联绿色勾选框标记(烘 #090 专用 SVG,ImageSpan 内联随标题文字换行同排)。
             if (this.topic.hasAcceptedAnswer === true) {
               ImageSpan($rawfile('fa_icons/far-square-check-green.svg'))
-                .width(15)
-                .height(15)
-                .margin({ right: 5 })
+                .width(this.inlineIconSizeValue())
+                .height(this.inlineIconSizeValue())
+                .margin({ right: inlineIconGap(this.inlineIconSizeValue()) })
                 .verticalAlign(ImageSpanAlignment.CENTER)
             }
             // 标题:搜索场景把命中词染品牌色(逐段拆 Span);普通 feed 保持单 Span 不变。
@@ -121,7 +155,8 @@ export struct TopicListItem {
               ForEach(this.titleSegments(), (seg: BlurbSegment, index: number) => {
                 Span(seg.text)
                   .fontColor(seg.hit ? $r('app.color.brand') : $r('app.color.text_body'))
-                  .fontWeight(FontWeight.Medium)
+                  // 分段 Span 会盖掉父 Text 的字重,得把设置值原样落到每一段上。
+                  .fontWeight(this.titleFontWeight)
               }, (seg: BlurbSegment, index: number) => `t${index}`)
             } else {
               Span(this.topic.title)
@@ -129,22 +164,25 @@ export struct TopicListItem {
             if (this.hasUnreadBadge()) {
               // 无背景的普通空格作外间距兼唯一可断点:药丸整体在此换行,不会被拆。
               Span('  ')
-                .fontSize(12)
+                .fontSize(this.unreadBadgeFontSizeValue())
               Span(` ${this.topic.unreadPosts} `)
-                .fontSize(12)
+                .fontSize(this.unreadBadgeFontSizeValue())
                 .fontColor(Color.White)
                 // 未读标记蓝:语义强调色,明暗底都成立,保留字面量(勿映射 ld_accent,白天会变深蓝)。
-                .textBackgroundStyle({ color: '#66CCFF', radius: 9 })
+                .textBackgroundStyle({
+                  color: '#66CCFF',
+                  radius: unreadBadgeRadius(this.unreadBadgeFontSizeValue())
+                })
             } else if (this.topic.unseen === true) {
               Span(' ●')
-                .fontSize(8)
+                .fontSize(unseenDotFontSize(this.titleFontSize))
                 .fontColor('#66CCFF')
             }
           }
-          .fontSize(FONT_BODY_LARGE)
-          .fontWeight(FontWeight.Medium)
+          .fontSize(this.titleFontSize)
+          .fontWeight(this.titleFontWeight)
           .fontColor($r('app.color.text_body'))
-          .lineHeight(23)
+          .lineHeight(titleLineHeight(this.titleFontSize, this.lineHeightRatio))
           .textVerticalAlign(TextVerticalAlign.CENTER)
           .width('100%')
 
@@ -157,11 +195,11 @@ export struct TopicListItem {
                   .fontWeight(seg.hit ? FontWeight.Medium : FontWeight.Regular)
               }, (seg: BlurbSegment, index: number) => `${index}`)
             }
-            .fontSize(13)
+            .fontSize(secondaryFontSize(this.titleFontSize))
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-            .margin({ top: 4 })
+            .margin({ top: blurbGap(this.rowPadding) })
           }
 
           // 分类 / 标签 与 时间同一行:徽标占剩余宽度可横向滚动,时间固定在最右侧。
@@ -183,14 +221,14 @@ export struct TopicListItem {
 
               if (this.getRelativeTime().length > 0) {
                 Text(this.getRelativeTime())
-                  .fontSize(13)
+                  .fontSize(secondaryFontSize(this.titleFontSize))
                   .fontColor($r('app.color.text_secondary'))
                   .margin({ left: 8 })
               }
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
-            .margin({ top: 3 })
+            .margin({ top: metaRowGap(this.rowPadding) })
           }
           }
           .layoutWeight(1)
@@ -200,8 +238,8 @@ export struct TopicListItem {
         .padding({
           left: this.contentHorizontalPadding,
           right: this.contentHorizontalPadding,
-          top: 8,
-          bottom: 8
+          top: this.rowPadding,
+          bottom: this.rowPadding
         })
         .backgroundColor(incomingTopicHighlightBackground(this.incomingHighlightActive, this.appIsDark))
         .animation({ duration: INCOMING_HIGHLIGHT_FADE_MS, curve: Curve.EaseOut })
@@ -229,7 +267,19 @@ export struct TopicListItem {
       if (this.incomingInsertFadeIn) {
         this.onIncomingInsertMeasured(this.topic.id, Number(newValue.height));
       }
+      if (this.onMeasured !== undefined) {
+        this.onMeasured(Number(newValue.height));
+      }
     })
+  }
+
+  // 未读药丸与内联图标的尺寸都从标题字号派生,build 里多处引用,收成方法免得散着算。
+  private unreadBadgeFontSizeValue(): number {
+    return unreadBadgeFontSize(this.titleFontSize);
+  }
+
+  private inlineIconSizeValue(): number {
+    return inlineIconSize(this.titleFontSize);
   }
 
   private hasUnreadBadge(): boolean {

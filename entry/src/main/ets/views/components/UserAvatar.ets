@@ -8,7 +8,10 @@ import { ANIMATED_AVATAR_ENABLED_STORAGE_KEY } from '../../services/avatar/Anima
 @Component
 export struct UserAvatar {
   user?: User;
-  avatarSize: number = 38;
+  // @Prop 而非普通成员:普通成员只在子组件创建时被父组件初始化一次,父组件之后再传新值也不会同步过来。
+  // 二十个调用点里十九个传的是常量,唯独帖子列表的头像尺寸可由用户在设置里实时拖动,不加 @Prop
+  // 就会出现「间距变了、头像纹丝不动」——间距是 TopicListItem 自己 build 里的,头像却卡在首次挂载的值。
+  @Prop @Watch('onAvatarSizeChanged') avatarSize: number = 38;
   private readonly avatarImageSize: string = '96';
   private readonly avatarBorderColor: string = '#4D00AEFF';
   // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
@@ -30,6 +33,12 @@ export struct UserAvatar {
   // 开关运行中翻转:重走一遍候选准备。开⇒原生分支直接生效(无需加载);关⇒补取首帧 PixelMap。
   private onAnimatedAvatarToggled(): void {
     this.prepareCurrentCandidate();
+    this.prepareFlairIfNeeded();
+  }
+
+  // 尺寸变化只影响 flair:hasFlair() 拿 avatarSize 与 flairMinAvatarSize 比,头像跨过这个门槛时
+  // 角标从不显示变为显示,得补上它的取帧。头像本体的候选与尺寸无关,不必重走。
+  private onAvatarSizeChanged(): void {
     this.prepareFlairIfNeeded();
   }
 

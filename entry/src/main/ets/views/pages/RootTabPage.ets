@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, BreakpointManager } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildTopicListStyleSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -54,6 +54,7 @@ import { DohSettingsPage } from './DohSettingsPage';
 import { PushSettingsPage } from './PushSettingsPage';
 import { NetworkSettingsPage } from './NetworkSettingsPage';
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
+import { TopicListStyleSettingsPage } from './TopicListStyleSettingsPage';
 import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
@@ -735,6 +736,10 @@ export struct RootTabPage {
           onOpenExperimental: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.LAB_SETTINGS, buildLabSettingsRouteParam('settings')));
           },
+          onOpenTopicListStyle: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.TOPIC_LIST_STYLE_SETTINGS,
+              buildTopicListStyleSettingsRouteParam('settings')));
+          },
           onOpenDiagnostics: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.DIAGNOSTICS_SETTINGS, buildDiagnosticsSettingsRouteParam('settings')));
           },
@@ -798,6 +803,16 @@ export struct RootTabPage {
     } else if (name === AppRouteName.LAB_SETTINGS) {
       NavDestination() {
         ExperimentalSettingsPage({
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.TOPIC_LIST_STYLE_SETTINGS) {
+      NavDestination() {
+        TopicListStyleSettingsPage({
           onBack: () => {
             this.popNavigation();
           }

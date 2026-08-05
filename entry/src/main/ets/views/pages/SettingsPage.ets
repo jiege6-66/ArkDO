@@ -37,6 +37,8 @@ export struct SettingsPage {
   onOpenPush: () => void = () => {};
   onOpenNetwork: () => void = () => {};
   onOpenExperimental: () => void = () => {};
+  // 帖子列表样式子页(字号/字重/行高/行间距/头像)。与外观同组:都是纯观感设置。
+  onOpenTopicListStyle: () => void = () => {};
   // 站点管理页:与上面四个同款,push 由 RootTabPage 注入。
   onOpenSites: () => void = () => {};
   onOpenDiagnostics: () => void = () => {};
@@ -144,6 +146,10 @@ export struct SettingsPage {
       // 卡片:外观(高频,内联)
       Column() {
         this.AppearanceCell()
+        this.HairlineInset()
+        this.SettingCell($r('sys.symbol.textformat'), '帖子列表样式', '', () => {
+          this.onOpenTopicListStyle();
+        })
         this.HairlineInset()
         this.FabGlassRow()
       }
