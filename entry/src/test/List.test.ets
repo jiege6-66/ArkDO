@@ -42,6 +42,7 @@ import topicListQueryTest from './TopicListQuery.test';
 import lotteryTopicRuleTest from './LotteryTopicRule.test';
 import linkClicksTest from './LinkClicks.test';
 import topicListStyleTest from './TopicListStyle.test';
+import breakpointManagerTest from './BreakpointManager.test';
 
 export default function testsuite() {
   localUnitTest();
@@ -87,4 +88,5 @@ export default function testsuite() {
   lotteryTopicRuleTest();
   linkClicksTest();
   topicListStyleTest();
+  breakpointManagerTest();
 }
