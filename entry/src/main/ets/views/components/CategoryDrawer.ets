@@ -981,6 +981,23 @@ export struct CategoryDrawer {
       return;
     }
     const scope: TopicCategory | undefined = category !== undefined ? category : this.draft.category;
+
+    // 「没输搜索词 + 没选版块」= 要的是站点热门标签,而不是一次联想查询。
+    // 这份数据 /site.json 里就有(top_tags),而首页早已为版块树拉过那个接口 —— 直接读缓存,
+    // 既省一次请求,又绕开 /tags/filter/search 的 max_tag_search_results 上限
+    // (默认只有 5,超了整个请求会被拒,曾导致 meta.discourse.org 上「暂无可选标签」)。
+    if (query.length === 0 && scope === undefined) {
+      const top: TopicTag[] = CategoryIndex.topTags();
+      if (top.length > 0) {
+        this.tagSeq++;
+        this.tagLoading = false;
+        this.tagResults = CategoryDrawer.toSuggestions(top);
+        this.tagResultsLoaded = true;
+        return;
+      }
+      // 拿不到就照旧走联想接口兜底:站点信息可能还没加载完,或该站没开标签功能。
+    }
+
     const seq: number = this.tagSeq + 1;
     this.tagSeq = seq;
     this.tagLoading = true;
@@ -1004,6 +1021,17 @@ export struct CategoryDrawer {
     }
     this.tagResults = [];
     Log.i(`${LOG_TAG} tag suggest failed status=${result.statusCode}`);
+  }
+
+  // top_tags 只有 {id,name,slug},没有 count/description —— 抽屉的标签行只用到 name,
+  // 缺的字段给零值即可,不必为此再查一遍。
+  private static toSuggestions(tags: TopicTag[]): TagSuggestion[] {
+    const list: TagSuggestion[] = [];
+    for (let index: number = 0; index < tags.length; index++) {
+      const tag: TopicTag = tags[index];
+      list.push({ id: tag.id ?? 0, name: tag.name, text: tag.name, count: 0 });
+    }
+    return list;
   }
 
   private clearTagDebounce(): void {

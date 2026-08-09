@@ -1,9 +1,18 @@
-import { TopicCategory } from '../../models/Topic';
+import { TopicCategory, TopicTag } from '../../models/Topic';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
 interface DiscourseSiteResponse {
   categories?: DiscourseCategory[];
+  // 站点热门标签。Discourse 在 /site.json 里直接给,匿名可见 —— 抽屉的「常用标签」用它,
+  // 既不必额外发请求,也不受 /tags/filter/search 的 max_tag_search_results 上限约束。
+  top_tags?: DiscourseTopTag[];
+}
+
+interface DiscourseTopTag {
+  id?: number;
+  name?: string;
+  slug?: string;
 }
 
 interface DiscourseCategory {
@@ -24,6 +33,8 @@ interface DiscourseUploadedLogo {
 
 export interface SiteMetadata {
   categories: TopicCategory[];
+  /** 站点热门标签(按热度排)。站点没开标签功能时为空数组。 */
+  topTags: TopicTag[];
 }
 
 export class SiteService {
@@ -54,12 +65,29 @@ export class SiteService {
         statusCode: response.statusCode,
         challengeState: response.challengeState,
         data: {
-          categories: this.mapCategories(payload.categories)
+          categories: this.mapCategories(payload.categories),
+          topTags: this.mapTopTags(payload.top_tags)
         }
       };
     } catch (error) {
       return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应不是有效 JSON。');
     }
+  }
+
+  // 站点没开标签功能时 /site.json 里没有 top_tags,返回空数组即可 —— 抽屉据此显示空态。
+  private mapTopTags(sourceTags?: DiscourseTopTag[]): TopicTag[] {
+    const tags: TopicTag[] = [];
+    if (!sourceTags) {
+      return tags;
+    }
+    for (let index: number = 0; index < sourceTags.length; index++) {
+      const raw: DiscourseTopTag = sourceTags[index];
+      if (typeof raw.name !== 'string' || raw.name.length === 0) {
+        continue;
+      }
+      tags.push({ id: raw.id, name: raw.name, slug: raw.slug });
+    }
+    return tags;
   }
 
   private mapCategories(sourceCategories: DiscourseCategory[]): TopicCategory[] {

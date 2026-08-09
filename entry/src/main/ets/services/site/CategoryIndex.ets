@@ -1,5 +1,5 @@
 import { Log } from '../logging/Log';
-import { TopicCategory } from '../../models/Topic';
+import { TopicCategory, TopicTag } from '../../models/Topic';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { SiteMetadata, SiteService } from './SiteService';
 
@@ -12,6 +12,9 @@ import { SiteMetadata, SiteService } from './SiteService';
 // Promise,避免冷启动时首页/个人中心同时各拉一份。
 export class CategoryIndex {
   private static cachedCategories: TopicCategory[] | null = null;
+  // 与版块同一份 /site.json 响应里带回来的站点热门标签,顺手缓存 —— 抽屉的「常用标签」用它,
+  // 不必再为此单独发请求。
+  private static cachedTopTags: TopicTag[] = [];
   private static inflight: Promise<TopicCategory[] | null> | null = null;
 
   // 按需加载分类:未就绪/页面已有数据(alreadyLoaded)时返回 null 表示无需更新;
@@ -42,7 +45,8 @@ export class CategoryIndex {
     const result: NetworkResult<SiteMetadata> = await new SiteService(bridge).getSiteMetadata();
     if (result.success && result.data) {
       CategoryIndex.cachedCategories = result.data.categories;
-      Log.i(`${logTag} site metadata loaded categories=${result.data.categories.length}`);
+      CategoryIndex.cachedTopTags = result.data.topTags;
+      Log.i(`${logTag} site metadata loaded categories=${result.data.categories.length} topTags=${result.data.topTags.length}`);
       return CategoryIndex.cachedCategories;
     }
     Log.i(`${logTag} site metadata skipped status=${result.statusCode}`);
@@ -54,7 +58,13 @@ export class CategoryIndex {
    * 清掉进程内的版块缓存。切站时必须调用 —— 版块是站点级数据,旧站的版块树
    * 套在新站上会让抽屉/筛选显示一堆不存在的版块。
    */
+  /** 站点热门标签。尚未加载或站点没开标签功能时为空数组。 */
+  static topTags(): TopicTag[] {
+    return CategoryIndex.cachedTopTags;
+  }
+
   static clearCache(): void {
+    CategoryIndex.cachedTopTags = [];
     CategoryIndex.cachedCategories = null;
     CategoryIndex.inflight = null;
   }
