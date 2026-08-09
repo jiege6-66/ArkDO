@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { Log } from '../logging/Log';
 import { PushRelayRegistration } from './PushSubscriptionService';
+import { SiteScope } from '../site/SiteScope';
 
 const LOG_TAG: string = '[ArkDO][PushStore]';
 const PREF_STORE_NAME: string = 'app_settings';
@@ -102,8 +103,13 @@ export class PushSubscriptionStore {
     };
   }
 
+  /**
+   * 订阅记录的键。**必须带站点**:Discourse 的 userId 是站内自增整数,你在 A 站是 123、
+   * 在 B 站也可能是 123 —— 只按 userId 分键,两个论坛的订阅记录会互相覆盖,导致
+   * 「给 A 站注册的订阅被 B 站顶掉」「退订退到错的站」。
+   */
   private static key(userId: number): string {
-    return `${PREF_KEY_PREFIX}${userId}`;
+    return SiteScope.key(`${PREF_KEY_PREFIX}${userId}`);
   }
 
   private static store(context: common.Context): preferences.Preferences {

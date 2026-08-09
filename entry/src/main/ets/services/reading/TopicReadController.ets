@@ -4,6 +4,8 @@ import { AppStateEventBus } from '../session/AppStateEventBus';
 import { TopicReadState, TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
 import { ReadingTracker, ReportTimingsFn } from './ReadingTracker';
 import { LoginGate } from '../session/LoginGate';
+import { CurrentSite } from '../site/CurrentSite';
+import { ChallengeState, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
 
 // 相邻楼层错峰翻已读的间隔:让蓝点淡出动画自上而下依次开始,对齐官网的级联观感。
 const READ_STAGGER_STEP_MS: number = 80;
@@ -95,13 +97,48 @@ export class TopicReadController {
     this.tracker.setFocus(AppStateEventBus.isForeground());
     this.tracker.start(
       detail.id,
-      reportFn,
+      this.guardBySite(reportFn, detail.id, logTag),
       (postNumbers: number[]) => this.markPostsRead(postNumbers),
       (postNumbers: number[], reporting: boolean) => this.markPostsReporting(postNumbers, reporting)
     );
     this.tracker.seedRead(this.collectAlreadyReadPostNumbers());
     this.started = true;
     Log.i(`${logTag} reading tracker started topicId=${detail.id}`);
+  }
+
+  /**
+   * 给上报函数套一层站点代次闸门。
+   *
+   * 必要性:detach() 里的最后一次上报是 setTimeout 延迟发的(为了不压在转场那一帧上),
+   * 而切换论坛会 clear 导航栈、进而销毁详情页 —— 那个延迟上报于是**落在切站之后**才发出,
+   * 此时 BASE_URL 已指向新论坛,却带着上一个论坛的 topicId。结果是把别人的帖子标成已读,
+   * 污染新论坛的阅读记录。
+   *
+   * 闸门在 startIfNeeded 这一处套上,周期 flush、离页 drain、延迟 flush 三条路径就全覆盖了,
+   * 不必逐个调用点去改。
+   *
+   * 返回 statusCode 0 的失败:tracker 只对 405/429/5xx 退避重试,0 会被直接丢弃,
+   * 不会留下一个反复重试的僵尸批次。
+   */
+  private guardBySite(reportFn: ReportTimingsFn, topicId: number, logTag: string): ReportTimingsFn {
+    const epoch: number = CurrentSite.epoch;
+    return (id: number, timings: Map<number, number>, topicTime: number) => {
+      if (!CurrentSite.isCurrentEpoch(epoch)) {
+        Log.i(`${logTag} skip timings report: site switched since tracking started topicId=${topicId}`);
+        const skipped: NetworkResult<string> = {
+          success: false,
+          statusCode: 0,
+          challengeState: ChallengeState.NONE,
+          error: {
+            code: NetworkErrorCode.NETWORK_FAILURE,
+            message: '已切换论坛,丢弃上一个论坛的阅读上报。',
+            requiresChallenge: false
+          }
+        };
+        return Promise.resolve(skipped);
+      }
+      return reportFn(id, timings, topicTime);
+    };
   }
 
   // 可见楼层范围变化(入参为 posts 数组下标,列表头部占位的换算由页面完成):

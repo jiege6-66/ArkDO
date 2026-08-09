@@ -1,11 +1,13 @@
 import { Log } from '../logging/Log';
 import { common } from '@kit.AbilityKit';
+import { SiteScope } from '../site/SiteScope';
 import { preferences } from '@kit.ArkData';
 
 const LOG_TAG: string = '[ArkDO][Search]';
 // 与 FeedPrefs / DohManager 共用同一个 preferences 库,只是键不同。
 const PREF_STORE_NAME: string = 'app_settings';
-// 单键存最近搜索词(JSON 字符串数组,最新在前)。
+// 单键存最近搜索词(JSON 字符串数组,最新在前)。**按站点分键**:搜索词是站点内的东西,
+// 不分的话 A 论坛搜过的词会冒到 B 论坛的搜索建议里。
 const PREF_KEY_HISTORY: string = 'search_history';
 // 历史封顶条数:超出丢弃最旧的。
 const MAX_HISTORY: number = 10;
@@ -23,7 +25,7 @@ export class SearchHistoryStore {
   static load(context: common.Context): string[] {
     try {
       const store: preferences.Preferences = SearchHistoryStore.getStore(context);
-      const raw: string = store.getSync(PREF_KEY_HISTORY, '') as string;
+      const raw: string = store.getSync(SiteScope.key(PREF_KEY_HISTORY), '') as string;
       if (raw.length === 0) {
         return [];
       }
@@ -83,7 +85,7 @@ export class SearchHistoryStore {
   private static persist(context: common.Context, terms: string[]): void {
     try {
       const store: preferences.Preferences = SearchHistoryStore.getStore(context);
-      store.putSync(PREF_KEY_HISTORY, JSON.stringify(terms));
+      store.putSync(SiteScope.key(PREF_KEY_HISTORY), JSON.stringify(terms));
       store.flush();
     } catch (err) {
       Log.e(`${LOG_TAG} write search history failed: ${JSON.stringify(err)}`);

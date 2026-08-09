@@ -89,6 +89,17 @@ export class ChallengeRecoveryCoordinator {
     this.reset();
   }
 
+  /**
+   * 切换论坛:丢弃这一轮恢复。与 dispose 区别开 —— dispose 是销毁语义,而切站后本协调器
+   * 还要继续为新论坛服务,只是**当前这轮过盾属于上一个论坛**:轮询在探测旧站、
+   * cf_clearance 判定基于旧域名、冷却计时也没有意义。不复位的话新站的第一个挑战信号
+   * 会被「恢复中」状态吞掉,用户卡在一个永远不弹验证的界面上。
+   */
+  resetForSiteSwitch(): void {
+    Log.i(`${DIAG_TAG} stage=recoveryResetOnSiteSwitch state=${this.state}`);
+    this.reset();
+  }
+
   // 收到挑战信号:仅在空闲态开启一轮静默恢复;恢复中/冷却中一律吞掉。
   handleChallengeSignal(source: string): void {
     if (this.state !== ChallengeRecoveryState.IDLE) {

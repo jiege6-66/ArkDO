@@ -1,3 +1,4 @@
+import { AppConstants } from '../../common/constants/AppConstants';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { http } from '@kit.NetworkKit';
 import { Log } from '../logging/Log';
@@ -21,6 +22,9 @@ interface RelayEnsureRequest {
   user_id: number;
   username: string;
   sub_id: string;
+  // 当前论坛的 host。中继按「站点 + 用户」认身份 —— Discourse 的 user_id 是站内自增,
+  // 不带站点的话同一台设备上两个论坛会被判成同一个用户而共用一条订阅记录。
+  site_host: string;
 }
 
 interface RelayDisableRequest {
@@ -28,6 +32,9 @@ interface RelayDisableRequest {
   endpoint: string;
   user_id: number;
   username: string;
+  // 当前论坛的 host。中继按「站点 + 用户」认身份 —— Discourse 的 user_id 是站内自增,
+  // 不带站点的话同一台设备上两个论坛会被判成同一个用户而共用一条订阅记录。
+  site_host: string;
 }
 
 // 中继在测试推送冷却期内返回的响应体。
@@ -42,6 +49,9 @@ interface RelayTestRequest {
   endpoint: string;
   user_id: number;
   username: string;
+  // 当前论坛的 host。中继按「站点 + 用户」认身份 —— Discourse 的 user_id 是站内自增,
+  // 不带站点的话同一台设备上两个论坛会被判成同一个用户而共用一条订阅记录。
+  site_host: string;
 }
 
 export class HttpPushRelayClient implements PushRelayClient {
@@ -71,7 +81,8 @@ export class HttpPushRelayClient implements PushRelayClient {
       device_token: deviceToken,
       user_id: user.userId,
       username: user.username,
-      sub_id: existingSubId ?? ''
+      sub_id: existingSubId ?? '',
+      site_host: AppConstants.HOST
     };
     return this.postRegistration('/subscription/ensure', payload);
   }
@@ -83,7 +94,8 @@ export class HttpPushRelayClient implements PushRelayClient {
         sub_id: registration.subId ?? '',
         endpoint: registration.endpoint,
         user_id: user?.userId ?? 0,
-        username: user?.username ?? ''
+        username: user?.username ?? '',
+        site_host: AppConstants.HOST
       };
       Log.i(`${LOG_TAG} disable start subId=${registration.subId ?? ''} endpointLength=${registration.endpoint.length}`);
       const response: http.HttpResponse = await request.request(`${this.baseUrl}/subscription/disable`, {
@@ -116,7 +128,8 @@ export class HttpPushRelayClient implements PushRelayClient {
         sub_id: registration.subId ?? '',
         endpoint: registration.endpoint,
         user_id: user.userId,
-        username: user.username
+        username: user.username,
+        site_host: AppConstants.HOST
       };
       Log.i(`${LOG_TAG} test start subId=${registration.subId ?? ''} endpointLength=${registration.endpoint.length} tokenLength=${deviceToken.length} userId=${user.userId}`);
       const response: http.HttpResponse = await request.request(`${this.baseUrl}/subscription/test`, {

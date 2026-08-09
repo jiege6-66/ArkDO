@@ -1876,6 +1876,10 @@ export struct RootTabPage {
    */
   private handleSiteChanged(): void {
     Log.i(`${LOG_TAG} site changed → ${CurrentSite.baseUrl} epoch=${CurrentSite.epoch}`);
+    // 先丢弃正在进行的过盾:它在探测旧站,且会把「恢复中」状态带到新站,吞掉新站的第一个
+    // 挑战信号。排在最前面还有个好处——它内部会还原持久化的 DoH 模式,之后 afterSwitch
+    // 再按新站重下发一次,顺序正好。
+    this.challengeRecovery?.resetForSiteSwitch();
     this.navPathStack.clear();
     SiteSwitchCoordinator.afterSwitch(this.hostContext(), this.bridge);
     SessionEventBus.notifySessionChanged();
