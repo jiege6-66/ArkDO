@@ -13,6 +13,7 @@ import {
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
 import { CurrentSite } from '../../services/site/CurrentSite';
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
@@ -50,6 +51,12 @@ export struct SettingsPage {
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
   @State private appVersion: string = '';
   private scroller: Scroller = new Scroller();
+  private disclaimerDialogController: CustomDialogController = new CustomDialogController({
+    builder: DisclaimerDialog(),
+    alignment: DialogAlignment.Center,
+    customStyle: true,
+    autoCancel: true
+  });
   private aboutDialogController: CustomDialogController = new CustomDialogController({
     builder: AboutDialog({
       onOpenDeveloper: () => {
@@ -177,12 +184,15 @@ export struct SettingsPage {
         this.SettingCell($r('sys.symbol.gearshape'), '实验性功能', '', () => {
           this.onOpenExperimental();
         })
-        this.HairlineInset()
         // 站点管理的「正门」。抽屉里那行「我的站点」只是快捷方式,而它自己可以被开关藏起来——
         // 唯一入口能把自己藏掉是设计缺陷,所以这里必须有一条不受那个开关影响的路。
-        this.SettingCell($r('sys.symbol.house'), '我的站点', '', () => {
-          this.onOpenSites();
-        })
+        // 整组仅在 linux.do 下露出:这功能靠复用主站 OAuth 免登录进生态站点,换站后无从谈起。
+        if (SiteCapabilities.ecosystemSites) {
+          this.HairlineInset()
+          this.SettingCell($r('sys.symbol.house'), '我的站点', '', () => {
+            this.onOpenSites();
+          })
+        }
       }
       .cardStyle()
 
@@ -303,12 +313,20 @@ export struct SettingsPage {
   private AboutGroup() {
     this.GroupLabel('关于')
     Column() {
-      this.SettingCell($r('sys.symbol.message'), '反馈与建议', '', () => {
-        this.onOpenFeedback();
-      })
-      this.HairlineInset()
+      // 反馈帖是写死的 topic id,只在 linux.do 上存在;换站后点进去会是一篇无关的帖子。
+      if (SiteCapabilities.feedbackTopic) {
+        this.SettingCell($r('sys.symbol.message'), '反馈与建议', '', () => {
+          this.onOpenFeedback();
+        })
+        this.HairlineInset()
+      }
       this.SettingCell($r('sys.symbol.info_circle'), '关于 ArkDO', this.getVersionLabel(), () => {
         this.aboutDialogController.open();
+      })
+      this.HairlineInset()
+      // 免责声明:应用是通用客户端、内容来自用户自己添加的站点。审核会翻这里,用户也该看得到。
+      this.SettingCell($r('sys.symbol.doc_text'), '免责声明', '', () => {
+        this.disclaimerDialogController.open();
       })
       this.HairlineInset()
       this.SettingCell($r('sys.symbol.exclamationmark_circle'), '诊断日志', '', () => {
@@ -383,6 +401,61 @@ export struct SettingsPage {
 
   private formatAppVersion(info: bundleManager.BundleInfo): string {
     return `v${info.versionName} (Build ${info.versionCode})`;
+  }
+}
+
+// 免责声明。刻意一个品牌都不提:它要说的是「内容不是我们的」,这句话不需要点名任何论坛
+// 或论坛程序。功能层面的「支持基于 Discourse 搭建的站点」属于产品说明,放应用市场描述里,
+// 与本声明分开 —— 免责声明里出现他人商标,容易被误读成需要授权。
+@CustomDialog
+struct DisclaimerDialog {
+  controller?: CustomDialogController;
+
+  build() {
+    Column() {
+      Text('免责声明')
+        .fontSize(18)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ top: 22, bottom: 16 })
+
+      Scroll() {
+        Text('本应用是第三方论坛客户端,不提供、不托管、不审核任何内容。\n\n' +
+          '应用内显示的全部内容均来自你自行添加的第三方站点,由该站点及其运营方负责。' +
+          '你选择访问哪些站点,完全由你自己决定。\n\n' +
+          '本应用与任何论坛站点及其运营方之间,不存在隶属、合作或授权关系。')
+          .fontSize(14)
+          .lineHeight(22)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 320 })
+      .scrollBar(BarState.Off)
+      .padding({ left: 24, right: 24 })
+      .margin({ bottom: 20 })
+
+      Divider()
+        .strokeWidth(0.5)
+        .color($r('app.color.border'))
+
+      Button('知道了')
+        .type(ButtonType.Normal)
+        .backgroundColor(Color.Transparent)
+        .fontColor($r('app.color.ld_accent'))
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .width('100%')
+        .height(48)
+        .onClick(() => {
+          this.controller?.close();
+        })
+    }
+    .width('100%')
+    .backgroundColor($r('app.color.page_bg'))
+    .borderRadius(28)
   }
 }
 

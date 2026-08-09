@@ -1,3 +1,4 @@
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { buffer } from '@kit.ArkTS';
 import resourceManager from '@ohos.resourceManager';
 
@@ -73,6 +74,11 @@ export function ensureTagIconsLoaded(manager: resourceManager.ResourceManager): 
 }
 
 export function getTagIconStyle(tagName: string): TagIconStyle | undefined {
+  // 图标表来自 linux.do 主题组件的私有配置,别的站点标签名对不上 —— 在这唯一出口处
+  // 拦掉,所有调用方(帖子列表徽标、详情页标签)自然全部降级为无图标,不必各自判断。
+  if (!SiteCapabilities.tagIcons) {
+    return undefined;
+  }
   return tagIconMap.get(normalizeTagKey(tagName));
 }
 

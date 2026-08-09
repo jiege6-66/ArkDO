@@ -32,6 +32,7 @@ import { PostStreamPager } from '../../services/topic/PostStreamPager';
 import { ReactionUsersPager } from '../../services/topic/ReactionUsersPager';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { LOTTERY_TIP_ENABLED_STORAGE_KEY } from '../../services/topic/LotteryTipPrefs';
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import {
   LOTTERY_REPLY_HINT,
   LOTTERY_REPLY_PLACEHOLDER,
@@ -2265,6 +2266,11 @@ export struct TopicDetailPage {
   // 本帖是否该出抽奖提醒:总开关 + 帖子本身的判定(见 LotteryTopicRule,含「高级推广」排除、
   // 已关闭/已归档、楼主是自己这几条)。详情未到手时先不显示,免得标签还没解析出来先闪一下。
   private showsLotteryNotice(): boolean {
+    // 抽奖是 linux.do 的社区玩法(靠标签约定判定),不是 Discourse 标准能力 —— 在这唯一的
+    // 判定入口拦掉,提醒卡、回复框提示、占位文案会一起降级,不必各自判断。
+    if (!SiteCapabilities.lotteryTopics) {
+      return false;
+    }
     if (!this.lotteryTipEnabled || this.detail === undefined) {
       return false;
     }

@@ -1,3 +1,4 @@
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { Log } from '../../services/logging/Log';
 import { TopicCategory, TopicTag } from '../../models/Topic';
 import { SidebarTag } from '../../models/User';
@@ -184,7 +185,8 @@ export struct CategoryDrawer {
       .align(Alignment.Top)
 
       // 「我的站点」:立即跳转,不受确认约束,故与三块条件之间用分割线隔开。
-      if (this.sitesEntryEnabled) {
+      // 与用户的显示开关取与:这功能靠复用主站 OAuth 免登录进生态站点,换站后无从谈起。
+      if (this.sitesEntryEnabled && SiteCapabilities.ecosystemSites) {
         Divider()
           .strokeWidth(0.5)
           .color($r('app.color.border'))

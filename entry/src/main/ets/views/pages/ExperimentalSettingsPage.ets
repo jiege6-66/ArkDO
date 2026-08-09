@@ -5,6 +5,7 @@ import { RealtimePostsPrefs } from '../../services/realtime/RealtimePostsPrefs';
 import { AnimatedAvatarPrefs } from '../../services/avatar/AnimatedAvatarPrefs';
 import { BadgeFilterPrefs } from '../../services/home/BadgeFilterPrefs';
 import { LotteryTipPrefs } from '../../services/topic/LotteryTipPrefs';
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { HoldingHandManager } from '../../common/utils/HoldingHandManager';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
@@ -93,8 +94,11 @@ export struct ExperimentalSettingsPage {
           this.SmartReachCell()
           this.HairlineInset()
           this.BadgeFilterCell()
-          this.HairlineInset()
-          this.LotteryTipCell()
+          // 抽奖提醒本体已按域名 gate,开关也一并隐藏——留个开了也没用的开关比没有更困惑。
+          if (SiteCapabilities.lotteryTopics) {
+            this.HairlineInset()
+            this.LotteryTipCell()
+          }
         }
         .cardStyle()
 

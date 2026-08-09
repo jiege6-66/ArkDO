@@ -22,6 +22,7 @@ import { LdcCreditSession } from '../../services/credit/LdcCreditSession';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
 import { LdcCreditWebHost } from '../components/LdcCreditWebHost';
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { formatLdcAmount } from '../../common/utils/LdcFormat';
 import { SessionEventBus } from '../../services/session/SessionEventBus';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -280,21 +281,28 @@ export struct ProfilePage {
                   .fontSize(13)
                   .fontColor($r('app.color.text_secondary'))
                 // 信任等级标做成可点药丸:tap 进等级进度页。
+                // 信任等级本身是 Discourse 标准信息,恒显;但「点进去看升级进度」的数据取自
+                // connect.linux.do,是专属能力 —— 非该站时去掉箭头与点击,退化为纯展示标签,
+                // 免得点了没反应。
                 Row() {
                   Text(trustLabelWithTitleOf(this.profileDetail))
                     .fontSize(13)
                     .fontWeight(FontWeight.Medium)
                     .fontColor($r('app.color.ld_accent'))
-                  SymbolGlyph($r('sys.symbol.chevron_right'))
-                    .fontSize(11)
-                    .fontColor([$r('app.color.ld_accent')])
-                    .margin({ left: 1 })
+                  if (SiteCapabilities.levelProgress) {
+                    SymbolGlyph($r('sys.symbol.chevron_right'))
+                      .fontSize(11)
+                      .fontColor([$r('app.color.ld_accent')])
+                      .margin({ left: 1 })
+                  }
                 }
-                .padding({ left: 8, right: 6, top: 2, bottom: 2 })
+                .padding({ left: 8, right: SiteCapabilities.levelProgress ? 6 : 8, top: 2, bottom: 2 })
                 .backgroundColor($r('app.color.surface_muted'))
                 .borderRadius(10)
                 .onClick(() => {
-                  this.onOpenLevelProgress();
+                  if (SiteCapabilities.levelProgress) {
+                    this.onOpenLevelProgress();
+                  }
                 })
               }
             }
@@ -367,7 +375,10 @@ export struct ProfilePage {
       .cardStyle()
 
       // 卡片 2.5:LINUX DO Credit(credit.linux.do)
-      this.LdcEntryCard()
+      // LDC Credit 是 credit.linux.do 的独立站点与独立会话,别的论坛没有对应物。
+      if (SiteCapabilities.ldcCredit) {
+        this.LdcEntryCard()
+      }
 
       // 卡片 3:徽章
       Column() {
@@ -891,6 +902,11 @@ export struct ProfilePage {
   // 入口行的取数入口。三条捷径按代价从小到大:未登录 credit 直接给「去登录」(连 webview 都不起);
   // 缓存新鲜就用缓存;都不满足才挂宿主真发一次请求。
   private refreshLdcEntry(): void {
+    // 换站后连余额都不必去取:那是 credit.linux.do 的接口,请求本身就没有意义。
+    if (!SiteCapabilities.ldcCredit) {
+      this.ldcHostActive = false;
+      return;
+    }
     this.ldcInfo = LdcCreditSession.getCachedInfo();
 
     if (!LdcCreditSession.hasSession()) {
