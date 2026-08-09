@@ -12,7 +12,8 @@ import {
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
-import { CurrentSite } from '../../services/site/CurrentSite';
+import { ACTIVE_FORUM_NAME_KEY } from '../../common/constants/StorageKeys';
+import { AppConstants } from '../../common/constants/AppConstants';
 import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
@@ -49,6 +50,9 @@ export struct SettingsPage {
   @StorageLink(THEME_MODE_STORAGE_KEY) themeMode: ThemeMode = ThemeMode.SYSTEM;
   // 「悬浮按钮玻璃效果」开关:镜像 AppStorage,onChange 落盘后两处 FAB 即时响应。默认关。
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
+  // 当前论坛名:绑 AppStorage 镜像而非直接读 CurrentSite.displayName —— 后者是普通静态
+  // getter,改名/切站后 ArkUI 不知道要重绘,副标题会一直停在旧值(要退回首页再进才更新)。
+  @StorageProp(ACTIVE_FORUM_NAME_KEY) private activeForumName: string = '';
   @State private appVersion: string = '';
   private scroller: Scroller = new Scroller();
   private disclaimerDialogController: CustomDialogController = new CustomDialogController({
@@ -70,6 +74,11 @@ export struct SettingsPage {
 
   aboutToAppear(): void {
     this.readAppVersion();
+  }
+
+  // 镜像尚未写入的那一帧兜底成 App 名,不留空副标题。
+  private activeForumLabel(): string {
+    return this.activeForumName.length > 0 ? this.activeForumName : AppConstants.APP_NAME;
   }
 
   // 卡片分组容器:无描边,靠灰底衬托。
@@ -169,7 +178,7 @@ export struct SettingsPage {
       Column() {
         // 论坛切换排在最前:它决定了整个 App 在看哪个站,是这一组里唯一会改变内容来源的项。
         // 副标题直接给出当前论坛名,免得用户要点进去才知道自己在哪。
-        this.SettingCell($r('sys.symbol.message'), '论坛', CurrentSite.displayName, () => {
+        this.SettingCell($r('sys.symbol.message'), '论坛', this.activeForumLabel(), () => {
           this.onOpenForums();
         })
         this.HairlineInset()

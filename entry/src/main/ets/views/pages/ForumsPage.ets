@@ -313,7 +313,11 @@ export struct ForumsPage {
             .color($r('app.color.border'))
             .margin({ left: CARD_PADDING })
         }
-      }, (forum: ForumDef) => forum.id)
+        // key 必须并入这一行实际渲染到的一切:ForEach 按 key 复用,key 不变就不重建。
+        // 只用 id 的话,改完名字 key 没变 → 复用旧行 → 名字不刷新(要退出页面重进才对);
+        // activeId 也得并进来,否则切换当前论坛时「当前」标记不会跟着挪。
+        // (SitesPage 的站点快捷条早踩过同一个坑,那里把 iconUri 并进了 key。)
+      }, (forum: ForumDef) => `${forum.id}_${forum.name}_${forum.baseUrl}_${forum.id === this.activeId}`)
     }
     .cardStyle()
   }
