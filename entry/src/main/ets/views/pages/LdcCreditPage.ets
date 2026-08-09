@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { LdcDailyStat, LdcUserInfo } from '../../models/LdcCredit';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
@@ -65,7 +65,7 @@ export struct LdcCreditPage {
   @State private hostNavTarget: string = '';
   // 宿主新建时的首屏地址。宿主已挂载时改 hostNavTarget 跳转,未挂载时改这里再挂上——
   // 后者不能用 hostNavTarget,@Watch 对初值不触发。
-  private hostInitialUrl: string = AppConstants.CREDIT_BOOTSTRAP_URL;
+  private hostInitialUrl: string = LinuxDoConstants.CREDIT_BOOTSTRAP_URL;
 
   private bridge: ArkWebNetworkBridge = new ArkWebNetworkBridge();
   private isHostReady: boolean = false;
@@ -493,7 +493,7 @@ export struct LdcCreditPage {
     if (this.phase !== LdcPhase.LOGGING_IN) {
       return;
     }
-    Log.i(`${LOG_TAG} login page settled sameSite=${url.startsWith(AppConstants.CREDIT_BASE_URL)}`);
+    Log.i(`${LOG_TAG} login page settled sameSite=${url.startsWith(LinuxDoConstants.CREDIT_BASE_URL)}`);
     this.settleLoginIfSessionExists();
   }
 
@@ -567,10 +567,10 @@ export struct LdcCreditPage {
     this.phase = LdcPhase.LOGGING_IN;
     if (this.hostActive) {
       // 宿主已在跑(取数失败后改走登录):就地导航到站内页。
-      this.hostNavTarget = AppConstants.CREDIT_HOME_URL;
+      this.hostNavTarget = LinuxDoConstants.CREDIT_HOME_URL;
     } else {
       // 宿主还没起:让它直接以站内页开局,别先加载一遍 JSON 接口再跳。
-      this.hostInitialUrl = AppConstants.CREDIT_HOME_URL;
+      this.hostInitialUrl = LinuxDoConstants.CREDIT_HOME_URL;
       this.hostActive = true;
     }
     this.startLoginPolling();

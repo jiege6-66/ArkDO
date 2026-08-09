@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, APP_SPLIT_NAV_BAR_WIDTH_STORAGE_KEY, BreakpointManager,
   SPLIT_NAV_BAR_MAX_WIDTH } from '../../common/utils/BreakpointManager';
 import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildTopicListStyleSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
@@ -733,7 +733,7 @@ export struct RootTabPage {
           },
           onOpenFeedback: () => {
             // 标题留空:详情页拉到帖子后自会填真实标题,不必在此硬编码一份易过期的副本。
-            this.openTopicDetailById(AppConstants.FEEDBACK_TOPIC_ID);
+            this.openTopicDetailById(LinuxDoConstants.FEEDBACK_TOPIC_ID);
           },
           onOpenPush: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PUSH_SETTINGS, buildPushSettingsRouteParam('settings')));

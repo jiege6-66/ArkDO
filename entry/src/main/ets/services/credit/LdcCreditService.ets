@@ -1,5 +1,5 @@
 import { Log } from '../logging/Log';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { LdcDailyStat, LdcUserInfo } from '../../models/LdcCredit';
 import { ArkWebNetworkBridge } from '../network/ArkWebNetworkBridge';
 import { ChallengeState, HttpHeaderEntry, NetworkErrorCode, NetworkResult } from '../network/NetworkTypes';
@@ -8,7 +8,7 @@ import { LdcCreditParser } from './LdcCreditParser';
 const LOG_TAG: string = '[ArkDO][Ldc]';
 
 // credit 的 XHR 指纹,照抓包对齐:后端按 x-requested-with 决定走 JSON 分支还是重定向到登录页。
-// Referer 另经参数传(见 AppConstants.CREDIT_HOME_URL),两者缺一都可能拿不到 JSON。
+// Referer 另经参数传(见 LinuxDoConstants.CREDIT_HOME_URL),两者缺一都可能拿不到 JSON。
 const CREDIT_HEADERS: HttpHeaderEntry[] = [
   { name: 'X-Requested-With', value: 'XMLHttpRequest' }
 ];
@@ -29,7 +29,7 @@ export class LdcCreditService {
 
   async getUserInfo(): Promise<NetworkResult<LdcUserInfo>> {
     const result: NetworkResult<string> = await this.bridge.getJsonWithHeaders(
-      USER_INFO_PATH, CREDIT_HEADERS, AppConstants.CREDIT_HOME_URL);
+      USER_INFO_PATH, CREDIT_HEADERS, LinuxDoConstants.CREDIT_HOME_URL);
     if (!result.success || result.data === undefined) {
       Log.i(`${LOG_TAG} user-info failed status=${result.statusCode} challenge=${result.challengeState}`);
       return LdcCreditService.failureOf(result);
@@ -62,7 +62,7 @@ export class LdcCreditService {
   async getDailyStats(days: number): Promise<NetworkResult<LdcDailyStat[]>> {
     const safeDays: number = days > 0 ? Math.floor(days) : 7;
     const result: NetworkResult<string> = await this.bridge.getJsonWithHeaders(
-      `${DAILY_STATS_PATH}?days=${safeDays}`, CREDIT_HEADERS, AppConstants.CREDIT_HOME_URL);
+      `${DAILY_STATS_PATH}?days=${safeDays}`, CREDIT_HEADERS, LinuxDoConstants.CREDIT_HOME_URL);
     if (!result.success || result.data === undefined) {
       Log.i(`${LOG_TAG} daily stats failed status=${result.statusCode} challenge=${result.challengeState}`);
       return LdcCreditService.failureOf(result);

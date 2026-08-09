@@ -1,5 +1,6 @@
 import { Log } from '../logging/Log';
 import { SiteIconStore } from './SiteIconStore';
+import { SiteUrl } from './SiteUrl';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
@@ -118,47 +119,21 @@ export class SitePrefs {
   }
 
   // ==================== URL 处理 ====================
+  // 实现已抽到 SiteUrl(与 ForumPrefs 共用同一套规则);这里保留薄壳转发,既有调用点无需改动。
 
   /** 补全裸域名为 https:// 并去首尾空白。从论坛复制来的多是全 URL,手输的多是裸域名。 */
   static normalizeUrl(input: string): string {
-    const trimmed: string = input.trim();
-    if (trimmed.length === 0) {
-      return '';
-    }
-    const lower: string = trimmed.toLowerCase();
-    if (lower.startsWith('http://') || lower.startsWith('https://')) {
-      return trimmed;
-    }
-    return `https://${trimmed}`;
+    return SiteUrl.normalize(input);
   }
 
   /** 粗校验:必须 http(s) 且 host 带点。挡空输入与明显笔误,不做严格 RFC 解析。 */
   static isValidUrl(url: string): boolean {
-    const lower: string = url.trim().toLowerCase();
-    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-      return false;
-    }
-    const host: string = SitePrefs.hostOf(url);
-    return host.length > 0 && host.indexOf('.') > 0;
+    return SiteUrl.isValid(url);
   }
 
   /** 取 host(不含协议/路径/端口);解析不出时返回空串。 */
   static hostOf(url: string): string {
-    const trimmed: string = url.trim();
-    const schemeEnd: number = trimmed.indexOf('://');
-    if (schemeEnd < 0) {
-      return '';
-    }
-    let rest: string = trimmed.substring(schemeEnd + 3);
-    const slash: number = rest.indexOf('/');
-    if (slash >= 0) {
-      rest = rest.substring(0, slash);
-    }
-    const colon: number = rest.indexOf(':');
-    if (colon >= 0) {
-      rest = rest.substring(0, colon);
-    }
-    return rest;
+    return SiteUrl.hostOf(url);
   }
 
   // ==================== 内部 ====================

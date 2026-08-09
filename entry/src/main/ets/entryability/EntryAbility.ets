@@ -1,4 +1,5 @@
 import { Log } from '../services/logging/Log';
+import { CurrentSite } from '../services/site/CurrentSite';
 import { AbilityConstant, Configuration, errorManager, UIAbility, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -42,6 +43,10 @@ export default class EntryAbility extends UIAbility {
     // 计时锚点①:应用启动。与首页帖子列表开始加载的日志配对,测量冷启动到首屏拉取的耗时。
     Log.i(`[ArkDO][Startup] stage=appOnCreate ts=${Date.now()}`);
     this.registerCrashHandler();
+    // 当前论坛:必须排在最前面。全 app 的 BASE_URL / LOGIN_URL / HOST_BOOTSTRAP_URL 都由它
+    // 派生,DoH 要按它的域名下发、宿主 webview 要按它的 origin 引导、首页要按它拉列表——
+    // 任何一项跑在它前面都会拿到空地址。未配置论坛时保持未配置状态,由首启引导页接手。
+    CurrentSite.init(this.context);
     // 登录态镜像绑定磁盘,须早于任何页面读取 AppStorage:冷启动即恢复上次登录态,
     // 避免已登录用户在首个会话检查回来前被误判为游客(阅读追踪不启动、写操作被拦)。
     LoginGate.initPersist();

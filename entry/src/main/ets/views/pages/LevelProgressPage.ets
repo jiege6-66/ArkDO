@@ -1,7 +1,7 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 import { CONNECT_EXTRACT_SCRIPT, ConnectLevelParser } from '../../services/connect/ConnectLevelParser';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -90,7 +90,7 @@ export struct LevelProgressPage {
     Stack() {
       // 隐藏 Web:满视口 + 近透明,被上层不透明内容完全遮挡;满视口给 CF/SSO 一个真实浏览器环境。
       if (this.isLoggedIn) {
-        Web({ src: AppConstants.CONNECT_URL, controller: this.controller })
+        Web({ src: LinuxDoConstants.CONNECT_URL, controller: this.controller })
           .javaScriptAccess(true)
           .domStorageAccess(true)
           .databaseAccess(true)
@@ -590,7 +590,7 @@ export struct LevelProgressPage {
             .padding({ left: 20, right: 20 })
             .borderRadius(21)
             .onClick(() => {
-              this.onOpenWeb(AppConstants.CONNECT_URL, '等级进度');
+              this.onOpenWeb(LinuxDoConstants.CONNECT_URL, '等级进度');
             })
         }
         .margin({ top: 22 })
@@ -689,7 +689,7 @@ export struct LevelProgressPage {
       }
       Log.i(`${LOG_TAG} auto-reload attempt=${attempt}`);
       try {
-        this.controller.loadUrl(AppConstants.CONNECT_URL);
+        this.controller.loadUrl(LinuxDoConstants.CONNECT_URL);
       } catch (error) {
         Log.i(`${LOG_TAG} auto-reload loadUrl failed: ${JSON.stringify(error)}`);
       }
@@ -714,7 +714,7 @@ export struct LevelProgressPage {
     this.clearTimers();
     this.startTimeout();
     try {
-      this.controller.loadUrl(AppConstants.CONNECT_URL);
+      this.controller.loadUrl(LinuxDoConstants.CONNECT_URL);
     } catch (error) {
       Log.i(`${LOG_TAG} retry loadUrl failed: ${JSON.stringify(error)}`);
     }

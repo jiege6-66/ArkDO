@@ -1,6 +1,6 @@
 import { Log } from '../../services/logging/Log';
 import webview from '@ohos.web.webview';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { WebSessionManager } from '../../services/web/WebSessionManager';
 
@@ -27,7 +27,7 @@ export struct LdcCreditWebHost {
   // 首屏地址。默认是最轻的 JSON 接口(只为拿一个 credit 同源文档);登录流程改传站内页。
   // 与 navTarget 分工明确:本组件是新建的走 initialUrl,已挂载再要跳转才走 navTarget——
   // @Watch 对「创建时的初值」不触发,只靠 navTarget 会让新建即登录的那条路加载错页面。
-  initialUrl: string = AppConstants.CREDIT_BOOTSTRAP_URL;
+  initialUrl: string = LinuxDoConstants.CREDIT_BOOTSTRAP_URL;
   // 导航目标。父组件改这个值即触发一次真实页面跳转(登录流程跳 credit 站内页);空串表示不跳。
   // Web 的 src 只在创建时生效,后续导航只能经 controller.loadUrl,故这里用 @Watch 转成一次调用。
   @Prop @Watch('onNavTargetChanged') navTarget: string = '';

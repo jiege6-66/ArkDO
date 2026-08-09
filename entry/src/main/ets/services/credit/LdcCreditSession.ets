@@ -1,4 +1,4 @@
-import { AppConstants } from '../../common/constants/AppConstants';
+import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { LdcUserInfo } from '../../models/LdcCredit';
 import { WebSessionManager } from '../web/WebSessionManager';
 
@@ -18,7 +18,7 @@ export class LdcCreditSession {
   private static cachedAt: number = 0;
 
   static hasSession(): boolean {
-    return WebSessionManager.hasCookieForUrl(AppConstants.CREDIT_BASE_URL, AppConstants.CREDIT_SESSION_COOKIE);
+    return WebSessionManager.hasCookieForUrl(LinuxDoConstants.CREDIT_BASE_URL, LinuxDoConstants.CREDIT_SESSION_COOKIE);
   }
 
   // 缓存的余额,不看新鲜度——用于先把上次的数字画出来避免空窗,随后后台刷新覆盖。
