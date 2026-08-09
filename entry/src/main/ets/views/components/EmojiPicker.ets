@@ -3,7 +3,6 @@ import { common } from '@kit.AbilityKit';
 import {
   EmojiGroup,
   EmojiItem,
-  ensureEmojiUrlsLoaded,
   getEmojiGroups
 } from './EmojiUrlRegistry';
 
@@ -51,9 +50,8 @@ export struct EmojiPicker {
   private dataSource: EmojiPickerDataSource = new EmojiPickerDataSource();
 
   aboutToAppear(): void {
-    const manager: resourceManager.ResourceManager =
-      (this.getUIContext().getHostContext() as common.Context).resourceManager;
-    ensureEmojiUrlsLoaded(manager);
+    // 表情表由 EmojiCatalogService 按站点异步拉取并缓存,这里只读已加载的结果 ——
+    // 还没拉到就是空分组(选择器显示为空),不再从 rawfile 兜底。
     this.groups = getEmojiGroups();
     if (this.selectedGroupIndex >= this.groups.length) {
       this.selectedGroupIndex = 0;

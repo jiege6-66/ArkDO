@@ -6,7 +6,6 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { EmojiPicker } from './EmojiPicker';
 import {
   EmojiItem,
-  ensureEmojiUrlsLoaded,
   getEmojiItem,
   getEmojiNameByUrl,
   getEmojiUrl
@@ -148,10 +147,9 @@ export struct CommentInputBar {
 
   aboutToAppear(): void {
     this.appearTimeMs = Date.now();
-    // 富文本编辑器必须在解析初始草稿前拿到短码索引，否则首次打开表情面板前无法还原已有表情。
-    const manager: resourceManager.ResourceManager =
-      (this.getUIContext().getHostContext() as common.Context).resourceManager;
-    ensureEmojiUrlsLoaded(manager);
+    // 富文本编辑器要靠短码索引还原草稿里的表情。索引由 EmojiCatalogService 按站点异步拉取
+    // 并缓存(冷启动即从磁盘装上),这里只用已加载的结果 —— 万一还没到,草稿里的表情短码会
+    // 暂时以文字形式呈现,拉到后重开输入框即恢复,不会丢内容。
     // 带回上次未发出的内容(页面暂存的)。
     this.text = this.initialText;
     this.selectionStart = this.initialText.length;

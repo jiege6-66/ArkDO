@@ -1,15 +1,22 @@
-import { buffer } from '@kit.ArkTS';
-import resourceManager from '@ohos.resourceManager';
 import { AppConstants } from '../../common/constants/AppConstants';
 
-// linux.do 的 GET /emojis.json 导出:{ 组名: [{ name, url, ... }] }。
-// 覆盖标准 twemoji + 4 个自定义组(b站/飞书/贴吧/小红书),共 ~2367 条,是 name→url 的权威字典。
-// 用于把 user_status.emoji(如 "lollipop"、"tieba_003")这类"只有短名"的具名表情渲染成图片。
-export const LINUXDO_EMOJIS_RAWFILE = 'linuxdo_emojis.json';
+// 表情字典:name → url。结构就是 Discourse `GET /emojis.json` 的原样响应
+// ({ 组名: [{ name, url, tonable, ... }] }),覆盖标准 twemoji + 该站的自定义表情组。
+// 用于把 user_status.emoji(如 "lollipop"、"tieba_003")这类"只有短名"的具名表情渲染成图片,
+// 以及给表情选择器提供分组数据。
+//
+// 数据从**当前论坛**动态拉取(见 EmojiCatalogService),不再内置 rawfile:
+// 那份 284KB 的导出只对 linux.do 成立,别的论坛自定义表情完全不同。
 
 // 标准表情的 url 是站内相对路径(/images/emoji/twemoji/xxx.png?v=15),站点实际经 CDN 提供;
 // 走 CDN 既与站点一致、又绕开主站 CF。自定义表情已是协议相对绝对地址,只补协议。
-const EMOJI_CDN_BASE = AppConstants.STATIC_CDN_BASE;
+//
+// 必须是函数而不是模块级 const:STATIC_CDN_BASE 现在跟当前论坛走(见 AppConstants),
+// 用 const 会在模块加载那一刻把值冻住 —— 那时可能还没选定站点(空串),拼出来就是
+// 没有 host 的 /images/emoji/...,表情全裂;切站后也不会跟着变。
+function emojiCdnBase(): string {
+  return AppConstants.STATIC_CDN_BASE;
+}
 
 interface RawEmojiEntry {
   name?: string;
@@ -36,20 +43,6 @@ const emojiNameByUrl: Map<string, string> = new Map();
 const emojiItemMap: Map<string, EmojiItem> = new Map();
 let emojiGroups: EmojiGroup[] = [];
 let emojiUrlsLoaded: boolean = false;
-
-export function loadEmojiUrlsFromRawContent(rawContent: Uint8Array): number {
-  try {
-    const json: string = buffer.from(rawContent as ArrayBufferLike).toString('utf8');
-    return loadEmojiUrlsFromJson(json);
-  } catch (err) {
-    emojiUrlMap.clear();
-    emojiNameByUrl.clear();
-    emojiItemMap.clear();
-    emojiGroups = [];
-    emojiUrlsLoaded = true;
-    return 0;
-  }
-}
 
 export function loadEmojiUrlsFromJson(json: string): number {
   emojiUrlMap.clear();
@@ -141,22 +134,18 @@ export function hasLoadedEmojiUrls(): boolean {
   return emojiUrlsLoaded;
 }
 
-// 惰性兜底:若 EntryAbility 启动加载缺失,首次取用时按需补载。
-export function ensureEmojiUrlsLoaded(manager: resourceManager.ResourceManager): number {
-  if (emojiUrlsLoaded && emojiUrlMap.size > 0) {
-    return emojiUrlMap.size;
-  }
-  try {
-    const rawContent: Uint8Array = manager.getRawFileContentSync(LINUXDO_EMOJIS_RAWFILE);
-    return loadEmojiUrlsFromRawContent(rawContent);
-  } catch (err) {
-    emojiUrlMap.clear();
-    emojiNameByUrl.clear();
-    emojiItemMap.clear();
-    emojiGroups = [];
-    emojiUrlsLoaded = true;
-    return 0;
-  }
+/** 清空字典。切站时调用 —— 各站的自定义表情完全不同,旧站的表留着会渲染出不存在的图。 */
+export function resetEmojiUrls(): void {
+  emojiUrlMap.clear();
+  emojiNameByUrl.clear();
+  emojiItemMap.clear();
+  emojiGroups = [];
+  emojiUrlsLoaded = false;
+}
+
+/** 已收录条数。0 = 还没拉到(首启或刚切站),消费方按"查不到"处理即可。 */
+export function emojiCount(): number {
+  return emojiUrlMap.size;
 }
 
 function resolveEmojiUrl(rawUrl: string): string {
@@ -169,7 +158,7 @@ function resolveEmojiUrl(rawUrl: string): string {
   }
   // 标准 twemoji:站内相对(/images/emoji/...),挂 CDN。
   if (rawUrl.startsWith('/')) {
-    return `${EMOJI_CDN_BASE}${rawUrl}`;
+    return `${emojiCdnBase()}${rawUrl}`;
   }
-  return `${EMOJI_CDN_BASE}/${rawUrl}`;
+  return `${emojiCdnBase()}/${rawUrl}`;
 }

@@ -61,6 +61,7 @@ import { TopicListStyleSettingsPage } from './TopicListStyleSettingsPage';
 import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
 import { CurrentSite } from '../../services/site/CurrentSite';
 import { ForumsPage } from './ForumsPage';
+import { EmojiCatalogService } from '../../services/content/EmojiCatalogService';
 import { SiteSwitchCoordinator } from '../../services/site/SiteSwitchCoordinator';
 import { ForumDef, ForumPrefs } from '../../services/site/ForumPrefs';
 import { SiteUrl } from '../../services/site/SiteUrl';
@@ -1610,6 +1611,9 @@ export struct RootTabPage {
       this.bridge.setDownloadContext(context);
     }
     this.checkCurrentUser();
+    // 表情表:宿主就绪才发得出请求。命中缓存或已加载时它自己会立刻返回,可安全重复调用。
+    // 不 await —— 表情缺失只是暂时看不到图,不该拖慢首屏。
+    EmojiCatalogService.ensureLoaded(this.hostContext(), this.bridge);
   }
 
   // 宿主首屏加载失败(DoH 关 + 无代理导致 linux.do 不可达):强制解锁 UI 进入降级可导航态——
@@ -1925,6 +1929,8 @@ export struct RootTabPage {
     // 再按新站重下发一次,顺序正好。
     this.challengeRecovery?.resetForSiteSwitch();
     this.navPathStack.clear();
+    // 表情表是站点级数据(各站自定义表情组不同):先丢掉旧站那份,新站的随后重新拉。
+    EmojiCatalogService.onSiteChanged();
     SiteSwitchCoordinator.afterSwitch(this.hostContext(), this.bridge);
     SessionEventBus.notifySessionChanged();
     // 若这次切站是被跨论坛的推送点击触发的,pending 里还留着那条跳转 —— 现在地址已指向

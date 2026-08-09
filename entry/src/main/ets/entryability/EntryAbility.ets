@@ -14,7 +14,6 @@ import { AppStateEventBus } from '../services/session/AppStateEventBus';
 import { WebSessionManager } from '../services/web/WebSessionManager';
 import { LINUXDO_FA_SYMBOLS_RAWFILE, loadFaIconsFromRawContent } from '../views/components/FaIcon';
 import { LINUXDO_TAG_ICONS_RAWFILE, loadTagIconsFromRawContent } from '../views/components/TagIconRegistry';
-import { LINUXDO_EMOJIS_RAWFILE, loadEmojiUrlsFromRawContent } from '../views/components/EmojiUrlRegistry';
 import { ArkWebNetworkBridge } from '../services/network/ArkWebNetworkBridge';
 import { LoginGate } from '../services/session/LoginGate';
 import { parsePushNotificationRouteFromParameters, PushNotificationRoute, describePushNotificationRoute } from '../services/push/PushNotificationNavigation';
@@ -204,14 +203,8 @@ export default class EntryAbility extends UIAbility {
         JSON.stringify(err));
     }
 
-    try {
-      const rawContent: Uint8Array = this.context.resourceManager.getRawFileContentSync(LINUXDO_EMOJIS_RAWFILE);
-      const emojiCount: number = loadEmojiUrlsFromRawContent(rawContent);
-      hilog.info(DOMAIN, 'testTag', 'Loaded Linux.do emoji urls: %{public}d', emojiCount);
-    } catch (err) {
-      hilog.error(DOMAIN, 'testTag', 'Failed to load Linux.do emoji urls. Cause: %{public}s',
-        JSON.stringify(err));
-    }
+    // 表情表不在这里加载:它已改为按当前论坛从 /emojis.json 动态获取(EmojiCatalogService),
+    // 由 RootTabPage 在宿主就绪后触发,冷启动先吃磁盘缓存。此处只留下与站点无关的图标字库。
   }
 
   // 载入随包的中继配置(relay-config.json,不进版本控制)。文件缺失属正常情况——
