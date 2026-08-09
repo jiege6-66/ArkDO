@@ -177,10 +177,7 @@ export struct SettingsPage {
       // 卡片:分类入口。繁重/低频配置各自收进子页。
       Column() {
         // 论坛切换排在最前:它决定了整个 App 在看哪个站,是这一组里唯一会改变内容来源的项。
-        // 副标题直接给出当前论坛名,免得用户要点进去才知道自己在哪。
-        this.SettingCell($r('sys.symbol.message'), '论坛', this.activeForumLabel(), () => {
-          this.onOpenForums();
-        })
+        this.ForumCell()
         this.HairlineInset()
         this.SettingCell($r('sys.symbol.bell'), '通知', '', () => {
           this.onOpenPush();
@@ -212,6 +209,41 @@ export struct SettingsPage {
         .height(40)
     }
     .width('100%')
+  }
+
+  /**
+   * 论坛入口。副标题是当前论坛名,会随改名/切站变化。
+   *
+   * 刻意不走 SettingCell:那是个 @Builder,`value` 按值传参 —— ArkUI 里按值传进
+   * @Builder 的参数变化**不会触发内部重绘**(要按引用 $$ 才行),副标题会一直停在旧值。
+   * 走 SettingCell 传值的只有版本号那类永不变化的东西,所以一直没暴露这个问题。
+   * 同页的「外观」也是为此单独建了 AppearanceCell —— 这里照同一套写法。
+   */
+  @Builder
+  private ForumCell() {
+    Row() {
+      SymbolGlyph($r('sys.symbol.message'))
+        .fontSize(20)
+        .fontColor([$r('app.color.text_secondary')])
+      Text('论坛')
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .margin({ left: 14 })
+      Text(this.activeForumLabel())
+        .fontSize(13)
+        .fontColor($r('app.color.text_faint'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .constraintSize({ maxWidth: '45%' })
+        .margin({ right: 6 })
+      this.ChevronIcon()
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 14, bottom: 14 })
+    .onClick(() => {
+      this.onOpenForums();
+    })
   }
 
   @Builder
