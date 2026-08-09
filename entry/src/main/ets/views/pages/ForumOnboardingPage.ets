@@ -52,7 +52,7 @@ export struct ForumOnboardingPage {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
 
-      Text('ArkDO 是通用的论坛客户端,支持基于 Discourse(开源论坛程序)搭建的站点。填入论坛地址即可开始浏览。')
+      Text('ArkDO 是通用的论坛客户端，支持基于 Discourse（开源论坛程序）搭建的站点。填入论坛地址即可开始浏览。')
         .fontSize(14)
         .lineHeight(21)
         .fontColor($r('app.color.text_secondary'))
@@ -66,7 +66,7 @@ export struct ForumOnboardingPage {
   @Builder
   private InputCard() {
     Column() {
-      TextInput({ placeholder: '论坛地址,如 meta.discourse.org', text: this.urlInput })
+      TextInput({ placeholder: '论坛地址，如 meta.discourse.org', text: this.urlInput })
         .fontSize(15)
         .height(48)
         .backgroundColor($r('app.color.surface_muted'))
@@ -149,7 +149,7 @@ export struct ForumOnboardingPage {
 
   @Builder
   private Disclaimer() {
-    Text('本应用不提供、不托管、不审核任何内容。所有内容均来自你自行添加的第三方站点,由该站点及其运营方负责。本应用与任何论坛站点及其运营方无隶属、合作或授权关系。')
+    Text('本应用不提供、不托管、不审核任何内容。所有内容均来自你自行添加的第三方站点，由该站点及其运营方负责。本应用与任何论坛站点及其运营方无隶属、合作或授权关系。')
       .fontSize(11)
       .lineHeight(17)
       .fontColor($r('app.color.text_faint'))
@@ -176,7 +176,7 @@ export struct ForumOnboardingPage {
     }
     const baseUrl: string = SiteUrl.toBaseUrl(urlInput);
     if (baseUrl.length === 0) {
-      promptToast(this.getUIContext(), '地址不正确,请填形如 example.com 的论坛域名');
+      promptToast(this.getUIContext(), '地址不正确，请填形如 example.com 的论坛域名');
       return;
     }
     this.adding = true;
@@ -184,7 +184,7 @@ export struct ForumOnboardingPage {
     const added: ForumDef | undefined = ForumPrefs.addForum(context, name, baseUrl);
     if (!added) {
       this.adding = false;
-      promptToast(this.getUIContext(), '添加失败,请检查地址');
+      promptToast(this.getUIContext(), '添加失败，请检查地址');
       return;
     }
     // reconcile 会选中它并推入 AppConstants,同时刷新 AppStorage 镜像 ——

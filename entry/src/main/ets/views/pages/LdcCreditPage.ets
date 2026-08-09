@@ -216,7 +216,7 @@ export struct LdcCreditPage {
           this.DailyCard()
           this.PoweredByFooter()
         } else if (this.phase === LdcPhase.ANON) {
-          this.MessageState('未登录 LINUX DO Credit', '使用 LINUX DO 账号登录后,即可查看余额与获取记录', true, false)
+          this.MessageState('未登录 LINUX DO Credit', '使用 LINUX DO 账号登录后，即可查看余额与获取记录', true, false)
         } else if (this.phase === LdcPhase.ERROR) {
           this.MessageState('暂时无法获取', this.errorMessage.length > 0 ? this.errorMessage : '可能是网络问题或需要完成人机验证', false, true)
         } else if (this.phase === LdcPhase.LOADING) {
@@ -483,7 +483,7 @@ export struct LdcCreditPage {
     if (this.phase === LdcPhase.LOGGING_IN || this.phase === LdcPhase.READY) {
       return;
     }
-    this.errorMessage = '连接 credit.linux.do 失败,请检查网络后重试';
+    this.errorMessage = '连接 credit.linux.do 失败，请检查网络后重试';
     this.phase = LdcPhase.ERROR;
   }
 

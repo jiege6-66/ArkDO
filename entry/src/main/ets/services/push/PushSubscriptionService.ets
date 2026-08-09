@@ -292,7 +292,7 @@ export class PushSubscriptionService {
     const lowered: string = text.toLowerCase();
     // 登录页/挑战页等 HTML:典型的"掉登录态但仍回 200"。
     if (lowered.indexOf('<html') >= 0 || lowered.indexOf('<!doctype html') >= 0) {
-      return '推送订阅失败: 登录态可能已失效,请重新登录后再试';
+      return '推送订阅失败：登录态可能已失效，请重新登录后再试';
     }
 
     // JSON 错误体:Discourse 失败时回 {"errors":[...]} / {"failed":"FAILED"}。
@@ -300,10 +300,10 @@ export class PushSubscriptionService {
       try {
         const parsed: SubscribeResponseBody = JSON.parse(text) as SubscribeResponseBody;
         if (parsed.errors !== undefined && parsed.errors.length > 0) {
-          return `推送订阅失败: ${parsed.errors.join('; ')}`;
+          return `推送订阅失败：${parsed.errors.join('; ')}`;
         }
         if (typeof parsed.failed === 'string' && parsed.failed.length > 0) {
-          return `推送订阅失败: ${parsed.failed}`;
+          return `推送订阅失败：${parsed.failed}`;
         }
       } catch (err) {
         // 解析不了的 JSON 不当作失败证据,交给上层按成功处理,避免误伤。

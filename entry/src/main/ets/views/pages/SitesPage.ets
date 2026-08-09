@@ -63,7 +63,7 @@ struct SiteEditDialog {
         .margin({ top: 22, bottom: 18 })
 
       Column() {
-        TextInput({ placeholder: '名称(可留空,默认取域名)', text: this.name })
+        TextInput({ placeholder: '名称（可留空，默认取域名）', text: this.name })
           .fontSize(15)
           .height(44)
           .backgroundColor($r('app.color.surface_muted'))
@@ -72,7 +72,7 @@ struct SiteEditDialog {
             this.name = value;
           })
 
-        TextInput({ placeholder: '站点地址,如 example.com', text: this.url })
+        TextInput({ placeholder: '站点地址，如 example.com', text: this.url })
           .fontSize(15)
           .height(44)
           .backgroundColor($r('app.color.surface_muted'))
@@ -404,10 +404,10 @@ export struct SitesPage {
         })
 
       Column() {
-        Text('DoH 解析域名,免代理直连')
+        Text('DoH 解析域名，免代理直连')
           .fontSize(13)
           .fontColor($r('app.color.text_faint'))
-        Text('复用论坛登录态,授权一键通过')
+        Text('复用论坛登录态，授权一键通过')
           .fontSize(13)
           .fontColor($r('app.color.text_faint'))
           .margin({ top: 6 })
@@ -668,7 +668,7 @@ export struct SitesPage {
   private confirmDelete(site: SiteDef): void {
     this.getUIContext().showAlertDialog({
       title: '删除站点',
-      message: `确定要删除「${site.name}」吗?`,
+      message: `确定要删除「${site.name}」吗？`,
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {

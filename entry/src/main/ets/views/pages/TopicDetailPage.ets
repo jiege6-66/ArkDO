@@ -176,8 +176,7 @@ export struct TopicDetailPage {
   // 靠 @Watch 就地起播(已加载路径的楼内跳转)。短暂生效后清零,避免楼层销毁重建时重播。
   @State private flashTargetPostId: number = 0;
   private flashClearTimerId: number = -1;
-  // 当前视口首/末项的 List 下标(onScrollIndex 持续更新):用于预取判断、已读统计，
-  // 以及跳楼时判断目标楼是否已在屏内(在屏内则不滚动)。
+  // 当前视口首/末项的 List 下标(onScrollIndex 持续更新):用于预取判断、已读统计，// 以及跳楼时判断目标楼是否已在屏内(在屏内则不滚动)。
   private currentStartListIndex: number = 0;
   private currentEndListIndex: number = 0;
   // 跳未加载楼的重开窗口请求进行中(防重入 + 顶部悬浮胶囊提示)。请求期间旧列表原样保留,不白屏。
@@ -840,8 +839,7 @@ export struct TopicDetailPage {
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
-    // 实时新楼提示条：用户不在底部时新楼到达累计，点按跳到首条新楼。悬浮在底部中央、不参与布局，
-    // 与向上加载胶囊同一套"悬浮小胶囊"长相。在底部时不显示(那时直接追加，见 flushCreatedPosts)。
+    // 实时新楼提示条：用户不在底部时新楼到达累计，点按跳到首条新楼。悬浮在底部中央、不参与布局，// 与向上加载胶囊同一套"悬浮小胶囊"长相。在底部时不显示(那时直接追加，见 flushCreatedPosts)。
     //
     // 定位方式与右下角悬浮回复按钮保持一致(满屏容器 + 底距)，不要改回
     // position('100%') + markAnchor('50%') + offset 那一套：算式上两者中心该重合，实测胶囊却沉到
@@ -885,8 +883,7 @@ export struct TopicDetailPage {
       .transition(TransitionEffect.OPACITY.animation({ duration: 150 }))
     }
 
-    // 底部"正在回复"悬浮条：真实 Presence 数据驱动。定位与"N 条新回复"一致(满屏容器 + 底距)，
-    // 与右下角悬浮回复按钮垂直居中。
+    // 底部"正在回复"悬浮条：真实 Presence 数据驱动。定位与"N 条新回复"一致(满屏容器 + 底距)，// 与右下角悬浮回复按钮垂直居中。
     if (this.detail && this.presenceUsers.length > 0 && !this.showComposer) {
       Column() {
         ReplyingPresenceBar({ users: this.presenceUsers })
@@ -1070,7 +1067,7 @@ export struct TopicDetailPage {
     const result: NetworkResult<string> = await new TopicService(this.bridge).getPostRaw(post.id);
     this.editLoadingPostId = 0;
     if (!result.success || result.data === undefined) {
-      this.showComposerToast('读取原文失败,请稍后重试', 2000);
+      this.showComposerToast('读取原文失败，请稍后重试', 2000);
       return;
     }
     this.resetComposerModes();
@@ -1116,10 +1113,10 @@ export struct TopicDetailPage {
       return true;
     }
     if (result.statusCode === 409) {
-      this.showComposerToast('这条回复已被改动,请重新打开编辑', 2500);
+      this.showComposerToast('这条回复已被改动，请重新打开编辑', 2500);
       return false;
     }
-    this.showComposerToast('保存失败,请稍后重试', 2000);
+    this.showComposerToast('保存失败，请稍后重试', 2000);
     return false;
   }
 
@@ -1552,8 +1549,7 @@ export struct TopicDetailPage {
       return;
     }
     const result: NetworkResult<TopicPost[]> = await new TopicService(this.bridge).loadMorePosts(topicId, ids);
-    // 拉取期间可能发生换窗(rewindowToPost 跳到中段)：此时 hasMorePosts 变真，末尾追加会造成楼号跳断，
-    // 或 detail/topic 已切换——一律放弃本次追加。
+    // 拉取期间可能发生换窗(rewindowToPost 跳到中段)：此时 hasMorePosts 变真，末尾追加会造成楼号跳断，// 或 detail/topic 已切换——一律放弃本次追加。
     if (!result.success || !result.data || result.data.length === 0 ||
       !this.detail || this.detail.id !== topicId || this.hasMorePosts) {
       return;
@@ -1568,8 +1564,7 @@ export struct TopicDetailPage {
     Log.i(`${LOG_TAG} realtime created topicId=${topicId} ids=${ids.length} added=${added} atEnd=${this.atListEnd}`);
     if (this.atListEnd) {
       // 在底部：只追加，不发滚动命令。新楼正好补进末尾"加载态行 + 底部留白"腾出的那段位置
-      // (54 + POST_LIST_BOTTOM_SPACER + 底部安全区 ≈ 116vp)，顶部自然露出来就够提示了；
-      // maintainVisibleContentPosition 保证已经在屏上的楼层原地不动。
+      // (54 + POST_LIST_BOTTOM_SPACER + 底部安全区 ≈ 116vp)，顶部自然露出来就够提示了；// maintainVisibleContentPosition 保证已经在屏上的楼层原地不动。
       // 此前这里发 scrollEdge(Edge.Bottom)，无动画瞬跳，正在读的内容会被整块顶走。
       // 注意：追加后末项被挤出视口，onScrollIndex 会把 atListEnd 置回 false——人确实不在
       // 真正的底部了，所以再来的新楼改走下面的提示条分支，这是预期行为。
@@ -1750,8 +1745,7 @@ export struct TopicDetailPage {
   }
 
   // contentStartOffset 只用于“带目标楼首帧定位”，不应成为这一个 List 永久的滚动坐标系。
-  // 用户回到顶部时将它归零；摘要项 Blank 的高度公式是 contentSpacer - startOffset，
-  // 因此同一帧会等量增高，总顶部空间保持不变，不会产生视觉跳动。归零后 HDS 的 0..8vp
+  // 用户回到顶部时将它归零；摘要项 Blank 的高度公式是 contentSpacer - startOffset，// 因此同一帧会等量增高，总顶部空间保持不变，不会产生视觉跳动。归零后 HDS 的 0..8vp
   // 模糊区间与普通从一楼进入时完全一致，避免再次要求内容滚到物理屏幕外才触发模糊。
   private normalizeTargetListStartOffsetAtTop(): void {
     if (this.initialListStartOffset <= 0) {

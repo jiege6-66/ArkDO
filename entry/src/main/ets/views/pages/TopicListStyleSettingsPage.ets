@@ -444,7 +444,7 @@ export struct TopicListStyleSettingsPage {
     // 第一条:长标题(必然折行,行高才看得出来)+ 未读药丸 + 分类标签 + 时间。
     const withUnread: Topic = new Topic();
     withUnread.id = -1;
-    withUnread.title = '这是一条用来预览的帖子标题,它足够长,好让你看清标题折行之后的行高与整体密度';
+    withUnread.title = '这是一条用来预览的帖子标题，它足够长，好让你看清标题折行之后的行高与整体密度';
     withUnread.author = this.previewAuthor('demo_user', '示例用户');
     withUnread.tags = [{ name: '教程' }, { name: '实用工具' }];
     withUnread.categoryId = 1;

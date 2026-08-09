@@ -1153,7 +1153,7 @@ export struct ProfilePage {
     if (!this.hasCheckedSession) {
       return '正在检查登录状态';
     }
-    return '账号由该论坛提供,登录后即可参与讨论。登录在论坛自己的页面完成,ArkDO 不经手你的密码。';
+    return '账号由该论坛提供，登录后即可参与讨论。登录在论坛自己的页面完成，ArkDO 不经手你的密码。';
   }
 
   private getCategoryFor(categoryId?: number): TopicCategory | undefined {

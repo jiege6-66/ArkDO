@@ -352,7 +352,7 @@ export class DraftService {
       sequence: typeof source.sequence === 'number' ? source.sequence : 0,
       action: action,
       title: title,
-      displayTitle: title.length > 0 ? title : '(无标题草稿)',
+      displayTitle: title.length > 0 ? title : '（无标题草稿）',
       excerpt: DraftService.cleanExcerpt(source.excerpt, data.reply),
       createdAt: typeof source.created_at === 'string' ? source.created_at : '',
       tags: this.mapTags(data.tags),

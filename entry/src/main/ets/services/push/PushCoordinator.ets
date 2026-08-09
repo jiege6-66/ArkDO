@@ -90,7 +90,7 @@ export class PushCoordinator {
     if (!context) {
       return {
         success: false,
-        message: '通知权限申请失败: 缺少 AbilityContext'
+        message: '通知权限申请失败：缺少 AbilityContext'
       };
     }
     const user: User | undefined = this.getUser();
@@ -105,7 +105,7 @@ export class PushCoordinator {
     if (!isPushRelayConfigured(context)) {
       return {
         success: false,
-        message: '未配置推送中继,请在设置中填写中继地址'
+        message: '未配置推送中继，请在设置中填写中继地址'
       };
     }
 

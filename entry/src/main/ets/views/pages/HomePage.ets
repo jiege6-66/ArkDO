@@ -454,8 +454,7 @@ export struct HomePage {
   // 瞬移到起跑线,并在下一帧确认它真的落地了再起动画。
   // 之所以要"确认":点击时列表可能还在惯性滑行,惯性会把瞬移顶回去,
   // 动画段于是又从几万 vp 外起跑——这正是回顶时灵时不灵的来源。
-  // 首页改为 LazyForEach 后,长距离按绝对 yOffset 跳转会触发懒列表估算/补建大量中间项；
-  // 改按 index 直接跳到首个帖子项,再动画补完顶部 spacer,成本稳定。
+  // 首页改为 LazyForEach 后,长距离按绝对 yOffset 跳转会触发懒列表估算/补建大量中间项；// 改按 index 直接跳到首个帖子项,再动画补完顶部 spacer,成本稳定。
   private teleportThenAnimate(runway: number, attempt: number): void {
     this.listScroller.scrollToIndex(1, false);
     this.getUIContext().postFrameCallback(new NextFrameTask(() => {
@@ -1724,8 +1723,8 @@ export struct HomePage {
 
     this.requiresChallenge = result.error?.requiresChallenge === true;
     const friendlyMessage: string = this.requiresChallenge
-      ? '内容加载遇到访问验证,请稍后重试'
-      : '加载失败,请检查网络后重试';
+      ? '内容加载遇到访问验证，请稍后重试'
+      : '加载失败，请检查网络后重试';
     if (this.topics.length === 0) {
       this.loadFailed = true;
       this.listMessage = friendlyMessage;
@@ -1734,7 +1733,7 @@ export struct HomePage {
       // "使用中列表怎么变空的"。这里记本次失败的指纹:是 CF 拦截还是普通网络失败、状态码、错误信息。
       Log.i(`${DIAG_TAG} stage=homeEmptyPromptShown requiresChallenge=${this.requiresChallenge} status=${result.statusCode} isLoggedIn=${this.isLoggedIn} errCode=${result.error?.code ?? ''} errMsg=${result.error?.message ?? ''}`);
     } else {
-      this.footerMessage = '刷新失败,请重试';
+      this.footerMessage = '刷新失败，请重试';
     }
     this.runPendingSessionRefresh();
     this.runPendingIncomingRefresh();

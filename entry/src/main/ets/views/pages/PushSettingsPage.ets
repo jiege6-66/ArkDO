@@ -345,7 +345,7 @@ export struct PushSettingsPage {
       this.relaySummary = '未配置，推送不可用';
       return;
     }
-    this.relaySummary = custom.length > 0 ? `${effective.baseUrl}(自填)` : effective.baseUrl;
+    this.relaySummary = custom.length > 0 ? `${effective.baseUrl}（自填）` : effective.baseUrl;
   }
 
   // 同意告知:记住选择,然后继续把推送开起来(此时 needsRelayConsent 已为 false,不会再弹)。

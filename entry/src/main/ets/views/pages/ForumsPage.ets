@@ -48,7 +48,7 @@ struct ForumEditDialog {
         .margin({ top: 22, bottom: 18 })
 
       Column() {
-        TextInput({ placeholder: '名称(可留空,默认取域名)', text: this.name })
+        TextInput({ placeholder: '名称（可留空，默认取域名）', text: this.name })
           .fontSize(15)
           .height(44)
           .backgroundColor($r('app.color.surface_muted'))
@@ -57,7 +57,7 @@ struct ForumEditDialog {
             this.name = value;
           })
 
-        TextInput({ placeholder: '论坛地址,如 meta.discourse.org', text: this.url })
+        TextInput({ placeholder: '论坛地址，如 meta.discourse.org', text: this.url })
           .fontSize(15)
           .height(44)
           .backgroundColor($r('app.color.surface_muted'))
@@ -67,7 +67,7 @@ struct ForumEditDialog {
             this.url = value;
           })
 
-        Text('必须是基于 Discourse(开源论坛程序)搭建的站点。')
+        Text('必须是基于 Discourse（开源论坛程序）搭建的站点。')
           .fontSize(12)
           .fontColor($r('app.color.text_faint'))
           .width('100%')
@@ -390,7 +390,7 @@ export struct ForumsPage {
 
   @Builder
   private Footnote() {
-    Text('各论坛的账号彼此独立并长期保留:切换不会退出登录,切回来仍是登录状态。长按可改名、改地址或删除。')
+    Text('各论坛的账号彼此独立并长期保留：切换不会退出登录，切回来仍是登录状态。长按可改名、改地址或删除。')
       .fontSize(12)
       .lineHeight(18)
       .fontColor($r('app.color.text_faint'))
@@ -475,7 +475,7 @@ export struct ForumsPage {
     const before: number = ForumPrefs.getForums(context).length;
     const added: ForumDef | undefined = ForumPrefs.addForum(context, name, urlInput);
     if (!added) {
-      promptToast(this.getUIContext(), '地址不正确,请填形如 example.com 的论坛域名');
+      promptToast(this.getUIContext(), '地址不正确，请填形如 example.com 的论坛域名');
       return;
     }
     const after: number = ForumPrefs.getForums(context).length;
@@ -509,7 +509,7 @@ export struct ForumsPage {
   private confirmRemove(forum: ForumDef): void {
     this.getUIContext().showAlertDialog({
       title: '删除论坛',
-      message: `确定要从列表中删除 ${forum.name} 吗?`,
+      message: `确定要从列表中删除 ${forum.name} 吗？`,
       buttons: [
         { value: '取消', action: () => {} },
         {
