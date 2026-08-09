@@ -61,6 +61,23 @@ export interface SearchResult {
   hasMore: boolean;
 }
 
+/**
+ * 标签联想的返回条数上限。
+ *
+ * 不能随便填:新版 Discourse 给 /tags/filter/search 加了契约校验 —— `limit` 大于站点设置
+ * `max_tag_search_results` 会直接返回 {"failed":"FAILED","errors":["Limit is invalid"]},
+ * 一条标签都拿不到。而该设置**默认值就是 5**。
+ *
+ * 原先写死 8 是照着 linux.do 抓包来的 —— 那个站把上限调高了,于是 8 能过;换到默认配置的
+ * 站点(如 meta.discourse.org)全都报错,表现成"抽屉里暂无可用标签",看起来像人家没有标签,
+ * 实际是我们的请求被拒了。又一次把某个站的配置当成了协议保证。
+ *
+ * 取 5 = 官方默认上限,对绝大多数站点都合法。理论上站点可把它调到 1~4,那时仍会被拒 ——
+ * 真要彻底免疫得先读站点设置再定,不值得为此多一次请求;何况抽屉的"常用标签"更该改用
+ * /site.json 的 top_tags(App 本就在调那个接口),那条路根本不受此限制。
+ */
+const TAG_SEARCH_LIMIT: number = 5;
+
 export class TopicService {
   private bridge: JsonNetworkClient;
 
@@ -638,7 +655,7 @@ export class TopicService {
     selectedTagIds: number[],
     categoryId: number
   ): Promise<NetworkResult<TagSuggestion[]>> {
-    let path: string = `/tags/filter/search?q=${encodeURIComponent(query)}&limit=8`;
+    let path: string = `/tags/filter/search?q=${encodeURIComponent(query)}&limit=${TAG_SEARCH_LIMIT}`;
     if (categoryId >= 0) {
       path += `&categoryId=${categoryId}`;
     }
