@@ -1,5 +1,5 @@
 import { Log } from '../../services/logging/Log';
-import { LinuxDoConstants } from '../../common/constants/AppConstants';
+import { AppConstants, LinuxDoConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, APP_SPLIT_NAV_BAR_WIDTH_STORAGE_KEY, BreakpointManager,
   SPLIT_NAV_BAR_MAX_WIDTH } from '../../common/utils/BreakpointManager';
 import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildTopicListStyleSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildForumsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
@@ -62,6 +62,8 @@ import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
 import { CurrentSite } from '../../services/site/CurrentSite';
 import { ForumsPage } from './ForumsPage';
 import { SiteSwitchCoordinator } from '../../services/site/SiteSwitchCoordinator';
+import { ForumDef, ForumPrefs } from '../../services/site/ForumPrefs';
+import { SiteUrl } from '../../services/site/SiteUrl';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { LdcCreditPage } from './LdcCreditPage';
@@ -1322,7 +1324,49 @@ export struct RootTabPage {
     this.openWebPage(target.url);
   }
 
+  /**
+   * 跨论坛的推送:先切到通知所属的论坛,再跳。
+   *
+   * 不切的话,route.url 带的是 A 站的 topicId,而全 app 的接口地址指向 B 站 —— 要么打开
+   * 一篇完全无关的帖子,要么 404。此前的行为是 resolveDiscoursePushUrl 直接把跨站地址判空、
+   * route 作废,表现成「点通知毫无反应」:安全但等于功能缺失。
+   *
+   * 只切**用户自己添加过**的论坛。通知里声明的 host 不在列表里就不动 —— 那意味着用户已经
+   * 把这个论坛删了(或订阅是别的设备留下的),擅自替他加回来不合适。
+   *
+   * 切站是异步的(要重建宿主 webview、清导航栈),所以这里不当场跳:把 route 留在 pending,
+   * 切完之后由既有的「宿主就绪 → 消费 pending」那条通路接手。返回 true 表示已交给切站流程。
+   */
+  private redirectPushRouteToItsForum(route: PushNotificationRoute): boolean {
+    const host: string = route.siteHost;
+    if (host.length === 0 || host === AppConstants.HOST) {
+      return false;
+    }
+    const context: common.Context = this.hostContext();
+    const forums: ForumDef[] = ForumPrefs.getForums(context);
+    let target: ForumDef | undefined = undefined;
+    for (let index: number = 0; index < forums.length; index++) {
+      if (SiteUrl.hostOf(forums[index].baseUrl) === host) {
+        target = forums[index];
+        break;
+      }
+    }
+    if (!target) {
+      Log.i(`${LOG_TAG} push route dropped: forum not in list host=${host}`);
+      PushNotificationNavigationEventBus.clearPending(route.id);
+      this.showToast(`通知来自 ${host}，该论坛已不在列表中`);
+      return true;
+    }
+    Log.i(`${LOG_TAG} push route needs forum switch ${AppConstants.HOST} → ${host}`);
+    // 不 clearPending:切站后要靠它把这次跳转接上。
+    CurrentSite.switchTo(context, target);
+    return true;
+  }
+
   private handlePushNotificationRoute(route: PushNotificationRoute): void {
+    if (this.redirectPushRouteToItsForum(route)) {
+      return;
+    }
     PushNotificationNavigationEventBus.clearPending(route.id);
     const target: LinkTarget = LinkRouter.resolve(route.url);
     Log.i(`${LOG_TAG} push route path=${describePushNotificationRoute(route)} kind=${target.kind}`);
@@ -1883,6 +1927,13 @@ export struct RootTabPage {
     this.navPathStack.clear();
     SiteSwitchCoordinator.afterSwitch(this.hostContext(), this.bridge);
     SessionEventBus.notifySessionChanged();
+    // 若这次切站是被跨论坛的推送点击触发的,pending 里还留着那条跳转 —— 现在地址已指向
+    // 目标论坛,把它接上。放在最后:前面刚清过导航栈,更早跳会被一起清掉。
+    const pendingPush: PushNotificationRoute | undefined = PushNotificationNavigationEventBus.takePending();
+    if (pendingPush) {
+      Log.i(`${LOG_TAG} resume push route after forum switch path=${describePushNotificationRoute(pendingPush)}`);
+      this.handlePushNotificationRoute(pendingPush);
+    }
   }
 
   private handleSessionChanged(version: number): void {
