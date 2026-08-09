@@ -22,6 +22,9 @@ import { User } from '../../models/User';
 import { TopicCategory } from '../../models/Topic';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { MathRenderService, MathImage } from '../../services/content/MathRenderService';
+import { ContentImageCache } from '../../services/network/ContentImageCache';
+import { BlockedImageHosts } from '../../services/network/BlockedImageHosts';
+import { image } from '@kit.ImageKit';
 import { APP_IS_DARK_STORAGE_KEY } from '../../common/theme/ThemeManager';
 import { APP_IS_WIDE_STORAGE_KEY } from '../../common/utils/BreakpointManager';
 import { display } from '@kit.ArkUI';
@@ -144,6 +147,14 @@ export struct PostRichContent {
   @State private mathImages: Map<string, MathImage> = new Map();
   // 已发起渲染的公式 key,避免重复请求。
   private mathRequested: Set<string> = new Set();
+  // 原生直载失败、改由 host webview 兜底取回的正文图(按 URL)。到手后整体重赋触发重渲染。
+  // 正常网络下这张表恒空:图片一律原生直载,这条兜底路零开销。
+  @State private bridgeImages: Map<string, image.PixelMap> = new Map();
+  // 已向桥发起过取图的 URL(无论成败),避免 onError 与预取重复排队、失败后无限重试。
+  private bridgeRequested: Set<string> = new Set();
+  // 原生直载确实失败过的 URL。只有这些图被桥救回来,才算"该域名原生走不通"的证据——
+  // 预取(域名已判定)取回的图不算数,否则判据会自我印证。
+  private nativeFailed: Set<string> = new Set();
   // 本帖是否已 retain 公式引擎(有公式才 retain,离开时 release)。
   private mathRetained: boolean = false;
   // 本实例的 hero id 前缀(aboutToAppear 领号)。见 heroTokenSeq。
@@ -166,6 +177,7 @@ export struct PostRichContent {
     heroTokenSeq++;
     this.heroToken = heroTokenSeq.toString(36);
     this.prepareMath();
+    this.prepareBlockedImages();
   }
 
   aboutToDisappear(): void {
@@ -225,9 +237,20 @@ export struct PostRichContent {
   }
 
   // 块级 ForEach 的 key。同理:MATH 块位图到位后翻转就绪标记,强制重建以切到 Image。
+  // IMAGE 块同样翻转:桥接兜底取回的 PixelMap 到手后要把 Image 的数据源从 URL 换成位图。
   private blockKey(block: RichBlock, index: number): string {
-    const ready: string = block.type === RichBlockType.MATH && !!block.text && this.mathImages.has(this.mathLocalKey(block.text, true)) ? 'r' : 'p';
+    const ready: string = this.blockReady(block) ? 'r' : 'p';
     return `${index}-${block.type}-${ready}`;
+  }
+
+  private blockReady(block: RichBlock): boolean {
+    if (block.type === RichBlockType.MATH) {
+      return !!block.text && this.mathImages.has(this.mathLocalKey(block.text, true));
+    }
+    if (block.type === RichBlockType.IMAGE) {
+      return !!block.src && this.bridgeImages.has(block.src);
+    }
+    return false;
   }
 
   // 递归收集 inlines / items / titleInlines / 子块 里的行内公式,以及 MATH 块本身。
@@ -988,12 +1011,15 @@ export struct PostRichContent {
       if (this.isSmallImage(block)) {
         // 小图（如 emoji、图标）：按 cooked 自带的真实尺寸显示，左对齐、不撑满、不显示 alt
         // 手机 / 宽屏一致,不动。
-        Image(block.src ? block.src : '')
+        Image(this.imageSourceOf(block))
           .id(this.heroIdOf(block))
           .width(block.width ? block.width : 20)
           .height(block.height ? block.height : 20)
           .objectFit(ImageFit.Contain)
           .draggable(false)
+          .onError(() => {
+            this.onImageLoadFailed(block);
+          })
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -1002,24 +1028,30 @@ export struct PostRichContent {
         //  + 按屏高限高。手机 / 窄屏永不进此分支。
         Row() {
           if (this.hasImageSize(block)) {
-            Image(block.src ? block.src : '')
+            Image(this.imageSourceOf(block))
               .id(this.heroIdOf(block))
               .width('100%')
               .aspectRatio(this.getImageAspectRatio(block))
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH, maxHeight: this.wideImageMaxHeight() })
               .objectFit(ImageFit.Contain)
               .backgroundColor($r('app.color.post_content_surface_bg'))
+              .onError(() => {
+                this.onImageLoadFailed(block);
+              })
               .onClick(() => {
                 this.openImageLink(block);
               })
           } else {
-            Image(block.src ? block.src : '')
+            Image(this.imageSourceOf(block))
               .id(this.heroIdOf(block))
               .width('100%')
               .height(260)
               .constraintSize({ maxWidth: WIDE_IMAGE_MAX_WIDTH })
               .objectFit(ImageFit.Contain)
               .backgroundColor($r('app.color.post_content_surface_bg'))
+              .onError(() => {
+                this.onImageLoadFailed(block);
+              })
               .onClick(() => {
                 this.openImageLink(block);
               })
@@ -1029,23 +1061,29 @@ export struct PostRichContent {
         .justifyContent(FlexAlign.Center)
       } else if (this.hasImageSize(block)) {
         // 手机 / 窄屏:原逻辑,一字未改(width 100% + maxHeight 520,靠外层 Column 左对齐)。
-        Image(block.src ? block.src : '')
+        Image(this.imageSourceOf(block))
           .id(this.heroIdOf(block))
           .width('100%')
           .aspectRatio(this.getImageAspectRatio(block))
           .constraintSize({ maxHeight: 520 })
           .objectFit(ImageFit.Contain)
           .backgroundColor($r('app.color.post_content_surface_bg'))
+          .onError(() => {
+            this.onImageLoadFailed(block);
+          })
           .onClick(() => {
             this.openImageLink(block);
           })
       } else {
-        Image(block.src ? block.src : '')
+        Image(this.imageSourceOf(block))
           .id(this.heroIdOf(block))
           .width('100%')
           .height(260)
           .objectFit(ImageFit.Contain)
           .backgroundColor($r('app.color.post_content_surface_bg'))
+          .onError(() => {
+            this.onImageLoadFailed(block);
+          })
           .onClick(() => {
             this.openImageLink(block);
           })
@@ -1725,6 +1763,117 @@ export struct PostRichContent {
     const width: number = block.width ? block.width : 1;
     const height: number = block.height ? block.height : 1;
     return width / height;
+  }
+
+  // ==================== 正文图片:原生直载 + 桥接兜底 ====================
+
+  /**
+   * 正文图的实际数据源。默认把 URL 交给原生 Image 直载(健康网络下零开销,与改动前完全一致);
+   * 只有两种情况改用桥接取回的 PixelMap:已兜底成功(表里有位图),或该域名已判定原生走不通
+   * 且桥接正在取(给空串等着,别再白等一次注定失败的原生请求)。
+   *
+   * 之所以需要这条兜底:原生 Image 走系统 netstack,吃不到 DoH(setHttpDns 只作用于 ArkWeb 内核),
+   * 域名被污染/封锁的网络里正文图会全白——而同一篇帖子的头像因为走桥接反而正常,极具迷惑性。
+   */
+  private imageSourceOf(block: RichBlock): image.PixelMap | string {
+    const src: string = block.src ? block.src : '';
+    if (src.length === 0) {
+      return '';
+    }
+    const bridged: image.PixelMap | undefined = this.bridgeImages.get(src);
+    if (bridged) {
+      return bridged;
+    }
+    if (BlockedImageHosts.isBlocked(src)) {
+      // 同一张图可能出现在多个楼层/多次挂载,共享缓存里有就直接用(只读,不在 build 期写状态)。
+      const shared: image.PixelMap | undefined = ContentImageCache.getInstance().getCached(src);
+      if (shared) {
+        return shared;
+      }
+      if (this.bridgeRequested.has(src)) {
+        return '';
+      }
+    }
+    return src;
+  }
+
+  // 原生直载失败:让桥接兜底取一次。是否把整个域名判定为走不通,要等桥真的取到了才算数
+  // (见 BlockedImageHosts:onError 分不清封锁与 404,而 404 桥也取不到)。
+  private onImageLoadFailed(block: RichBlock): void {
+    const src: string = block.src ? block.src : '';
+    if (src.length === 0 || this.bridgeRequested.has(src)) {
+      return;
+    }
+    Log.i(`${LOG_TAG} native image failed, falling back to bridge url=${src}`);
+    this.nativeFailed.add(src);
+    this.requestBridgeImage(src);
+  }
+
+  // 进楼层时把已知走不通域名上的图直接预取,免得每张都先白等一次原生失败。
+  // 健康网络下没有任何域名被判定过,这里一次 Set.size 检查就返回,不遍历、不分配、零成本。
+  private prepareBlockedImages(): void {
+    if (!BlockedImageHosts.hasAny()) {
+      return;
+    }
+    const images: ViewerImage[] = this.collectImages();
+    for (let i: number = 0; i < images.length; i++) {
+      // 正文里显示的是优化图(collectImages 的 fallbackUrl),没有优化图时才是原图。
+      const displayed: string = images[i].fallbackUrl.length > 0 ? images[i].fallbackUrl : images[i].url;
+      if (BlockedImageHosts.isBlocked(displayed)) {
+        this.requestBridgeImage(displayed);
+      }
+    }
+  }
+
+  // 经 host webview 取图字节解码成 PixelMap。每个 URL 只发起一次;桥未就绪时不记账,留给下次 onError 重试。
+  private requestBridgeImage(src: string): void {
+    if (src.length === 0 || this.bridgeRequested.has(src)) {
+      return;
+    }
+    const cache: ContentImageCache = ContentImageCache.getInstance();
+    if (!cache.isReady()) {
+      return;
+    }
+    // 只走异步一条路(load 命中缓存也是立即 resolve):同步写 @State 有可能落在渲染中途。
+    this.bridgeRequested.add(src);
+    cache.load(src)
+      .then((pixelMap: image.PixelMap | undefined) => {
+        if (!pixelMap) {
+          this.onBridgeImageFailed(src);
+          return;
+        }
+        // 原生取不到、桥取到了 —— 这才是"该域名原生走不通"的一条证据。
+        if (this.nativeFailed.has(src)) {
+          BlockedImageHosts.markBridgeRescued(src);
+        }
+        this.applyBridgeImage(src, pixelMap);
+      })
+      .catch(() => {
+        this.onBridgeImageFailed(src);
+      });
+  }
+
+  private applyBridgeImage(src: string, pixelMap: image.PixelMap): void {
+    if (!this.isActive) {
+      return;
+    }
+    const next: Map<string, image.PixelMap> = new Map(this.bridgeImages);
+    next.set(src, pixelMap);
+    this.bridgeImages = next;
+  }
+
+  /**
+   * 桥也取不到:多半是跨源图床不回 ACAO(而非网络被封),撤销该域名的"只走桥"标记,
+   * 并原样重赋一次状态触发重渲染——占位的空串要换回 URL,让原生再试一次(它可能只是某几张 404)。
+   * 该 URL 已在 bridgeRequested 里,原生这次再失败也不会又去排队,不会来回抖。
+   */
+  private onBridgeImageFailed(src: string): void {
+    Log.i(`${LOG_TAG} bridge image failed url=${src}`);
+    BlockedImageHosts.clearBlocked(src);
+    if (!this.isActive) {
+      return;
+    }
+    this.bridgeImages = new Map(this.bridgeImages);
   }
 
   private openImageLink(block: RichBlock): void {

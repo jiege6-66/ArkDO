@@ -2,6 +2,7 @@ import { image } from '@kit.ImageKit';
 import { AppConstants } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
+import { BlockedImageHosts } from '../../services/network/BlockedImageHosts';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { ANIMATED_AVATAR_ENABLED_STORAGE_KEY } from '../../services/avatar/AnimatedAvatarPrefs';
 
@@ -16,6 +17,8 @@ export struct UserAvatar {
   private readonly avatarBorderColor: string = '#4D00AEFF';
   // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
   @State private avatarSourceIndex: number = 0;
+  // 当前候选原生直载失败过、已由桥救回:build 据此从原生分支切到 PixelMap 分支。换候选时复位。
+  @State private nativeAvatarFailed: boolean = false;
   // 主站(linux.do)被 SNI 封锁的头像经 host webview 过盾取回并解码的 PixelMap(单帧,静态)。
   // ldstatic.com CDN 上的头像不封,走原生 Image 直载(且 .png 实为动图内容时会自动播放),不落此字段。
   @State private avatarPixelMap: image.PixelMap | undefined = undefined;
@@ -61,7 +64,7 @@ export struct UserAvatar {
             .objectFit(ImageFit.Cover)
             .backgroundColor($r('app.color.surface_muted'))
             .draggable(false)
-            .onError(() => this.advanceCandidate())
+            .onError(() => this.onNativeAvatarFailed())
         } else if (this.avatarPixelMap) {
           Image(this.avatarPixelMap)
             .width(this.avatarSize)
@@ -99,7 +102,7 @@ export struct UserAvatar {
   @Builder
   FlairBadge() {
     Stack() {
-      if (this.isImageFlair() && this.animatedAvatarEnabled) {
+      if (this.isImageFlair() && this.useNativeFlair()) {
         // 跨源 CDN 图(cdn3/s3.ldstatic.com,非被封的 linux.do 主站),原生 Image 直载且自动播 gif。
         // 有底色的多是透明 PNG(如信任等级):Contain + 内缩让底色露成圆环;无底色是整幅图:Cover 铺满方块。
         Image(this.flairImageUrl())
@@ -149,12 +152,17 @@ export struct UserAvatar {
     this.loadViaBridge(url);
   }
 
-  // 关闭动图时把图片型 flair 也解成单帧;开启时不需要(原生 Image 直载)。
+  // 关闭动图、或该 CDN 已判定原生走不通时,把图片型 flair 也经桥解成单帧;否则原生 Image 直载。
   private prepareFlairIfNeeded(): void {
-    if (this.animatedAvatarEnabled || !this.hasFlair() || !this.isImageFlair()) {
+    if (this.useNativeFlair() || !this.hasFlair() || !this.isImageFlair()) {
       return;
     }
     this.loadFlairViaBridge(this.flairImageUrl());
+  }
+
+  // 图片型 flair 是否交原生 Image 直载:允许播动图,且该域名原生还走得通。
+  private useNativeFlair(): boolean {
+    return this.animatedAvatarEnabled && !BlockedImageHosts.isBlocked(this.flairImageUrl());
   }
 
   private async loadFlairViaBridge(url: string): Promise<void> {
@@ -174,10 +182,37 @@ export struct UserAvatar {
     }
   }
 
+  /**
+   * 原生直载的 CDN 头像失败:先让桥救这一张。
+   * 桥也取不到 → 图是真没了,按老规矩退下一候选(行为与改动前一致)。
+   * 桥取到了 → 说明是网络层面走不通而非图失效,显示首帧并记一条证据;同域名攒够几条,
+   * BlockedImageHosts 才会判定该 CDN 原生走不通、让后续头像直接走桥。
+   * (写死"ldstatic.com 不被封"的老假设在部分用户网络里不成立,但也不能一张失败就推翻。)
+   */
+  private async onNativeAvatarFailed(): Promise<void> {
+    const url: string = this.currentAvatarUrl();
+    if (url.length === 0) {
+      return;
+    }
+    const pixelMap: image.PixelMap | undefined = await AvatarImageCache.getInstance().load(url);
+    if (!pixelMap) {
+      this.advanceCandidate();
+      return;
+    }
+    BlockedImageHosts.markBridgeRescued(url);
+    this.avatarPixelMap = pixelMap;
+    // 让 build 从原生分支切到 PixelMap 分支(代价:动图退成静态首帧,总好过掉成首字母)。
+    this.nativeAvatarFailed = true;
+    // 角标多半与头像同域,判定若已翻转就一并改走桥,免得等到下次挂载才恢复。
+    this.prepareFlairIfNeeded();
+  }
+
   // 当前候选取不到 → 退到下一候选(动图失败退静态);无更多候选则保持首字母占位。
   private advanceCandidate(): void {
     if (this.avatarSourceIndex + 1 < this.avatarCandidates().length) {
       this.avatarSourceIndex += 1;
+      // 换了候选就重新给原生一次机会:上一张的失败不代表这一张也取不到。
+      this.nativeAvatarFailed = false;
       this.prepareCurrentCandidate();
     }
   }
@@ -282,17 +317,19 @@ export struct UserAvatar {
   // 关掉「动态头像」时一律不走原生 Image——原生 Image 遇到动图内容就会自动播,没有属性能冻住它;
   // 唯一能得到静态图的办法是取字节后 createPixelMap() 拿首帧(PixelMap 天然只有一帧)。
   private useNativeImage(): boolean {
-    if (!this.animatedAvatarEnabled) {
+    if (!this.animatedAvatarEnabled || this.nativeAvatarFailed) {
       return false;
     }
     const url: string = this.currentAvatarUrl();
     return url.length > 0 && this.isNativeHost(url);
   }
 
-  // ldstatic.com CDN(含 cdn/s3 等子域)不被 SNI 封锁,原生 Image 可直载并自动播放动图内容;
+  // ldstatic.com CDN(含 cdn/s3 等子域)一般不被 SNI 封锁,原生 Image 可直载并自动播放动图内容;
   // 主站 linux.do 被封,须经 host webview 过桥取 PixelMap。
+  // "CDN 不被封"只是常态而非定律:部分网络里 ldstatic.com 同样解析不到/连不上,此时
+  // BlockedImageHosts 会在若干张失败后判定该域名原生走不通,这里跟着改走桥(代价是动图变静态首帧)。
   private isNativeHost(url: string): boolean {
-    return url.includes('ldstatic.com');
+    return url.includes('ldstatic.com') && !BlockedImageHosts.isBlocked(url);
   }
 
   private currentAvatarUrl(): string {

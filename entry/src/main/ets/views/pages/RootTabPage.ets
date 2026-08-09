@@ -32,6 +32,7 @@ import { PushTokenUpdateEventBus } from '../../services/push/PushTokenUpdateEven
 import { isPushRelayConfigured, PushRelayConfig, resolvePushRelayConfig } from '../../services/push/PushRelayConfig';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
+import { ContentImageCache } from '../../services/network/ContentImageCache';
 import { SiteIconStore } from '../../services/site/SiteIconStore';
 import { image } from '@kit.ImageKit';
 import { DohManager, DohResolveMode } from '../../services/network/DohManager';
@@ -214,6 +215,8 @@ export struct RootTabPage {
     this.syncWidePlaceholder();
     // 头像缓存单例注入 host bridge:UserAvatar 深层嵌套拿不到 bridge,统一经它取图(过 SNI 封锁)。
     AvatarImageCache.getInstance().attachBridge(this.bridge);
+    // 正文图缓存同理:原生 Image 直载失败时由它经 host webview 兜底取图(DoH 只对 ArkWeb 内核生效)。
+    ContentImageCache.getInstance().attachBridge(this.bridge);
     if (!this.challengeRecovery) {
       this.challengeRecovery = new ChallengeRecoveryCoordinator(
         this.bridge,

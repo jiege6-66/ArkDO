@@ -6,6 +6,9 @@ import { ON_DARK_FG } from '../../common/theme/Palette';
 import { FaIconView, getFaIcon, FaIconDefinition } from './FaIcon';
 import { ImageShareService } from '../../services/content/ImageShareService';
 import { showToast } from '../../common/utils/Toast';
+import { ContentImageCache } from '../../services/network/ContentImageCache';
+import { BlockedImageHosts } from '../../services/network/BlockedImageHosts';
+import { image } from '@kit.ImageKit';
 
 /**
  * 一张待浏览的图片：url 为首选（原图 href，高清），优化图作为兜底。
@@ -83,6 +86,11 @@ export struct ImageViewer {
   @Param backTick: number = 0;
 
   @Local currentIndex: number = 0;
+  // 原生直载失败、改由 host webview 兜底取回的图(按 URL)。与正文里的兜底同一套缓存,
+  // 从帖子里点开的图多半已在 ContentImageCache 里,秒出。正常网络下这张表恒空。
+  @Local bridgeImages: Map<string, image.PixelMap> = new Map();
+  // 已向桥发起过取图的 URL(无论成败),避免重复排队与失败后无限重试。
+  private bridgeRequested: Set<string> = new Set();
   @Local failedIndexes: number[] = [];
   // 高清原图已加载完成的页下标（隐藏该页 loading 指示）
   @Local loadedIndexes: number[] = [];
@@ -166,13 +174,16 @@ export struct ImageViewer {
             // 渐进加载：底层优化图（已缓存、秒显占位，避免高清图未回来时纯黑），
             // 顶层高清原图加载完成后覆盖；高清失败则回退优化图。
             Stack() {
-              Image(this.placeholderUrl(ri.index))
+              Image(this.sourceFor(this.placeholderUrl(ri.index)))
                 .objectFit(ImageFit.Contain)
                 .width('100%')
                 .height('100%')
                 .draggable(false)
+                .onError(() => {
+                  this.requestBridgeImage(this.placeholderUrl(ri.index));
+                })
 
-              Image(this.resolveUrl(ri.index))
+              Image(this.sourceFor(this.resolveUrl(ri.index)))
                 .objectFit(ImageFit.Contain)
                 .width('100%')
                 .height('100%')
@@ -184,6 +195,9 @@ export struct ImageViewer {
                   this.markFailed(ri.index);
                   // 回退到优化图后也算「已就绪」，隐藏 loading
                   this.markLoaded(ri.index);
+                  // 再让桥接兜底取一次「回退之后真正要显示的那张」(有优化图就是它,没有就还是原图)——
+                  // 受限网络下优化图同样是原生直载,不兜底一样白。放在 markFailed 之后是为了不白取原图。
+                  this.requestBridgeImage(this.resolveUrl(ri.index));
                 })
             }
             .width('100%')
@@ -289,7 +303,7 @@ export struct ImageViewer {
       // y 恒加上 dragOffsetY——关闭动画里 dragOffsetY 与 heroRect 一起收敛，
       // 拖到一半松手也能从手指所在处接着飞回原位。
       if (this.heroMounted) {
-        Image(this.heroUrl(this.currentIndex))
+        Image(this.sourceFor(this.heroUrl(this.currentIndex)))
           .objectFit(ImageFit.Contain)
           .draggable(false)
           .width(this.heroRect.w)
@@ -600,6 +614,72 @@ export struct ImageViewer {
       return item.url;
     }
     return item.fallbackUrl;
+  }
+
+  /**
+   * 这张图的实际数据源:默认仍是 URL 交原生 Image 直载;桥接兜底取回过就用 PixelMap。
+   * 已知走不通的域名(BlockedImageHosts)直接给空串并发起桥接,不再白等一次注定失败的原生请求。
+   * 原因见 PostRichContent.imageSourceOf:原生 Image 走系统 netstack,吃不到 DoH。
+   */
+  private sourceFor(url: string): image.PixelMap | string {
+    if (url.length === 0) {
+      return '';
+    }
+    const bridged: image.PixelMap | undefined = this.bridgeImages.get(url);
+    if (bridged) {
+      return bridged;
+    }
+    if (BlockedImageHosts.isBlocked(url)) {
+      // 帖子里刚兜底过的图多半还在共享缓存里,同步命中即可秒出(只读,不在 build 期写状态)。
+      const shared: image.PixelMap | undefined = ContentImageCache.getInstance().getCached(url);
+      if (shared) {
+        return shared;
+      }
+      this.requestBridgeImage(url);
+      return '';
+    }
+    return url;
+  }
+
+  /**
+   * 经 host webview 取图字节解码成 PixelMap。每个 URL 只发起一次;桥未就绪时不记账,留给下次重试。
+   * 注意这里只消费 BlockedImageHosts 的判定、不往里记失败:预览的原图 href 加载失败本就是常态
+   * (设计上就要回退优化图),拿它当"域名走不通"的证据会误伤。判定统一由正文那边攒。
+   */
+  private requestBridgeImage(url: string): void {
+    if (url.length === 0 || this.bridgeRequested.has(url)) {
+      return;
+    }
+    const cache: ContentImageCache = ContentImageCache.getInstance();
+    if (!cache.isReady()) {
+      return;
+    }
+    // 只走异步一条路:sourceFor 可能在 build 期调到这里,同步写 @Local 会在渲染中途改状态。
+    this.bridgeRequested.add(url);
+    cache.load(url)
+      .then((pixelMap: image.PixelMap | undefined) => {
+        if (!pixelMap) {
+          this.onBridgeImageFailed(url);
+          return;
+        }
+        this.applyBridgeImage(url, pixelMap);
+      })
+      .catch(() => {
+        this.onBridgeImageFailed(url);
+      });
+  }
+
+  private applyBridgeImage(url: string, pixelMap: image.PixelMap): void {
+    const next: Map<string, image.PixelMap> = new Map(this.bridgeImages);
+    next.set(url, pixelMap);
+    this.bridgeImages = next;
+  }
+
+  // 桥也取不到(多半是跨源图床不回 ACAO):撤销该域名标记并原样重赋状态触发重渲染,
+  // 把占位的空串换回 URL 让原生再试一次。URL 已在 bridgeRequested 里,不会来回抖。
+  private onBridgeImageFailed(url: string): void {
+    BlockedImageHosts.clearBlocked(url);
+    this.bridgeImages = new Map(this.bridgeImages);
   }
 
   private isLoaded(index: number): boolean {
