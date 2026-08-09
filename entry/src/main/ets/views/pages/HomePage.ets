@@ -63,7 +63,7 @@ import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/Rea
 import { BADGE_FILTER_ENABLED_STORAGE_KEY } from '../../services/home/BadgeFilterPrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
-import { ACTIVE_FORUM_NAME_KEY, SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
+import { ACTIVE_FORUM_NAME_KEY, ACTIVE_FORUM_TICK, SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PostRichContent } from '../components/PostRichContent';
 import {
@@ -266,6 +266,8 @@ export struct HomePage {
   // 「点分类/标签快速筛选」开关(实验性功能页,默认关)。开着时帖子行上的徽章可点。
   // 当前论坛名镜像:切站后首页标题自动跟着变。
   @StorageProp(ACTIVE_FORUM_NAME_KEY) private activeForumName: string = '';
+  // 切站信号。抽屉的版块树、筛选条件里的版块/标签都是站点级数据,必须整批复位重取。
+  @StorageProp(ACTIVE_FORUM_TICK) @Watch('onActiveForumChanged') private activeForumTick: number = 0;
   @StorageProp(BADGE_FILTER_ENABLED_STORAGE_KEY) private badgeFilterEnabled: boolean = false;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
@@ -1538,6 +1540,26 @@ export struct HomePage {
 
   // 实时开关翻转:关⇒中和所有 incoming 运行态并动画收起提示条(轮询由 ArkWebHost 侧停掉);
   // 开⇒无需动作,事件恢复流入后按既有逻辑自然展示提示。
+  /**
+   * 切站:把站点级的界面状态整批复位,再重取版块树。
+   *
+   * 光靠 CategoryIndex.clearCache() 不够 —— loadSiteMetadataIfNeeded 的短路条件是
+   * 「this.categories 非空就不加载」,而那份 @State 里还留着旧站的版块,于是根本走不到
+   * 缓存那一层。必须先把它清空。
+   *
+   * 筛选条件也得复位:listQuery / draftQuery 里存的是 TopicCategory 与 TopicTag 对象,
+   * 那些 id 在新站上要么不存在、要么指向另一个版块,不清就会拿旧站的版块 id 去新站拉列表。
+   */
+  private onActiveForumChanged(): void {
+    Log.i(`${LOG_TAG} active forum changed, resetting site-scoped state`);
+    this.categories = [];
+    this.drawerExpandedIds = [];
+    this.listQuery = createDefaultTopicListQuery();
+    this.draftQuery = createDefaultTopicListQuery();
+    // 列表本身由 RootTabPage 广播的会话变更去刷;这里只补版块树——它不在那条链路上。
+    this.loadSiteMetadataIfNeeded();
+  }
+
   private onRealtimeTopicsEnabledChanged(): void {
     if (!this.realtimeTopicsEnabled) {
       this.clearIncomingTopicsState();
