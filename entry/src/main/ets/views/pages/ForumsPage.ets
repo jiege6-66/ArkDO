@@ -76,7 +76,7 @@ struct ForumAddDialog {
           .fontColor($r('app.color.text_secondary'))
           .fontSize(16)
           .layoutWeight(1)
-          .height(48)
+          .height(52)
           .onClick(() => {
             this.controller.close();
           })
@@ -94,7 +94,7 @@ struct ForumAddDialog {
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .layoutWeight(1)
-          .height(48)
+          .height(52)
           .onClick(() => {
             const name: string = this.name;
             const url: string = this.url;
@@ -104,9 +104,13 @@ struct ForumAddDialog {
       }
       .width('100%')
     }
-    .width('100%')
-    .backgroundColor($r('app.color.page_bg'))
-    .borderRadius(28)
+    // 三项都不能少:customStyle 下宽度得自己给(不给就撑满屏宽);圆角用系统弹窗 token
+    // 与其它弹窗一致;clip 是关键 —— 底部按钮的按压高亮是矩形,不裁剪会从圆角处溢出一块
+    // 深色直角。与 SitesPage 的站点编辑弹窗保持同款。
+    .width('86%')
+    .backgroundColor($r('app.color.surface_card'))
+    .borderRadius($r('sys.float.ohos_id_corner_radius_dialog'))
+    .clip(true)
   }
 }
 

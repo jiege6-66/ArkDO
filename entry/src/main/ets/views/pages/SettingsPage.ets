@@ -453,9 +453,11 @@ struct DisclaimerDialog {
           this.controller?.close();
         })
     }
-    .width('100%')
-    .backgroundColor($r('app.color.page_bg'))
-    .borderRadius(28)
+    // 与本页 AboutDialog 同款:customStyle 下宽度自己给,并 clip 掉按钮按压高亮的直角溢出。
+    .width('86%')
+    .backgroundColor($r('app.color.surface_card'))
+    .borderRadius(20)
+    .clip(true)
   }
 }
 
