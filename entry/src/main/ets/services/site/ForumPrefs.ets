@@ -43,7 +43,8 @@ export const FORUM_SUGGESTIONS: ForumSuggestion[] = [
   { name: 'Discourse Meta', baseUrl: 'https://meta.discourse.org', desc: 'Discourse 官方社区' },
   { name: 'Python 官方论坛', baseUrl: 'https://discuss.python.org', desc: 'Python 语言官方讨论区' },
   { name: 'Home Assistant', baseUrl: 'https://community.home-assistant.io', desc: '智能家居社区' },
-  { name: 'Obsidian Forum', baseUrl: 'https://forum.obsidian.md', desc: 'Obsidian 笔记社区' }
+  { name: 'Obsidian Forum', baseUrl: 'https://forum.obsidian.md', desc: 'Obsidian 笔记社区' },
+  { name: 'Linux.DO', baseUrl: 'https://linux.do', desc: '中文技术社区' }
 ];
 
 /**
@@ -130,7 +131,7 @@ export class ForumPrefs {
   static updateForum(context: common.Context, id: string, name: string, urlInput: string): ForumUpdateResult {
     const baseUrl: string = SiteUrl.toBaseUrl(urlInput);
     if (baseUrl.length === 0) {
-      return { ok: false, reason: '地址不正确,请填形如 example.com 的论坛域名' };
+      return { ok: false, reason: '地址不正确，请填形如 example.com 的论坛域名' };
     }
     const forums: ForumDef[] = ForumPrefs.getForums(context);
     const host: string = SiteUrl.hostOf(baseUrl);
