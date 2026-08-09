@@ -50,6 +50,15 @@ export class CategoryIndex {
   }
 
   // 仅供单测复位静态缓存。
+  /**
+   * 清掉进程内的版块缓存。切站时必须调用 —— 版块是站点级数据,旧站的版块树
+   * 套在新站上会让抽屉/筛选显示一堆不存在的版块。
+   */
+  static clearCache(): void {
+    CategoryIndex.cachedCategories = null;
+    CategoryIndex.inflight = null;
+  }
+
   static resetForTest(): void {
     CategoryIndex.cachedCategories = null;
     CategoryIndex.inflight = null;

@@ -59,7 +59,9 @@ import { NetworkSettingsPage } from './NetworkSettingsPage';
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 import { TopicListStyleSettingsPage } from './TopicListStyleSettingsPage';
 import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
+import { CurrentSite } from '../../services/site/CurrentSite';
 import { ForumsPage } from './ForumsPage';
+import { SiteSwitchCoordinator } from '../../services/site/SiteSwitchCoordinator';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { LdcCreditPage } from './LdcCreditPage';
@@ -202,6 +204,8 @@ export struct RootTabPage {
   private unsubscribePushNavigation?: () => void = undefined;
   private unsubscribePushTokenUpdate?: () => void = undefined;
   private unsubscribeCurrentUser?: () => void = undefined;
+  // 切站订阅:本页持有 bridge 与导航栈,是唯一能编排「重载宿主 + 清栈 + 刷列表」的地方。
+  private unsubscribeSiteChanged?: () => void = undefined;
   // 挑战恢复协调器:优先后台静默过盾,失败才弹窗。惰性创建(需闭包引用本组件方法)。
   private challengeRecovery?: ChallengeRecoveryCoordinator = undefined;
 
@@ -246,6 +250,11 @@ export struct RootTabPage {
     if (!this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged = SessionEventBus.subscribe((version: number) => {
         this.handleSessionChanged(version);
+      });
+    }
+    if (!this.unsubscribeSiteChanged) {
+      this.unsubscribeSiteChanged = CurrentSite.subscribe(() => {
+        this.handleSiteChanged();
       });
     }
     if (!this.unsubscribeDownload) {
@@ -309,6 +318,10 @@ export struct RootTabPage {
     if (this.unsubscribeCurrentUser) {
       this.unsubscribeCurrentUser();
       this.unsubscribeCurrentUser = undefined;
+    }
+    if (this.unsubscribeSiteChanged) {
+      this.unsubscribeSiteChanged();
+      this.unsubscribeSiteChanged = undefined;
     }
     if (this.unsubscribeSessionChanged) {
       this.unsubscribeSessionChanged();
@@ -1850,6 +1863,22 @@ export struct RootTabPage {
       Log.i(`${LOG_TAG} recheck session after previous failure`);
       this.checkCurrentUser();
     }
+  }
+
+  /**
+   * 切站。三件事,顺序不能反:
+   *
+   * 1. 先清导航栈。栈里可能还压着旧站的帖子详情/用户主页,那些 id 在新站上要么不存在、
+   *    要么指向另一篇完全无关的帖子 —— 必须在任何新请求发出前清掉,否则用户返回时会看到
+   *    一个用新站数据渲染的旧站页面。
+   * 2. 再做切站善后(清缓存、重置登录判断位、重下发 DoH、重载宿主 webview)。
+   * 3. 最后广播会话变更,让复查登录态与列表刷新按既有链路跑一遍 —— 与过盾恢复复用同一条路。
+   */
+  private handleSiteChanged(): void {
+    Log.i(`${LOG_TAG} site changed → ${CurrentSite.baseUrl} epoch=${CurrentSite.epoch}`);
+    this.navPathStack.clear();
+    SiteSwitchCoordinator.afterSwitch(this.hostContext(), this.bridge);
+    SessionEventBus.notifySessionChanged();
   }
 
   private handleSessionChanged(version: number): void {

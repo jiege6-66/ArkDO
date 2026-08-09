@@ -1,11 +1,19 @@
+import { AppConstants } from '../../common/constants/AppConstants';
 import { Log } from '../logging/Log';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 const LOG_TAG: string = '[ArkDO][DohTest]';
-// 测速探针域名:解析 linux.do 本身既测延迟又验证"能否正确解析目标站"。
-const PROBE_DOMAIN: string = 'linux.do';
+// 测速探针域名:解析当前论坛的域名本身,既测延迟又验证「能否正确解析目标站」——
+// 这才是用户真正在意的指标,拿一个固定域名去测等于测了个无关的站。
+// 未选定论坛时回落到一个公认可解析的域名,免得拼出空 query 让整轮测速失败。
+const FALLBACK_PROBE_DOMAIN: string = 'example.com';
+
+function probeDomain(): string {
+  const host: string = AppConstants.HOST;
+  return host.length > 0 ? host : FALLBACK_PROBE_DOMAIN;
+}
 const PER_REQUEST_TIMEOUT_MS: number = 3000;
 const SAMPLE_COUNT: number = 3;
 
@@ -26,7 +34,7 @@ export class DohSpeedTester {
     if (!url.startsWith('https://')) {
       return { ok: false, latencyMs: -1, message: '地址无效' };
     }
-    const query: string = DohSpeedTester.buildQueryParam(PROBE_DOMAIN);
+    const query: string = DohSpeedTester.buildQueryParam(probeDomain());
     const requestUrl: string = url.indexOf('?') >= 0 ? `${url}&dns=${query}` : `${url}?dns=${query}`;
 
     const latencies: number[] = [];

@@ -519,6 +519,24 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     };
   }
 
+  // 未选定论坛时不发请求:BASE_URL 为空,拼出来的会是 `/latest.json` 这种没有 host 的地址,
+  // 打到宿主 webview 里等于向「about:blank 的同源」发请求,失败信息还很难看懂。
+  // 正常路径上 Index 会用引导页顶掉主界面,不该走到这里;这里是兜住推送/通知等
+  // 不经页面的后台链路,让它们拿到一条明确的失败而不是一串诡异报错。
+  private noActiveSiteFailure(verb: string, requestPath: string): NetworkResult<string> {
+    logNetwork(`${verb} ${requestPath} skipped: no active site`);
+    return {
+      success: false,
+      statusCode: 0,
+      challengeState: ChallengeState.NONE,
+      error: {
+        code: NetworkErrorCode.NETWORK_FAILURE,
+        message: '尚未选择论坛。',
+        requiresChallenge: false
+      }
+    };
+  }
+
   setExecutor(executor: ArkWebJsonExecutor): void {
     this.executor = executor;
   }
@@ -526,6 +544,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   async getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`GET ${requestPath} start`);
+
+    if (!AppConstants.HAS_ACTIVE_SITE) {
+      return this.noActiveSiteFailure('GET', requestPath);
+    }
 
     if (!this.executor) {
       logNetwork(`GET ${requestPath} skipped: ArkWeb host is not ready`);
@@ -756,6 +778,14 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   async putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`PUT ${requestPath} start`);
+
+    if (!AppConstants.HAS_ACTIVE_SITE) {
+      return this.noActiveSiteFailure('POST', requestPath);
+    }
+
+    if (!AppConstants.HAS_ACTIVE_SITE) {
+      return this.noActiveSiteFailure('GET', requestPath);
+    }
 
     if (!this.executor) {
       logNetwork(`PUT ${requestPath} skipped: ArkWeb host is not ready`);
