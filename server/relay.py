@@ -200,7 +200,33 @@ def response_for_subscription(sid: str, rec: dict) -> dict:
     }
 
 
-def is_same_user(rec: dict, user_id, username: str) -> bool:
+# 未带 site_host 的请求/记录一律按 linux.do 处理:多站支持之前只有那一个站,
+# 老客户端不会传这个字段、库里的老记录也没有这个键 —— 归一到同一个默认值,
+# 老订阅才能被继续认出来复用,不至于升级后凭空多出一条。
+DEFAULT_SITE_HOST = "linux.do"
+
+
+def normalize_site_host(value) -> str:
+    host = str(value or "").strip().lower()
+    if not host:
+        return DEFAULT_SITE_HOST
+    # 客户端理论上只传裸 host,但容错一下:整条 URL 也能收
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0].split(":", 1)[0]
+    return host or DEFAULT_SITE_HOST
+
+
+def rec_site_host(rec: dict) -> str:
+    return normalize_site_host(rec.get("site_host"))
+
+
+def is_same_user(rec: dict, user_id, username: str, site_host: str = "") -> bool:
+    # 站点必须先对上:Discourse 的 user_id 是站内自增整数,你在 A 站是 123、在 B 站也可能是 123。
+    # 不比站点的话,同一台设备上两个论坛会被判成"同一个用户"而复用同一条订阅 ——
+    # 后开通的那个会顶掉前一个,或者两个站的推送挤在一条记录上。
+    if rec_site_host(rec) != normalize_site_host(site_host):
+        return False
     if user_id:
         rec_user_id = rec.get("user_id")
         return rec_user_id in (None, "", user_id)
@@ -210,30 +236,36 @@ def is_same_user(rec: dict, user_id, username: str) -> bool:
     return True
 
 
-def update_subscription_metadata(rec: dict, device_token: str, user_id, username: str):
+def update_subscription_metadata(rec: dict, device_token: str, user_id, username: str, site_host: str = ""):
     rec["device_token"] = device_token
     if user_id:
         rec["user_id"] = user_id
     if username:
         rec["username"] = username
+    # 老记录没有这个键,复用时补齐(归一化后写入),之后就不必再靠缺省推断了。
+    rec["site_host"] = normalize_site_host(site_host)
     rec["enabled"] = True
     rec["updated"] = utc_now()
 
 
-def register(device_token, user_id=None, username="", existing_sub_id=""):
+def register(device_token, user_id=None, username="", existing_sub_id="", site_host=""):
     # 整段持锁:这是"读-改-写",load 与 save 之间若放开锁,并发注册会互相覆盖(丢更新)。
+    site_host = normalize_site_host(site_host)
     with _lock:
         db = load_db()
         if existing_sub_id and existing_sub_id in db:
             rec = db[existing_sub_id]
-            if device_token and is_same_user(rec, user_id, username):
-                update_subscription_metadata(rec, device_token, user_id, username)
+            if device_token and is_same_user(rec, user_id, username, site_host):
+                update_subscription_metadata(rec, device_token, user_id, username, site_host)
                 save_db(db)
                 return existing_sub_id, rec
+        # 按 device_token 找回:客户端丢了 sub_id 时靠这条复用旧记录,不新建。
+        # 现在还要求站点一致 —— 同一台设备上的第二个论坛应当拿到**自己的**记录
+        # (每条记录有独立的 ECDH 密钥对,本就不能共用)。
         if device_token:
             for sid, rec in db.items():
-                if rec.get("device_token") == device_token and is_same_user(rec, user_id, username) and rec.get("enabled", True):
-                    update_subscription_metadata(rec, device_token, user_id, username)
+                if rec.get("device_token") == device_token and is_same_user(rec, user_id, username, site_host) and rec.get("enabled", True):
+                    update_subscription_metadata(rec, device_token, user_id, username, site_host)
                     save_db(db)
                     return sid, rec
 
@@ -262,6 +294,7 @@ def register(device_token, user_id=None, username="", existing_sub_id=""):
             "device_token": device_token,
             "user_id": user_id or "",
             "username": username or "",
+            "site_host": site_host,
             "enabled": True,
             "created": utc_now(),
             "updated": utc_now(),
@@ -281,15 +314,15 @@ def find_subscription(db: dict, sub_id: str, endpoint: str):
     return "", None
 
 
-def disable_subscription(sub_id: str, endpoint: str, user_id=None, username="") -> bool:
+def disable_subscription(sub_id: str, endpoint: str, user_id=None, username="", site_host="") -> bool:
     # 同 register:读-改-写必须整段持锁。
     with _lock:
         db = load_db()
         sid, rec = find_subscription(db, sub_id, endpoint)
         if not sid or rec is None:
             return False
-        if not is_same_user(rec, user_id, username):
-            log("disable denied sid=%s requested_user=%s stored_user=%s" % (sid, user_id or username, rec.get("user_id") or rec.get("username")))
+        if not is_same_user(rec, user_id, username, site_host):
+            log("disable denied sid=%s requested_site=%s stored_site=%s requested_user=%s stored_user=%s" % (sid, normalize_site_host(site_host), rec_site_host(rec), user_id or username, rec.get("user_id") or rec.get("username")))
             return False
         # 私钥已无用:停用后不会再有投递需要解密,留着只是多一份泄露面。
         rec.pop("priv_pem", None)
@@ -630,13 +663,15 @@ class H(BaseHTTPRequestHandler):
                 user_id = ""
             username = str(j.get("username") or "")[:80]
             sub_id = str(j.get("sub_id") or j.get("subId") or "")[:80]
+            # 缺省 = linux.do:老客户端不传这个字段,归一到默认值才能认出它们的旧订阅。
+            site_host = normalize_site_host(j.get("site_host") or j.get("siteHost"))
             try:
-                sid, rec = register(device_token, user_id, username, sub_id)
+                sid, rec = register(device_token, user_id, username, sub_id, site_host)
             except RuntimeError as e:
                 # 容量上限:明确回 503,让客户端知道是服务端暂时不收,而不是参数错。
                 self._send(503, {"error": str(e)})
                 return
-            log("ensure sid=%s device=%s user=%s:%s" % (sid, "yes" if rec.get("device_token") else "no", rec.get("user_id", ""), rec.get("username", "")))
+            log("ensure sid=%s device=%s site=%s user=%s:%s" % (sid, "yes" if rec.get("device_token") else "no", rec_site_host(rec), rec.get("user_id", ""), rec.get("username", "")))
             self._send(200, response_for_subscription(sid, rec))
         elif path == "/subscription/test":
             try:
@@ -652,6 +687,7 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 user_id = ""
             username = str(j.get("username") or "")[:80]
+            site_host = normalize_site_host(j.get("site_host") or j.get("siteHost"))
             if not sub_id or not endpoint or not device_token:
                 self._send(400, {"success": False, "error": "missing subscription credentials"})
                 return
@@ -664,8 +700,8 @@ class H(BaseHTTPRequestHandler):
                 log("test denied sid=%s reason=endpoint_mismatch" % sid)
                 self._send(403, {"success": False, "error": "endpoint mismatch"})
                 return
-            if not is_same_user(rec, user_id, username):
-                log("test denied sid=%s reason=user_mismatch requested_user=%s stored_user=%s" % (sid, user_id or username, rec.get("user_id") or rec.get("username")))
+            if not is_same_user(rec, user_id, username, site_host):
+                log("test denied sid=%s reason=user_mismatch requested_site=%s stored_site=%s requested_user=%s stored_user=%s" % (sid, normalize_site_host(site_host), rec_site_host(rec), user_id or username, rec.get("user_id") or rec.get("username")))
                 self._send(403, {"success": False, "error": "user mismatch"})
                 return
             if rec.get("device_token") != device_token:
@@ -709,6 +745,7 @@ class H(BaseHTTPRequestHandler):
                 str(j.get("endpoint") or "")[:300],
                 user_id,
                 str(j.get("username") or "")[:80],
+                normalize_site_host(j.get("site_host") or j.get("siteHost")),
             )
             self._send(200, {"success": ok})
         elif path.startswith("/wp/"):
