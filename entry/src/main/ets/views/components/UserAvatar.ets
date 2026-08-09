@@ -1,5 +1,5 @@
 import { image } from '@kit.ImageKit';
-import { AppConstants } from '../../common/constants/AppConstants';
+import { AppConstants, LINUX_DO_HOST } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
 import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 import { BlockedImageHosts } from '../../services/network/BlockedImageHosts';
@@ -161,8 +161,16 @@ export struct UserAvatar {
   }
 
   // 图片型 flair 是否交原生 Image 直载:允许播动图,且该域名原生还走得通。
+  // 与 useNativeImage 同一套判据:默认原生,只有「关掉动图且该域名经桥取得到」才走桥。
   private useNativeFlair(): boolean {
-    return this.animatedAvatarEnabled && !BlockedImageHosts.isBlocked(this.flairImageUrl());
+    const url: string = this.flairImageUrl();
+    if (BlockedImageHosts.isBlocked(url)) {
+      return false;
+    }
+    if (!this.animatedAvatarEnabled && this.isBridgeFetchable(url)) {
+      return false;
+    }
+    return true;
   }
 
   private async loadFlairViaBridge(url: string): Promise<void> {
@@ -317,19 +325,47 @@ export struct UserAvatar {
   // 关掉「动态头像」时一律不走原生 Image——原生 Image 遇到动图内容就会自动播,没有属性能冻住它;
   // 唯一能得到静态图的办法是取字节后 createPixelMap() 拿首帧(PixelMap 天然只有一帧)。
   private useNativeImage(): boolean {
-    if (!this.animatedAvatarEnabled || this.nativeAvatarFailed) {
+    if (this.nativeAvatarFailed) {
       return false;
     }
     const url: string = this.currentAvatarUrl();
-    return url.length > 0 && this.isNativeHost(url);
+    if (url.length === 0 || !this.isNativeHost(url)) {
+      return false;
+    }
+    // 关掉动图开关时,本想改走桥取静态首帧;但只有「经桥确实取得到」的域名才能这么做 ——
+    // 多数站点的图片 CDN 不回 CORS 头,宿主文档里的跨域 fetch 会被直接拦掉,走桥等于
+    // 一张都取不到。那种情况下宁可让它动着,也别显示不出来。
+    if (!this.animatedAvatarEnabled && this.isBridgeFetchable(url)) {
+      return false;
+    }
+    return true;
   }
 
-  // ldstatic.com CDN(含 cdn/s3 等子域)一般不被 SNI 封锁,原生 Image 可直载并自动播放动图内容;
-  // 主站 linux.do 被封,须经 host webview 过桥取 PixelMap。
-  // "CDN 不被封"只是常态而非定律:部分网络里 ldstatic.com 同样解析不到/连不上,此时
-  // BlockedImageHosts 会在若干张失败后判定该域名原生走不通,这里跟着改走桥(代价是动图变静态首帧)。
+  /**
+   * 能否用原生 Image 直载。
+   *
+   * **默认能** —— 这与正文图(PostRichContent)一致:原生请求不受 CORS 约束,是通用站点
+   * 唯一走得通的路。原先这里是白名单「只有 ldstatic.com 能直载」,那是把 linux.do 的
+   * 特殊情况当成了通则:别的论坛头像因此一律走桥,而它们的 CDN(如 discourse-cdn.com)
+   * 不回 access-control-allow-origin,宿主文档里的跨域 fetch 被拦,头像永远停在首字母。
+   *
+   * 只有两种情况改走桥:
+   * 1. BlockedImageHosts 已在若干张失败后判定该域名原生走不通(SNI 阻断/解析不到);
+   * 2. linux.do 主站域名 —— 已知被按 SNI 阻断,不必先失败几张再降级。它的静态资源镜像
+   *    cdn.ldstatic.com 不受影响,照常直载。
+   */
   private isNativeHost(url: string): boolean {
-    return url.includes('ldstatic.com') && !BlockedImageHosts.isBlocked(url);
+    if (BlockedImageHosts.isBlocked(url)) {
+      return false;
+    }
+    return !url.startsWith(`https://${LINUX_DO_HOST}/`);
+  }
+
+  // 经宿主 webview 的注入式 fetch 是否取得到:跨域取图要求对方回 CORS 头。
+  // 实测 cdn.ldstatic.com 回 access-control-allow-origin: *,故 linux.do 生态可以走桥;
+  // 其余域名一律按「取不到」处理,不去赌。
+  private isBridgeFetchable(url: string): boolean {
+    return url.includes('ldstatic.com');
   }
 
   private currentAvatarUrl(): string {
