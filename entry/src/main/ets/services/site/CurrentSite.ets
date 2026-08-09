@@ -1,4 +1,5 @@
 import { AppConstants, LINUX_DO_HOST } from '../../common/constants/AppConstants';
+import { ACTIVE_FORUM_NAME_KEY, ACTIVE_FORUM_TICK, ACTIVE_FORUM_URL_KEY, bumpTick } from '../../common/constants/StorageKeys';
 import { ForumDef, ForumPrefs } from './ForumPrefs';
 import { Log } from '../logging/Log';
 import { SiteUrl } from './SiteUrl';
@@ -165,14 +166,14 @@ export class CurrentSite {
   // ==================== 内部 ====================
 
   // 一处推入 AppConstants:全 app 的 BASE_URL / LOGIN_URL / HOST_BOOTSTRAP_URL 等
-  // 都由它派生,所以这里是唯一的写入口。
+  // 都由它派生,所以这里是唯一的写入口。顺带刷 AppStorage 镜像给 UI 侧监听。
   private static apply(forum: ForumDef | undefined): void {
     CurrentSite.active = forum;
-    if (forum) {
-      AppConstants.setActiveSite(forum.baseUrl, SiteUrl.hostOf(forum.baseUrl));
-    } else {
-      AppConstants.setActiveSite('', '');
-    }
+    const baseUrl: string = forum ? forum.baseUrl : '';
+    AppConstants.setActiveSite(baseUrl, forum ? SiteUrl.hostOf(forum.baseUrl) : '');
+    AppStorage.setOrCreate(ACTIVE_FORUM_URL_KEY, baseUrl);
+    AppStorage.setOrCreate(ACTIVE_FORUM_NAME_KEY, forum ? forum.name : '');
+    bumpTick(ACTIVE_FORUM_TICK);
   }
 
   // 逐个 try:一个订阅者抛异常不能连累后面的(尤其宿主 webview 的重建回调必须跑到)。

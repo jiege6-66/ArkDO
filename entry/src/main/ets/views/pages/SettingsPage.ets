@@ -12,6 +12,7 @@ import {
   requiresHdsComponentSafeArea,
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
+import { CurrentSite } from '../../services/site/CurrentSite';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
@@ -39,6 +40,8 @@ export struct SettingsPage {
   onOpenExperimental: () => void = () => {};
   // 帖子列表样式子页(字号/字重/行高/行间距/头像)。与外观同组:都是纯观感设置。
   onOpenTopicListStyle: () => void = () => {};
+  // 论坛管理/切换页:push 由 RootTabPage 注入。
+  onOpenForums: () => void = () => {};
   // 站点管理页:与上面四个同款,push 由 RootTabPage 注入。
   onOpenSites: () => void = () => {};
   onOpenDiagnostics: () => void = () => {};
@@ -157,6 +160,12 @@ export struct SettingsPage {
 
       // 卡片:分类入口。繁重/低频配置各自收进子页。
       Column() {
+        // 论坛切换排在最前:它决定了整个 App 在看哪个站,是这一组里唯一会改变内容来源的项。
+        // 副标题直接给出当前论坛名,免得用户要点进去才知道自己在哪。
+        this.SettingCell($r('sys.symbol.message'), '论坛', CurrentSite.displayName, () => {
+          this.onOpenForums();
+        })
+        this.HairlineInset()
         this.SettingCell($r('sys.symbol.bell'), '通知', '', () => {
           this.onOpenPush();
         })

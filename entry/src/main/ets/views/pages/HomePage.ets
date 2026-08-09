@@ -63,7 +63,7 @@ import { REALTIME_TOPICS_ENABLED_STORAGE_KEY } from '../../services/realtime/Rea
 import { BADGE_FILTER_ENABLED_STORAGE_KEY } from '../../services/home/BadgeFilterPrefs';
 import { FaIconDefinition, FaIconView, getFaIcon } from '../components/FaIcon';
 import { SEARCH_ICON_GEOMETRY_ID } from '../components/SearchOverlay';
-import { SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
+import { ACTIVE_FORUM_NAME_KEY, SEARCH_OVERLAY_VISIBLE_KEY } from '../../common/constants/StorageKeys';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { PostRichContent } from '../components/PostRichContent';
 import {
@@ -264,6 +264,8 @@ export struct HomePage {
   @StorageProp(REALTIME_TOPICS_ENABLED_STORAGE_KEY) @Watch('onRealtimeTopicsEnabledChanged')
   private realtimeTopicsEnabled: boolean = false;
   // 「点分类/标签快速筛选」开关(实验性功能页,默认关)。开着时帖子行上的徽章可点。
+  // 当前论坛名镜像:切站后首页标题自动跟着变。
+  @StorageProp(ACTIVE_FORUM_NAME_KEY) private activeForumName: string = '';
   @StorageProp(BADGE_FILTER_ENABLED_STORAGE_KEY) private badgeFilterEnabled: boolean = false;
   // 传感器只发布明确的左右手结果；本页把结果转成 RelativeContainer 约束，保证换边可平滑插值。
   @StorageProp(SMART_REACH_LEFT_HAND_STORAGE_KEY) @Watch('onSmartReachSideChanged')
@@ -1047,7 +1049,10 @@ export struct HomePage {
   private FeedTitle() {
     Column({ space: 1 }) {
       if (isDefaultTopicListQuery(this.listQuery)) {
-        Text(AppConstants.APP_NAME)
+        // 默认态标题 = 当前论坛名(用户没起名就是域名)。多站之后「我在哪个论坛」比
+        // 「App 叫什么」重要得多;App 名在闪屏与设置页里都有,不必再占这行。
+        // 兜底成 APP_NAME:镜像尚未写入的那一帧不留空标题。
+        Text(this.activeForumName.length > 0 ? this.activeForumName : AppConstants.APP_NAME)
           .fontSize(26)
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))

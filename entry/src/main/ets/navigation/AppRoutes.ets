@@ -19,6 +19,10 @@ export enum AppRouteName {
   BADGES = 'badges',
   READ_TOPICS = 'readTopics',
   SITES = 'sites',
+  // 论坛管理页:添加/切换/删除 App 原生浏览的 Discourse 论坛。与 SITES(生态站点快捷方式)
+  // 不是一回事——切换这里的论坛,全 app 的接口地址会跟着换,读的也是那个论坛的登录态。
+  // 注意「换」不等于「退出」:cookie 由系统按域名分开存,切走不会清掉原论坛的登录,切回来还在。
+  FORUMS = 'forums',
   // 他人主页:点任意头像进这里。PROFILE 是「我的」页,与本页无关(那页混着登出/设置/草稿)。
   USER_PROFILE = 'userProfile',
   // 他被采纳为解决方案的回复列表,入口是他人主页统计格里的「解决方案」。
@@ -129,6 +133,17 @@ export interface SitesRouteParam {
 }
 
 export function buildSitesRouteParam(source: string): SitesRouteParam {
+  return {
+    source: source
+  };
+}
+
+// 论坛管理页参数:与站点管理页同理,论坛列表全在本地 preferences,只留来源标记。
+export interface ForumsRouteParam {
+  source: string;
+}
+
+export function buildForumsRouteParam(source: string): ForumsRouteParam {
   return {
     source: source
   };

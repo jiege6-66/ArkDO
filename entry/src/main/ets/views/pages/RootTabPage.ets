@@ -2,7 +2,7 @@ import { Log } from '../../services/logging/Log';
 import { LinuxDoConstants } from '../../common/constants/AppConstants';
 import { APP_IS_WIDE_STORAGE_KEY, APP_SPLIT_NAV_BAR_WIDTH_STORAGE_KEY, BreakpointManager,
   SPLIT_NAV_BAR_MAX_WIDTH } from '../../common/utils/BreakpointManager';
-import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildTopicListStyleSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
+import { ActivityRouteParam, AppRouteName, BadgesRouteParam, BookmarksRouteParam, buildActivityRouteParam, buildBadgesRouteParam, buildBookmarksRouteParam, buildDraftsRouteParam, buildDohSettingsRouteParam, buildPushSettingsRouteParam, buildNetworkSettingsRouteParam, buildLabSettingsRouteParam, buildDiagnosticsSettingsRouteParam, buildTopicListStyleSettingsRouteParam, buildLevelProgressRouteParam, buildNotificationsRouteParam, buildProfileRouteParam, buildReadTopicsRouteParam, buildSettingsRouteParam, buildForumsRouteParam, buildSitesRouteParam, buildSolvedRouteParam, buildTopicDetailRouteParam, buildTopicDetailDraftRouteParam, buildTopicDetailEditDraftRouteParam, buildUserProfileRouteParam, buildWebRouteParam, isActivityRouteParam, isBadgesRouteParam, isBookmarksRouteParam, isDraftsRouteParam, DraftsRouteParam, isSolvedRouteParam, isTopicDetailRouteParam, isUserProfileRouteParam, isWebRouteParam, LevelProgressRouteParam, SolvedRouteParam, TopicDetailRouteParam, UserProfileRouteParam, WebRouteParam } from '../../navigation/AppRoutes';
 import { LinkRouter, LinkTarget, LinkTargetKind } from '../../services/content/LinkRouter';
 import { DownloadService } from '../../services/content/DownloadService';
 import { DownloadEventBus, DownloadResult } from '../../services/content/DownloadEventBus';
@@ -59,6 +59,7 @@ import { NetworkSettingsPage } from './NetworkSettingsPage';
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 import { TopicListStyleSettingsPage } from './TopicListStyleSettingsPage';
 import { DiagnosticsSettingsPage } from './DiagnosticsSettingsPage';
+import { ForumsPage } from './ForumsPage';
 import { SitesPage } from './SitesPage';
 import { LevelProgressPage } from './LevelProgressPage';
 import { LdcCreditPage } from './LdcCreditPage';
@@ -735,6 +736,9 @@ export struct RootTabPage {
             // 标题留空:详情页拉到帖子后自会填真实标题,不必在此硬编码一份易过期的副本。
             this.openTopicDetailById(LinuxDoConstants.FEEDBACK_TOPIC_ID);
           },
+          onOpenForums: () => {
+            this.navPathStack.pushPath(new NavPathInfo(AppRouteName.FORUMS, buildForumsRouteParam('settings')));
+          },
           onOpenPush: () => {
             this.navPathStack.pushPath(new NavPathInfo(AppRouteName.PUSH_SETTINGS, buildPushSettingsRouteParam('settings')));
           },
@@ -871,6 +875,16 @@ export struct RootTabPage {
       })
       // NavDestination 自身背景默认铺满含状态栏区域;统一为 page_bg,让各二级页顶部状态栏
       // 与页内头部/导航栏同色(否则暗色下露出默认浅底,与内容不一致)。
+      .backgroundColor($r('app.color.page_bg'))
+    } else if (name === AppRouteName.FORUMS) {
+      NavDestination() {
+        ForumsPage({
+          onBack: () => {
+            this.popNavigation();
+          }
+        })
+      }
+      .hideTitleBar(true)
       .backgroundColor($r('app.color.page_bg'))
     } else if (name === AppRouteName.ACTIVITY && isActivityRouteParam(param)) {
       NavDestination() {

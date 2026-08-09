@@ -41,6 +41,17 @@ export const PROFILE_DRAFT_COUNT_KEY: string = 'profileDraftCount';
 // 站点列表变更信号(站点管理页改动后通知首页抽屉重读)。
 export const SITES_TICK: string = 'sites_tick';
 
+// 当前论坛的根地址镜像。由 CurrentSite 在选定/切换时写入,是 UI 侧判断「有没有可用论坛」
+// 的唯一依据:Index 据此决定渲染引导页还是主界面。空串 = 尚未配置任何论坛。
+// 之所以要这层镜像:CurrentSite 是普通静态类,ArkUI 的 @StorageProp 只认 AppStorage。
+export const ACTIVE_FORUM_URL_KEY: string = 'activeForumUrl';
+// 当前论坛的展示名镜像。首页标题直接绑它:切站后标题自动跟着变,不用页面自己订阅。
+// 用户没给名字时 ForumPrefs 已用域名兜底,所以这里恒非空(未配置论坛时为空串)。
+export const ACTIVE_FORUM_NAME_KEY: string = 'activeForumName';
+// 切站信号。地址镜像只在「换到不同地址」时变,而删掉再加回同一个站也需要各页重读,
+// 故另给一个自增 tick。
+export const ACTIVE_FORUM_TICK: string = 'activeForumTick';
+
 // DoH 设置变更信号(DoH 设置页改动后通知设置页刷新摘要)。
 export const SETTINGS_DOH_TICK: string = 'settings_doh_tick';
 
