@@ -3,6 +3,7 @@ import { FORUM_SUGGESTIONS, ForumDef, ForumPrefs, ForumSuggestion } from '../../
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { Log } from '../../services/logging/Log';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
+import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { SiteUrl } from '../../services/site/SiteUrl';
 import { immersiveTitleBarContentTopSpacer } from '../../common/ui/ImmersiveTitleBarLayout';
 import {
@@ -15,7 +16,6 @@ import { showToast as promptToast } from '../../common/utils/Toast';
 import { common } from '@kit.AbilityKit';
 
 const LOG_TAG: string = '[ArkDO][Forums]';
-const CARD_PADDING: number = 16;
 
 /** 添加论坛弹窗。名称可留空(取域名);地址裸域名自动补 https://。 */
 @CustomDialog
@@ -139,6 +139,15 @@ export struct ForumsPage {
     this.reload();
   }
 
+  // 卡片分组容器:无描边,靠灰底衬托。与设置页/各设置子页同款。
+  @Styles
+  cardStyle() {
+    .width('100%')
+    .backgroundColor($r('app.color.surface_card'))
+    .borderRadius(CARD_RADIUS)
+    .margin({ top: CARD_GAP })
+  }
+
   build() {
     // 与「我的站点」同款结构:内容层自行避让状态栏,标题栏作透明浮层叠在上面。
     Stack({ alignContent: Alignment.TopStart }) {
@@ -147,7 +156,8 @@ export struct ForumsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+    // 与设置页及其它设置子页一致:灰底衬托白卡片。用 page_bg 会与卡片同色,卡片就"看不见"了。
+    .backgroundColor($r('app.color.page_bg_gray'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
@@ -169,7 +179,7 @@ export struct ForumsPage {
           .height(40)
       }
       .width('100%')
-      .padding({ left: 16, right: 16 })
+      .padding({ left: PAGE_MARGIN, right: PAGE_MARGIN })
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
@@ -279,10 +289,7 @@ export struct ForumsPage {
         }
       }, (forum: ForumDef) => forum.id)
     }
-    .width('100%')
-    .backgroundColor($r('app.color.surface_muted'))
-    .borderRadius(16)
-    .margin({ top: 12 })
+    .cardStyle()
   }
 
   @Builder
@@ -296,12 +303,9 @@ export struct ForumsPage {
         .fontColor($r('app.color.ld_accent'))
         .margin({ left: 8 })
     }
-    .width('100%')
     .justifyContent(FlexAlign.Center)
     .padding({ top: 14, bottom: 14 })
-    .backgroundColor($r('app.color.surface_muted'))
-    .borderRadius(16)
-    .margin({ top: 12 })
+    .cardStyle()
     .onClick(() => {
       this.openAddDialog();
     })
@@ -349,9 +353,7 @@ export struct ForumsPage {
           }
         }, (item: ForumSuggestion) => item.baseUrl)
       }
-      .width('100%')
-      .backgroundColor($r('app.color.surface_muted'))
-      .borderRadius(16)
+      .cardStyle()
     }
     .width('100%')
   }
