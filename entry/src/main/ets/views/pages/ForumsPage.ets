@@ -1,5 +1,5 @@
 import { CurrentSite } from '../../services/site/CurrentSite';
-import { FORUM_SUGGESTIONS, ForumDef, ForumPrefs, ForumSuggestion } from '../../services/site/ForumPrefs';
+import { FORUM_SUGGESTIONS, ForumDef, ForumPrefs, ForumSuggestion, ForumUpdateResult } from '../../services/site/ForumPrefs';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { Log } from '../../services/logging/Log';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
@@ -17,17 +17,29 @@ import { common } from '@kit.AbilityKit';
 
 const LOG_TAG: string = '[ArkDO][Forums]';
 
-/** 添加论坛弹窗。名称可留空(取域名);地址裸域名自动补 https://。 */
+// 添加 / 编辑论坛弹窗。名称可留空(取域名);地址裸域名自动补 https://。
+// 编辑态多一枚删除入口 —— 底部只有取消/保存两枚按钮,删除塞不进去,放内容区末尾。
+// (与 SitesPage 的站点编辑弹窗同款布局。)
 @CustomDialog
-struct ForumAddDialog {
-  controller: CustomDialogController = new CustomDialogController({ builder: ForumAddDialog({}) });
+struct ForumEditDialog {
+  controller: CustomDialogController = new CustomDialogController({ builder: ForumEditDialog({}) });
+  isEdit: boolean = false;
+  initialName: string = '';
+  initialUrl: string = '';
   onConfirm: (name: string, url: string) => void = () => {};
+  // 删除:先关弹窗再由页面弹二次确认(两层弹窗叠加在鸿蒙上会打架)。
+  onDelete: () => void = () => {};
   @State private name: string = '';
   @State private url: string = '';
 
+  aboutToAppear(): void {
+    this.name = this.initialName;
+    this.url = this.initialUrl;
+  }
+
   build() {
     Column() {
-      Text('添加论坛')
+      Text(this.isEdit ? '编辑论坛' : '添加论坛')
         .fontSize(18)
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
@@ -60,6 +72,19 @@ struct ForumAddDialog {
           .fontColor($r('app.color.text_faint'))
           .width('100%')
           .margin({ top: 10 })
+
+        if (this.isEdit) {
+          Text('删除论坛')
+            .fontSize(15)
+            .fontColor($r('app.color.ld_danger'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .margin({ top: 18 })
+            .onClick(() => {
+              this.controller.close();
+              this.onDelete();
+            })
+        }
       }
       .width('100%')
       .padding({ left: 24, right: 24 })
@@ -87,7 +112,7 @@ struct ForumAddDialog {
           .color($r('app.color.border'))
           .height(24)
 
-        Button('添加')
+        Button(this.isEdit ? '保存' : '添加')
           .type(ButtonType.Normal)
           .backgroundColor(Color.Transparent)
           .fontColor($r('app.color.ld_accent'))
@@ -133,7 +158,7 @@ export struct ForumsPage {
   @State private forums: ForumDef[] = [];
   @State private activeId: string = '';
   private scroller: Scroller = new Scroller();
-  private addDialog: CustomDialogController | undefined = undefined;
+  private editDialog: CustomDialogController | undefined = undefined;
 
   aboutToAppear(): void {
     this.reload();
@@ -274,10 +299,11 @@ export struct ForumsPage {
         .onClick(() => {
           this.switchTo(forum);
         })
+        // 点击 = 切换(主操作),所以编辑只能另给一个手势。长按开编辑弹窗,删除入口在弹窗里。
         .gesture(
-          LongPressGesture()
+          LongPressGesture({ repeat: false, duration: 300 })
             .onAction(() => {
-              this.confirmRemove(forum);
+              this.openEditDialog(forum);
             })
         )
 
@@ -360,7 +386,7 @@ export struct ForumsPage {
 
   @Builder
   private Footnote() {
-    Text('各论坛的账号彼此独立并长期保留:切换不会退出登录,切回来仍是登录状态。长按可删除。')
+    Text('各论坛的账号彼此独立并长期保留:切换不会退出登录,切回来仍是登录状态。长按可改名、改地址或删除。')
       .fontSize(12)
       .lineHeight(18)
       .fontColor($r('app.color.text_faint'))
@@ -381,8 +407,11 @@ export struct ForumsPage {
   }
 
   private openAddDialog(): void {
-    this.addDialog = new CustomDialogController({
-      builder: ForumAddDialog({
+    this.editDialog = new CustomDialogController({
+      builder: ForumEditDialog({
+        isEdit: false,
+        initialName: '',
+        initialUrl: '',
         onConfirm: (name: string, url: string) => {
           this.addForum(name, url, false);
         }
@@ -391,7 +420,45 @@ export struct ForumsPage {
       customStyle: true,
       alignment: DialogAlignment.Center
     });
-    this.addDialog.open();
+    this.editDialog.open();
+  }
+
+  private openEditDialog(forum: ForumDef): void {
+    this.editDialog = new CustomDialogController({
+      builder: ForumEditDialog({
+        isEdit: true,
+        initialName: forum.name,
+        initialUrl: forum.baseUrl,
+        onConfirm: (name: string, url: string) => {
+          this.saveForum(forum, name, url);
+        },
+        onDelete: () => {
+          this.confirmRemove(forum);
+        }
+      }),
+      autoCancel: true,
+      customStyle: true,
+      alignment: DialogAlignment.Center
+    });
+    this.editDialog.open();
+  }
+
+  /**
+   * 保存编辑。改地址等于换了个站,若改的正是当前论坛,refreshActive 会按切站处理
+   * (重建宿主、清缓存、刷列表);只改名字则仅刷标题等镜像,不惊动这些。
+   */
+  private saveForum(forum: ForumDef, name: string, urlInput: string): void {
+    const context: common.Context = this.hostContext();
+    const result: ForumUpdateResult = ForumPrefs.updateForum(context, forum.id, name, urlInput);
+    if (!result.ok) {
+      promptToast(this.getUIContext(), result.reason);
+      return;
+    }
+    if (forum.id === this.activeId) {
+      CurrentSite.refreshActive(context);
+    }
+    this.reload();
+    Log.i(`${LOG_TAG} updated ${forum.id}`);
   }
 
   /**

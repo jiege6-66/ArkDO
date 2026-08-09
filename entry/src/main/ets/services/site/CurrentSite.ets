@@ -101,6 +101,43 @@ export class CurrentSite {
     }
   }
 
+  /**
+   * 当前论坛的定义被就地改过(改名 / 改地址)后重新读取。
+   *
+   * **地址变了才按切站处理**(epoch 自增 + 通知订阅者):那等于换了个站,宿主 webview
+   * 必须重建、缓存必须清。只改名字则仅刷一遍镜像就够 —— 若也走通知,改个显示名会白
+   * 重建一次宿主并清掉整页状态,代价和收益完全不成比例。
+   *
+   * 改完发现它已不在列表里(极端并发)则退回 reconcile 重选。
+   */
+  static refreshActive(context: common.Context): void {
+    const current: ForumDef | undefined = CurrentSite.active;
+    if (!current) {
+      return;
+    }
+    const forums: ForumDef[] = ForumPrefs.getForums(context);
+    let found: ForumDef | undefined = undefined;
+    for (let index: number = 0; index < forums.length; index++) {
+      if (forums[index].id === current.id) {
+        found = forums[index];
+        break;
+      }
+    }
+    if (!found) {
+      CurrentSite.reconcile(context);
+      return;
+    }
+    const urlChanged: boolean = found.baseUrl !== current.baseUrl;
+    CurrentSite.apply(found);
+    if (urlChanged) {
+      CurrentSite.epochValue += 1;
+      Log.i(`${LOG_TAG} active site url changed → ${found.baseUrl} epoch=${CurrentSite.epochValue}`);
+      CurrentSite.notify();
+    } else {
+      Log.i(`${LOG_TAG} active site renamed → ${found.name}`);
+    }
+  }
+
   // ==================== 读取 ====================
 
   /** 是否已选定论坛。未选定时不应发起任何站点请求。 */

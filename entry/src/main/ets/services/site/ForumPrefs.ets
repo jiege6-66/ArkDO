@@ -26,6 +26,12 @@ export interface ForumDef {
   baseUrl: string;
 }
 
+/** 修改论坛的结果。reason 可直接拿去提示用户;成功时为空串。 */
+export interface ForumUpdateResult {
+  ok: boolean;
+  reason: string;
+}
+
 /** 首启引导用的候选论坛。都是公开的 Discourse 站点,仅作为示例供用户点选,不预置进列表。 */
 export interface ForumSuggestion {
   name: string;
@@ -112,6 +118,43 @@ export class ForumPrefs {
     forums.push(added);
     ForumPrefs.setForums(context, forums);
     return added;
+  }
+
+  /**
+   * 就地修改一个论坛的名称与地址。
+   *
+   * 地址查重要**排除自己**,否则「只改名字、地址不动」会被自己挡下来。撞到别的论坛则
+   * 拒绝并给出是哪一个 —— 同一个站点存两条会出现「两个入口、两份界面状态、同一份
+   * 登录态」的怪状态。
+   */
+  static updateForum(context: common.Context, id: string, name: string, urlInput: string): ForumUpdateResult {
+    const baseUrl: string = SiteUrl.toBaseUrl(urlInput);
+    if (baseUrl.length === 0) {
+      return { ok: false, reason: '地址不正确,请填形如 example.com 的论坛域名' };
+    }
+    const forums: ForumDef[] = ForumPrefs.getForums(context);
+    const host: string = SiteUrl.hostOf(baseUrl);
+    let targetIndex: number = -1;
+    for (let index: number = 0; index < forums.length; index++) {
+      if (forums[index].id === id) {
+        targetIndex = index;
+        continue;
+      }
+      if (SiteUrl.hostOf(forums[index].baseUrl) === host) {
+        return { ok: false, reason: `${forums[index].name} 已经用了这个地址` };
+      }
+    }
+    if (targetIndex < 0) {
+      return { ok: false, reason: '该论坛已不在列表里' };
+    }
+    const trimmedName: string = name.trim();
+    forums[targetIndex] = {
+      id: id,
+      name: trimmedName.length > 0 ? trimmedName : host,
+      baseUrl: baseUrl
+    };
+    ForumPrefs.setForums(context, forums);
+    return { ok: true, reason: '' };
   }
 
   /** 删除论坛。若删掉的是当前论坛,当前论坛 id 一并清空,由 CurrentSite 重新选。 */
