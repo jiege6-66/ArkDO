@@ -445,7 +445,7 @@ export struct TopicListStyleSettingsPage {
     const withUnread: Topic = new Topic();
     withUnread.id = -1;
     withUnread.title = '这是一条用来预览的帖子标题,它足够长,好让你看清标题折行之后的行高与整体密度';
-    withUnread.author = this.previewAuthor('linuxdo', 'LinuxDo');
+    withUnread.author = this.previewAuthor('demo_user', '示例用户');
     withUnread.tags = [{ name: '教程' }, { name: '实用工具' }];
     withUnread.categoryId = 1;
     withUnread.unreadPosts = 12;

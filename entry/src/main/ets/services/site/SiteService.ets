@@ -40,13 +40,13 @@ export class SiteService {
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, 'Linux.do 站点信息响应为空。');
+      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应为空。');
     }
 
     try {
       const payload: DiscourseSiteResponse = JSON.parse(response.data) as DiscourseSiteResponse;
       if (!payload.categories) {
-        return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, 'Linux.do 站点信息响应缺少 categories。');
+        return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应缺少 categories。');
       }
 
       return {
@@ -58,7 +58,7 @@ export class SiteService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, 'Linux.do 站点信息响应不是有效 JSON。');
+      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应不是有效 JSON。');
     }
   }
 

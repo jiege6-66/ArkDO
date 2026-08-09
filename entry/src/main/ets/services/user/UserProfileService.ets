@@ -243,7 +243,7 @@ export class UserProfileService {
       return this.forwardFailure<User[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, 'Linux.do 用户搜索响应为空。');
+      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应为空。');
     }
     try {
       const payload: DiscourseUserSearchResponse = JSON.parse(response.data) as DiscourseUserSearchResponse;
@@ -274,7 +274,7 @@ export class UserProfileService {
         data: users
       };
     } catch (error) {
-      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, 'Linux.do 用户搜索响应不是有效 JSON。');
+      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应不是有效 JSON。');
     }
   }
 
@@ -284,14 +284,14 @@ export class UserProfileService {
       return this.forwardFailure<UserProfileDetail>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, 'Linux.do 用户资料响应为空。');
+      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应为空。');
     }
 
     try {
       const payload: DiscourseUserResponse = JSON.parse(response.data) as DiscourseUserResponse;
       const sourceUser: DiscourseUserDetail | undefined = payload.user;
       if (!sourceUser || typeof sourceUser.id !== 'number' || typeof sourceUser.username !== 'string') {
-        return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, 'Linux.do 用户资料响应字段无效。');
+        return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应字段无效。');
       }
 
       const detail: UserProfileDetail = {
@@ -379,7 +379,7 @@ export class UserProfileService {
         data: detail
       };
     } catch (error) {
-      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, 'Linux.do 用户资料响应不是有效 JSON。');
+      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应不是有效 JSON。');
     }
   }
 
@@ -389,14 +389,14 @@ export class UserProfileService {
       return this.forwardFailure<UserSummary>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, 'Linux.do 用户摘要响应为空。');
+      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应为空。');
     }
 
     try {
       const payload: DiscourseSummaryResponse = JSON.parse(response.data) as DiscourseSummaryResponse;
       const sourceSummary: DiscourseUserSummary | undefined = payload.user_summary;
       if (!sourceSummary) {
-        return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, 'Linux.do 用户摘要响应缺少 user_summary。');
+        return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应缺少 user_summary。');
       }
 
       const stats: UserSummaryStats = {
@@ -427,7 +427,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, 'Linux.do 用户摘要响应不是有效 JSON。');
+      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应不是有效 JSON。');
     }
   }
 
@@ -593,7 +593,7 @@ export class UserProfileService {
       return this.forwardFailure<UserActivityPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应为空。');
+      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应为空。');
     }
 
     try {
@@ -616,7 +616,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, 'Linux.do 用户活动响应不是有效 JSON。');
+      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应不是有效 JSON。');
     }
   }
 
@@ -629,7 +629,7 @@ export class UserProfileService {
       return this.forwardFailure<UserBadgeGroup[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, 'Linux.do 徽章响应为空。');
+      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应为空。');
     }
 
     try {
@@ -641,7 +641,7 @@ export class UserProfileService {
         data: this.mapUserBadges(payload.badges, payload.badge_types, payload.user_badges)
       };
     } catch (error) {
-      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, 'Linux.do 徽章响应不是有效 JSON。');
+      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应不是有效 JSON。');
     }
   }
 
@@ -655,7 +655,7 @@ export class UserProfileService {
       return this.forwardFailure<SolvedPostPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, 'Linux.do 解决方案响应为空。');
+      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应为空。');
     }
 
     try {
@@ -678,7 +678,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, 'Linux.do 解决方案响应不是有效 JSON。');
+      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应不是有效 JSON。');
     }
   }
 

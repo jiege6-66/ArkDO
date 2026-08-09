@@ -48,7 +48,7 @@ export class UserRelationService {
       return this.forwardFailure<EndorsableCategoriesResult>(response);
     }
     if (response.data === undefined) {
-      return this.unexpected<EndorsableCategoriesResult>(response, 'Linux.do 认可分类响应为空。');
+      return this.unexpected<EndorsableCategoriesResult>(response, '站点认可分类响应为空。');
     }
     try {
       const payload: DiscourseEndorsableResponse = JSON.parse(response.data) as DiscourseEndorsableResponse;
@@ -75,7 +75,7 @@ export class UserRelationService {
         data: { categories: categories, remainingEndorsements: remaining }
       };
     } catch (error) {
-      return this.unexpected<EndorsableCategoriesResult>(response, 'Linux.do 认可分类响应不是有效 JSON。');
+      return this.unexpected<EndorsableCategoriesResult>(response, '站点认可分类响应不是有效 JSON。');
     }
   }
 

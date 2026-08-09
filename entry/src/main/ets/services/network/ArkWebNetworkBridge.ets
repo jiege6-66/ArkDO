@@ -912,7 +912,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         challengeState: ChallengeState.NONE,
         error: {
           code: NetworkErrorCode.UNEXPECTED_RESPONSE,
-          message: `Linux.do 返回 HTTP ${statusCode}。`,
+          message: `站点返回 HTTP ${statusCode}。`,
           requiresChallenge: false
         }
       };

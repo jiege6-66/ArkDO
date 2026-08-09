@@ -404,7 +404,7 @@ export struct PushSettingsPage {
     this.pushEnabled = isOn;
     if (!this.isLoggedIn || this.currentUser.id <= 0) {
       this.pushEnabled = false;
-      this.pushStatus = '请先登录 linux.do';
+      this.pushStatus = '请先登录论坛账号';
       this.showToast(this.pushStatus);
       return;
     }
@@ -444,7 +444,7 @@ export struct PushSettingsPage {
       return;
     }
     if (!this.isLoggedIn || this.currentUser.id <= 0) {
-      this.showToast('请先登录 linux.do');
+      this.showToast('请先登录论坛账号');
       return;
     }
     if (!this.pushEnabled) {
@@ -492,7 +492,7 @@ export struct PushSettingsPage {
   private async refreshPushState(): Promise<void> {
     if (!this.isLoggedIn || this.currentUser.id <= 0) {
       this.pushEnabled = false;
-      this.pushStatus = '请先登录 linux.do';
+      this.pushStatus = '请先登录论坛账号';
       return;
     }
     const start: PushRefreshStart = nextPushRefreshStart(this.pushRefreshSequence, this.pushRegistering);
@@ -600,7 +600,7 @@ struct RelayConsentDialog {
 
       // 点名 Discourse:通知走的是它的标准 Web Push 机制,不是我们自造的一套。
       // 说清出处比空口承诺更能建立信任,懂行的人也能自行验证。
-      Text('LinuxDO 使用 Discourse 论坛程序，通知按其标准的 Web Push 协议加密发出')
+      Text('站点使用 Discourse（开源论坛程序），通知按其标准的 Web Push 协议加密发出')
         .fontSize(13)
         .lineHeight(19)
         .fontColor($r('app.color.text_faint'))

@@ -717,7 +717,7 @@ export struct ProfilePage {
         .borderRadius(34)
         .border({ width: 1, color: $r('app.color.border') })
 
-        Text(this.hasCheckedSession ? '登录 Linux.do' : '检查登录状态')
+        Text(this.hasCheckedSession ? '登录论坛' : '检查登录状态')
           .fontSize(19)
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))

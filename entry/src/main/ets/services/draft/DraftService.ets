@@ -265,15 +265,15 @@ export class DraftService {
       return forwardFailure<boolean>(response);
     }
     if (response.data === undefined) {
-      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 删除草稿响应为空。');
+      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, '站点删除草稿响应为空。');
     }
     try {
       const payload: DiscourseDraftDeleteResponse = JSON.parse(response.data) as DiscourseDraftDeleteResponse;
       if (payload.success !== 'OK') {
-        return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 未确认草稿已删除。');
+        return unexpectedResponse<boolean>(response.statusCode, response.challengeState, '站点未确认草稿已删除。');
       }
     } catch (error) {
-      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, 'Linux.do 删除草稿响应不是有效 JSON。');
+      return unexpectedResponse<boolean>(response.statusCode, response.challengeState, '站点删除草稿响应不是有效 JSON。');
     }
     return {
       success: true,
@@ -304,7 +304,7 @@ export class DraftService {
       return this.forwardFailure(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 草稿响应为空。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点草稿响应为空。');
     }
 
     try {
@@ -329,7 +329,7 @@ export class DraftService {
         data: page
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 草稿响应不是有效 JSON。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点草稿响应不是有效 JSON。');
     }
   }
 

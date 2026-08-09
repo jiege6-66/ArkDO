@@ -249,7 +249,7 @@ export struct LevelProgressPage {
       } else if (this.phase === LoadPhase.LOADING) {
         this.LoadingState()
       } else if (this.phase === LoadPhase.ANON) {
-        this.MessageState('请先登录', '登录 Linux.do 后即可查看等级升级进度', false)
+        this.MessageState('请先登录', '登录后即可查看等级升级进度', false)
       } else {
         this.MessageState('暂时无法获取', '可能是网络问题或需要在浏览器完成验证', true)
       }

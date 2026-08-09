@@ -64,7 +64,7 @@ export class PushSubscriptionService {
 
   async enable(user: PushRelayUser, existingSubId?: string): Promise<PushRegistrationResult> {
     if (user.userId <= 0 || user.username.length === 0) {
-      return { success: false, message: '请先登录 linux.do 账号' };
+      return { success: false, message: '请先登录论坛账号' };
     }
 
     Log.i(`${LOG_TAG} enable start`);
@@ -107,7 +107,7 @@ export class PushSubscriptionService {
       );
       Log.i(`${LOG_TAG} linuxdo subscribe result success=${response.success} status=${response.statusCode} challenge=${response.challengeState}`);
     } catch (err) {
-      return this.failure('linux.do 订阅请求异常', err);
+      return this.failure('站点订阅请求异常', err);
     }
 
     if (!response.success) {
@@ -222,7 +222,7 @@ export class PushSubscriptionService {
 
   async sendTest(registration: PushRelayRegistration, user: PushRelayUser): Promise<PushStatusResult> {
     if (user.userId <= 0 || user.username.length === 0) {
-      return { enabled: false, message: '请先登录 linux.do 账号' };
+      return { enabled: false, message: '请先登录论坛账号' };
     }
     if (!this.isValidRelayRegistration(registration) || (registration.subId ?? '').length === 0) {
       return { enabled: false, message: '推送订阅参数无效' };
@@ -292,7 +292,7 @@ export class PushSubscriptionService {
     const lowered: string = text.toLowerCase();
     // 登录页/挑战页等 HTML:典型的"掉登录态但仍回 200"。
     if (lowered.indexOf('<html') >= 0 || lowered.indexOf('<!doctype html') >= 0) {
-      return 'linux.do 推送订阅失败: 登录态可能已失效,请重新登录后再试';
+      return '推送订阅失败: 登录态可能已失效,请重新登录后再试';
     }
 
     // JSON 错误体:Discourse 失败时回 {"errors":[...]} / {"failed":"FAILED"}。
@@ -300,10 +300,10 @@ export class PushSubscriptionService {
       try {
         const parsed: SubscribeResponseBody = JSON.parse(text) as SubscribeResponseBody;
         if (parsed.errors !== undefined && parsed.errors.length > 0) {
-          return `linux.do 推送订阅失败: ${parsed.errors.join('; ')}`;
+          return `推送订阅失败: ${parsed.errors.join('; ')}`;
         }
         if (typeof parsed.failed === 'string' && parsed.failed.length > 0) {
-          return `linux.do 推送订阅失败: ${parsed.failed}`;
+          return `推送订阅失败: ${parsed.failed}`;
         }
       } catch (err) {
         // 解析不了的 JSON 不当作失败证据,交给上层按成功处理,避免误伤。
@@ -315,7 +315,7 @@ export class PushSubscriptionService {
   }
 
   private networkFailureMessage(response: NetworkResult<string>): string {
-    const parts: string[] = ['linux.do 推送订阅失败'];
+    const parts: string[] = ['推送订阅失败'];
     if (response.statusCode > 0) {
       parts.push(`status=${response.statusCode}`);
     }

@@ -402,7 +402,7 @@ struct AboutDialog {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
 
-      Text('Linux.do 第三方鸿蒙客户端')
+      Text('第三方论坛客户端')
         .fontSize(13)
         .fontColor($r('app.color.text_secondary'))
         .margin({ top: 8 })

@@ -373,7 +373,7 @@ export struct SitesPage {
   private EmptyCard() {
     Column() {
       // 与首页空态同款:彩色 logo 直接用,不染色不套圈。
-      Image($r('app.media.linuxdo_logo'))
+      Image($r('app.media.app_logo'))
         .width(64)
         .height(64)
 
@@ -383,7 +383,7 @@ export struct SitesPage {
         .fontColor($r('app.color.text_primary'))
         .margin({ top: 16 })
 
-      Text('Linux.do 生态里的不少站点要用论坛账号授权登录，域名也常常解析不出来。加到这里，ArkDO 会用 DoH 解析域名、并复用你已有的登录态。')
+      Text('有些站点要用论坛账号授权登录，域名也常常解析不出来。加到这里，ArkDO 会用 DoH 解析域名、并复用你已有的登录态。')
         .fontSize(13)
         .fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)

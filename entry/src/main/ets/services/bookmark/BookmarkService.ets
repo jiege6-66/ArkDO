@@ -98,14 +98,14 @@ export class BookmarkService {
       return this.forwardFailure(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 书签响应为空。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应为空。');
     }
 
     try {
       const payload: DiscourseBookmarkListResponse = JSON.parse(response.data) as DiscourseBookmarkListResponse;
       const list: DiscourseBookmarkList | undefined = payload.user_bookmark_list;
       if (!list) {
-        return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 书签响应缺少 user_bookmark_list。');
+        return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应缺少 user_bookmark_list。');
       }
 
       const sourceBookmarks: DiscourseBookmark[] = list.bookmarks ? list.bookmarks : [];
@@ -128,7 +128,7 @@ export class BookmarkService {
         data: page
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 书签响应不是有效 JSON。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应不是有效 JSON。');
     }
   }
 

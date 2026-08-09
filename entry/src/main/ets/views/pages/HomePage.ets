@@ -794,7 +794,7 @@ export struct HomePage {
           // (hostReadyEpoch)再进 LoadStateView——此时要么已有数据、要么是真失败(CF/服务端)给重试,
           // 从而不再硬闪「加载失败」。
           if (!this.bridge.canFetch()) {
-            Image($r('app.media.linuxdo_logo'))
+            Image($r('app.media.app_logo'))
               .width(64)
               .height(64)
               .margin({ bottom: 16 })
@@ -1047,20 +1047,13 @@ export struct HomePage {
   private FeedTitle() {
     Column({ space: 1 }) {
       if (isDefaultTopicListQuery(this.listQuery)) {
-        Text() {
-          Span(AppConstants.APP_NAME.slice(0, -1))
-          ImageSpan($r('app.media.linuxdo_logo'))
-            .width(24)
-            .height(24)
-            .verticalAlign(ImageSpanAlignment.CENTER)
-            .margin({ bottom: 2 })
-        }
-        .fontSize(26)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
+        Text(AppConstants.APP_NAME)
+          .fontSize(26)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
       } else {
         Row() {
           this.QueryTitleIcon()

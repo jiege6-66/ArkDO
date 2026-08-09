@@ -62,7 +62,7 @@ export class PushCoordinator {
     const context: common.UIAbilityContext | undefined = this.getContext();
     const user: User | undefined = this.getUser();
     if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { enabled: false, message: '请先登录 linux.do' };
+      return { enabled: false, message: '请先登录论坛账号' };
     }
 
     const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
@@ -97,7 +97,7 @@ export class PushCoordinator {
     if (user === undefined || user.id <= 0 || user.username.length === 0) {
       return {
         success: false,
-        message: '请先登录 linux.do 账号'
+        message: '请先登录论坛账号'
       };
     }
     // 中继地址来自随包配置(不进版本控制)或用户自填。自行编译且没配的话推送不可用,
@@ -140,7 +140,7 @@ export class PushCoordinator {
     const context: common.UIAbilityContext | undefined = this.getContext();
     const user: User | undefined = this.getUser();
     if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { success: false, message: '请先登录 linux.do 账号' };
+      return { success: false, message: '请先登录论坛账号' };
     }
 
     const stored: StoredPushSubscription = PushSubscriptionStore.get(context, user.id);
@@ -262,7 +262,7 @@ export class PushCoordinator {
     const context: common.UIAbilityContext | undefined = this.getContext();
     const user: User | undefined = this.getUser();
     if (!context || user === undefined || user.id <= 0 || user.username.length === 0) {
-      return { enabled: false, message: '请先登录 linux.do 账号' };
+      return { enabled: false, message: '请先登录论坛账号' };
     }
 
     const ensureResult: PushRegistrationResult = await this.ensure(false);

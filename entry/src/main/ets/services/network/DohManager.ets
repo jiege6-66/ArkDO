@@ -16,7 +16,7 @@ const PREF_KEY_ID_SEQ: string = 'doh_id_seq';
  * 两条内置项都恒在列表中(缺失自动补回):edge 为默认激活项(装机即用),arkdo 为备用预设。
  */
 export const DOH_EDGE_ID: string = 'builtin-edge';
-const DOH_EDGE_NAME: string = 'Linux.do 优选';
+const DOH_EDGE_NAME: string = '论坛优选';
 const DOH_EDGE_URL: string = 'https://edge.47258.xyz/linuxdo';
 
 // 保留原 id 兼容旧安装(旧版持久化里 active/列表都引用它);现降为第二预设。

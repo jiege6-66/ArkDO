@@ -66,7 +66,7 @@ export class AuthService {
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 当前会话响应为空。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前会话响应为空。');
     }
 
     try {
@@ -82,7 +82,7 @@ export class AuthService {
       }
 
       if (typeof sourceUser.id !== 'number' || typeof sourceUser.username !== 'string') {
-        return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 当前用户响应字段无效。');
+        return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前用户响应字段无效。');
       }
 
       return {
@@ -105,7 +105,7 @@ export class AuthService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, 'Linux.do 当前会话响应不是有效 JSON。');
+      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前会话响应不是有效 JSON。');
     }
   }
 
