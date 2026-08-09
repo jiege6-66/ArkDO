@@ -1,3 +1,4 @@
+import { Log } from '../../services/logging/Log';
 import { image } from '@kit.ImageKit';
 import { AppConstants, LINUX_DO_HOST } from '../../common/constants/AppConstants';
 import { User } from '../../models/User';
@@ -5,6 +6,10 @@ import { AvatarImageCache } from '../../services/network/AvatarImageCache';
 import { BlockedImageHosts } from '../../services/network/BlockedImageHosts';
 import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
 import { ANIMATED_AVATAR_ENABLED_STORAGE_KEY } from '../../services/avatar/AnimatedAvatarPrefs';
+
+const LOG_TAG: string = '[ArkDO][AvatarRoute]';
+// 选路日志去重集合的上限。浏览久了不同头像 URL 会成千上万,不设上限就是一处慢性泄漏。
+const ROUTE_LOG_MAX: number = 512;
 
 @Component
 export struct UserAvatar {
@@ -18,7 +23,12 @@ export struct UserAvatar {
   // 当前使用的头像候选下标:动图(0)加载失败 → 静态(1)→ 都失败(>=候选数)回退首字母。
   @State private avatarSourceIndex: number = 0;
   // 当前候选原生直载失败过、已由桥救回:build 据此从原生分支切到 PixelMap 分支。换候选时复位。
-  @State private nativeAvatarFailed: boolean = false;
+  // 当前候选上「原生 / 桥」各自试过没有。两条路都保留退路,靠这两个标记防止来回弹。
+  @State private triedNative: boolean = false;
+  @State private triedBridge: boolean = false;
+  // 选路日志去重:同一张头像在列表里会被多个实例渲染,不去重会刷出成百条同样的行。
+  // 满了整批清空而不是 LRU:它只服务于日志去重,清了最多多打几条,不值得为此维护淘汰顺序。
+  private static routeLogged: Set<string> = new Set();
   // 主站(linux.do)被 SNI 封锁的头像经 host webview 过盾取回并解码的 PixelMap(单帧,静态)。
   // ldstatic.com CDN 上的头像不封,走原生 Image 直载(且 .png 实为动图内容时会自动播放),不落此字段。
   @State private avatarPixelMap: image.PixelMap | undefined = undefined;
@@ -144,13 +154,20 @@ export struct UserAvatar {
   // 主站被封头像经 host webview 过盾取字节解码成 PixelMap。
   private prepareCurrentCandidate(): void {
     const url: string = this.currentAvatarUrl();
-    // 判据与 build 分支同源(问 useNativeImage 而不是直接问 isNativeHost):否则关掉动图开关后,
-    // build 走 PixelMap 分支、这里却因为"是 CDN 域名"而不去加载,头像会永远停在首字母。
-    if (url.length === 0 || this.useNativeImage()) {
-      return;
+    const route: string = this.avatarRoute();
+    // 排障用:每个 url 只记一次选路结果,重复渲染不再刷屏。
+    if (url.length > 0 && !UserAvatar.routeLogged.has(url)) {
+      if (UserAvatar.routeLogged.size >= ROUTE_LOG_MAX) {
+        UserAvatar.routeLogged.clear();
+      }
+      UserAvatar.routeLogged.add(url);
+      Log.i(`${LOG_TAG} route=${route} url=${url}`);
     }
-    this.loadViaBridge(url);
+    if (route === 'bridge') {
+      this.loadViaBridge(url);
+    }
   }
+
 
   // 关闭动图、或该 CDN 已判定原生走不通时,把图片型 flair 也经桥解成单帧;否则原生 Image 直载。
   private prepareFlairIfNeeded(): void {
@@ -197,30 +214,41 @@ export struct UserAvatar {
    * BlockedImageHosts 才会判定该 CDN 原生走不通、让后续头像直接走桥。
    * (写死"ldstatic.com 不被封"的老假设在部分用户网络里不成立,但也不能一张失败就推翻。)
    */
+  // 原生取不到(URL 失效、被封、CF 挑战页解不出图)。记账后交给另一条路;两条都试过才换候选。
   private async onNativeAvatarFailed(): Promise<void> {
     const url: string = this.currentAvatarUrl();
     if (url.length === 0) {
       return;
     }
-    const pixelMap: image.PixelMap | undefined = await AvatarImageCache.getInstance().load(url);
-    if (!pixelMap) {
+    Log.i(`${LOG_TAG} native failed url=${url}`);
+    this.triedNative = true;
+    if (this.avatarRoute() !== 'bridge') {
+      Log.i(`${LOG_TAG} no route left url=${url} → advance candidate`);
       this.advanceCandidate();
       return;
     }
+    const pixelMap: image.PixelMap | undefined = await AvatarImageCache.getInstance().load(url);
+    if (!pixelMap) {
+      Log.i(`${LOG_TAG} bridge rescue failed url=${url} → advance candidate`);
+      this.triedBridge = true;
+      this.advanceCandidate();
+      return;
+    }
+    Log.i(`${LOG_TAG} bridge rescued url=${url}`);
     BlockedImageHosts.markBridgeRescued(url);
     this.avatarPixelMap = pixelMap;
-    // 让 build 从原生分支切到 PixelMap 分支(代价:动图退成静态首帧,总好过掉成首字母)。
-    this.nativeAvatarFailed = true;
     // 角标多半与头像同域,判定若已翻转就一并改走桥,免得等到下次挂载才恢复。
     this.prepareFlairIfNeeded();
   }
+
 
   // 当前候选取不到 → 退到下一候选(动图失败退静态);无更多候选则保持首字母占位。
   private advanceCandidate(): void {
     if (this.avatarSourceIndex + 1 < this.avatarCandidates().length) {
       this.avatarSourceIndex += 1;
-      // 换了候选就重新给原生一次机会:上一张的失败不代表这一张也取不到。
-      this.nativeAvatarFailed = false;
+      // 换了候选就两条路都重新给一次机会:上一张的失败不代表这一张也取不到。
+      this.triedNative = false;
+      this.triedBridge = false;
       this.prepareCurrentCandidate();
     }
   }
@@ -238,6 +266,14 @@ export struct UserAvatar {
       this.avatarPixelMap = pixelMap;
       return;
     }
+    // 桥取不到(多半是跨域被 CORS 挡,如 meta 的头像 302 到不回 CORS 头的 CDN)。
+    // 先退回原生再试一次 —— 原生不受 CORS 约束,恰好能取到这类图。
+    this.triedBridge = true;
+    if (this.avatarRoute() === 'native') {
+      Log.i(`${LOG_TAG} bridge failed url=${url} → retry native`);
+      return;
+    }
+    Log.i(`${LOG_TAG} no route left url=${url} → advance candidate`);
     this.advanceCandidate();
   }
 
@@ -321,49 +357,63 @@ export struct UserAvatar {
     return this.avatarSize / 2;
   }
 
-  // 当前候选是否走原生 Image:候选 URL 在未被封的 CDN(ldstatic.com)上,且允许播动图。
-  // 关掉「动态头像」时一律不走原生 Image——原生 Image 遇到动图内容就会自动播,没有属性能冻住它;
-  // 唯一能得到静态图的办法是取字节后 createPixelMap() 拿首帧(PixelMap 天然只有一帧)。
-  private useNativeImage(): boolean {
-    if (this.nativeAvatarFailed) {
-      return false;
-    }
+  /**
+   * 当前候选走哪条路:'native' 用原生 Image、'bridge' 经宿主 webview 取 PixelMap、'none' 两条都试过了。
+   *
+   * ## 为什么不能「默认原生、失败再降级」
+   * 站点自己域名下的图多半在 Cloudflare 后面。原生 Image 走的是系统网络栈,**不带宿主
+   * webview 的 cookie**(包括 cf_clearance),于是 CF 回一个 200 的挑战页 HTML —— 那不是
+   * 网络错误,Image 的 onError **根本不触发**,降级链路永远启动不了,头像永远停在占位。
+   * (idcflare.com 实测:13 张全是 route=native,一条 native failed 都没有。)
+   * 所以必须在选路时就判对,不能指望失败回调。
+   *
+   * ## 判据
+   * - **站点自己的域名 → 优先走桥**:桥在宿主文档里发请求,天然带 cookie、能过盾,且同源
+   *   不受 CORS 约束。
+   * - **第三方 CDN → 优先走原生**:CDN 取图不需要 cookie,而原生请求不受 CORS 约束 ——
+   *   很多图片 CDN(如 discourse-cdn.com)不回 access-control-allow-origin,走桥反而取不到。
+   *
+   * ## 两条路都保留退路
+   * 首选那条失败后自动改走另一条(triedNative / triedBridge 记账,换候选时复位)。
+   * meta.discourse.org 就需要这个:头像 URL 在自己域名下(首选走桥),却 302 到不回 CORS 头的
+   * global.discourse-cdn.com,桥必然失败 —— 得能退回原生。两条都失败才换下一个候选。
+   */
+  private avatarRoute(): string {
     const url: string = this.currentAvatarUrl();
-    if (url.length === 0 || !this.isNativeHost(url)) {
-      return false;
+    if (url.length === 0) {
+      return 'none';
     }
-    // 关掉动图开关时,本想改走桥取静态首帧;但只有「经桥确实取得到」的域名才能这么做 ——
-    // 多数站点的图片 CDN 不回 CORS 头,宿主文档里的跨域 fetch 会被直接拦掉,走桥等于
-    // 一张都取不到。那种情况下宁可让它动着,也别显示不出来。
-    if (!this.animatedAvatarEnabled && this.isBridgeFetchable(url)) {
-      return false;
+    const bridgeAvailable: boolean = !this.triedBridge;
+    const nativeAvailable: boolean = !this.triedNative && !BlockedImageHosts.isBlocked(url);
+    // 关掉动图开关时也优先走桥:PixelMap 天然只有一帧,是唯一能冻住动图的办法。
+    // 但仅限「经桥确实取得到」的域名,否则宁可让它动着也别显示不出来。
+    const preferBridge: boolean = this.isOwnOrigin(url) ||
+      (!this.animatedAvatarEnabled && this.isBridgeFetchable(url));
+    if (preferBridge) {
+      if (bridgeAvailable) {
+        return 'bridge';
+      }
+      return nativeAvailable ? 'native' : 'none';
     }
-    return true;
+    if (nativeAvailable) {
+      return 'native';
+    }
+    return bridgeAvailable ? 'bridge' : 'none';
   }
 
-  /**
-   * 能否用原生 Image 直载。
-   *
-   * **默认能** —— 这与正文图(PostRichContent)一致:原生请求不受 CORS 约束,是通用站点
-   * 唯一走得通的路。原先这里是白名单「只有 ldstatic.com 能直载」,那是把 linux.do 的
-   * 特殊情况当成了通则:别的论坛头像因此一律走桥,而它们的 CDN(如 discourse-cdn.com)
-   * 不回 access-control-allow-origin,宿主文档里的跨域 fetch 被拦,头像永远停在首字母。
-   *
-   * 只有两种情况改走桥:
-   * 1. BlockedImageHosts 已在若干张失败后判定该域名原生走不通(SNI 阻断/解析不到);
-   * 2. linux.do 主站域名 —— 已知被按 SNI 阻断,不必先失败几张再降级。它的静态资源镜像
-   *    cdn.ldstatic.com 不受影响,照常直载。
-   */
-  private isNativeHost(url: string): boolean {
-    if (BlockedImageHosts.isBlocked(url)) {
-      return false;
-    }
-    return !url.startsWith(`https://${LINUX_DO_HOST}/`);
+  private useNativeImage(): boolean {
+    return this.avatarRoute() === 'native';
+  }
+
+  // 是否是当前论坛自己域名下的图。这类图要带登录态/过盾凭证才取得到,只有桥做得到。
+  private isOwnOrigin(url: string): boolean {
+    const base: string = AppConstants.BASE_URL;
+    return base.length > 0 && url.startsWith(`${base}/`);
   }
 
   // 经宿主 webview 的注入式 fetch 是否取得到:跨域取图要求对方回 CORS 头。
   // 实测 cdn.ldstatic.com 回 access-control-allow-origin: *,故 linux.do 生态可以走桥;
-  // 其余域名一律按「取不到」处理,不去赌。
+  // 其余第三方域名一律按「取不到」处理,不去赌。
   private isBridgeFetchable(url: string): boolean {
     return url.includes('ldstatic.com');
   }
