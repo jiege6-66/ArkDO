@@ -420,24 +420,35 @@ def clean_text(value, limit: int) -> str:
     return value[:limit - 1] + "…"
 
 
-def same_linuxdo_url(url: str) -> bool:
+def same_site_url(url: str, site_host: str) -> bool:
+    """跳转目标必须与该订阅所属站点同源。
+
+    原先这里写死 netloc == "linux.do":别的论坛的通知因此过不了这道校验,click_data 被整个
+    丢掉,点开只能进首页。改成按订阅记录里的站点比对 —— 校验的意义(不让通知把用户带去
+    第三方地址)保住了,同时对任何论坛都成立。
+    """
     parsed = urllib.parse.urlparse(url)
-    return parsed.scheme in ("http", "https") and parsed.netloc.lower() == "linux.do"
+    return parsed.scheme in ("http", "https") and parsed.netloc.lower() == normalize_site_host(site_host)
 
 
-def build_click_data(message: dict, title: str) -> dict:
+def build_click_data(message: dict, title: str, site_host: str) -> dict:
     raw_url = clean_text(message.get("url"), 500)
     if not raw_url:
         return {}
-    base_url = clean_text(message.get("base_url"), 120) or "https://linux.do"
+    # base_url 由 Discourse 在推送体里给出(它自己的站点地址),缺失时回落到订阅记录的站点。
+    base_url = clean_text(message.get("base_url"), 120) or ("https://%s" % normalize_site_host(site_host))
     if raw_url.startswith("/"):
         target_url = "%s%s" % (base_url.rstrip("/"), raw_url)
     else:
         target_url = raw_url
-    if not same_linuxdo_url(target_url):
+    if not same_site_url(target_url, site_host):
         return {}
     data = {
         "arkdo_url": target_url,
+        # 通知所属站点。客户端据此判断:若当前论坛不是它,得先切过去再跳,否则会拿另一个
+        # 论坛的地址去开这个 topicId —— 打开一篇完全无关的帖子。
+        "arkdo_site_host": normalize_site_host(site_host),
+        # 兼容:老客户端只认 arkdo_source,保留原值不动。
         "arkdo_source": "linuxdo"
     }
     if title:
@@ -491,7 +502,7 @@ def forward_pushkit(sid: str, rec: dict, message: dict):
     click_action = {
         "actionType": 0
     }
-    click_data = build_click_data(message, title)
+    click_data = build_click_data(message, title, rec_site_host(rec))
     if click_data:
         click_action["data"] = click_data
     category = resolve_category(message)
@@ -721,10 +732,12 @@ class H(BaseHTTPRequestHandler):
             # 测试推送的落点:主帖里一个固定楼层(作者留的祝福语)。
             # 文案要明确引导点击——否则用户只当是条成功提示,不会想到点开还有内容。
             # 楼层一旦发布请勿删除:楼层号写死在这里,删了会跳到不存在的楼层。
+            # base_url 跟该订阅所属站点走:写死 linux.do 的话,别的论坛点测试推送会被
+            # same_site_url 判为跨站而丢掉跳转数据,点开进不了目标楼层。
             message = {
                 "title": "ArkDO 推送已开启 🎉",
                 "body": "点我看看,给你准备了一句话 →",
-                "base_url": "https://linux.do",
+                "base_url": "https://%s" % rec_site_host(rec),
                 "url": TEST_PUSH_URL
             }
             log("test push sid=%s user=%s:%s token=yes" % (sid, rec.get("user_id", ""), rec.get("username", "")))
