@@ -1,6 +1,7 @@
 import { Log } from '../logging/Log';
 import { TopicDetail, TopicPost } from '../../models/TopicDetail';
 import { AppStateEventBus } from '../session/AppStateEventBus';
+import { ChallengeRecoveryEventBus, ChallengeRecoveryState } from '../challenge/ChallengeRecoveryEventBus';
 import { TopicReadState, TopicReadStateEventBus } from '../session/TopicReadStateEventBus';
 import { ReadingTracker, ReportTimingsFn } from './ReadingTracker';
 import { LoginGate } from '../session/LoginGate';
@@ -28,6 +29,7 @@ export class TopicReadController {
   private tracker: ReadingTracker = new ReadingTracker();
   private started: boolean = false;
   private unsubscribeAppState?: () => void = undefined;
+  private unsubscribeChallengeRecovery?: () => void = undefined;
   private staggerTimers: number[] = [];
   // 本次浏览进入过视口的最高楼号:作为"已读到哪"的水位,用于返回时算真实剩余未读。
   // 比依赖停留时长的 post.read 更贴合"我看过了就算读了"的预期,避免徽标卡住不更新。
@@ -38,11 +40,22 @@ export class TopicReadController {
     this.getPosts = getPosts;
   }
 
-  // 页面挂载:订阅 App 前后台切换,驱动阅读计时的焦点(对齐 Discourse session.hasFocus)。
+  // 页面挂载:订阅 App 前后台切换,驱动阅读计时的焦点(对齐 Discourse session.hasFocus);
+  // 以及过盾成功信号,驱动撞盾挂起的 timings 立即补发。
   attach(): void {
     if (!this.unsubscribeAppState) {
       this.unsubscribeAppState = AppStateEventBus.subscribe((isForeground: boolean) => {
         this.tracker.setFocus(isForeground);
+      });
+    }
+    // 只认 COOLDOWN:它是「刚过盾成功」的唯一入口 —— 后台静默探通(resolvedSilently)与弹窗验证
+    // 通过(notifySheetResolved)都汇到 enterCooldown,而放弃/销毁走的是 IDLE、DISMISSED,不会误触发。
+    // 比订阅 SessionEventBus 精确:那条通道登录/登出也会发。
+    if (!this.unsubscribeChallengeRecovery) {
+      this.unsubscribeChallengeRecovery = ChallengeRecoveryEventBus.subscribeState((state: ChallengeRecoveryState) => {
+        if (state === ChallengeRecoveryState.COOLDOWN) {
+          this.tracker.notifyChallengeResolved();
+        }
       });
     }
   }
@@ -66,6 +79,11 @@ export class TopicReadController {
     if (this.unsubscribeAppState) {
       this.unsubscribeAppState();
       this.unsubscribeAppState = undefined;
+    }
+
+    if (this.unsubscribeChallengeRecovery) {
+      this.unsubscribeChallengeRecovery();
+      this.unsubscribeChallengeRecovery = undefined;
     }
 
     const tracker: ReadingTracker = this.tracker;

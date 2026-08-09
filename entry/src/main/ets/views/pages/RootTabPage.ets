@@ -17,7 +17,6 @@ import { SidebarTag, User } from '../../models/User';
 import { ChallengeEventBus, ChallengeRequiredEvent } from '../../services/challenge/ChallengeEventBus';
 import { ChallengeRecoveryCoordinator } from '../../services/challenge/ChallengeRecoveryCoordinator';
 import { ChallengeRecoveryEventBus } from '../../services/challenge/ChallengeRecoveryEventBus';
-import { ChallengeShortcutEventBus } from '../../services/challenge/ChallengeShortcutEventBus';
 import { AuthService } from '../../services/auth/AuthService';
 import { NotificationService } from '../../services/notification/NotificationService';
 import { NotificationEventBus } from '../../services/notification/NotificationEventBus';
@@ -1980,9 +1979,11 @@ export struct RootTabPage {
     Log.i(`${LOG_TAG} challenge resolved`);
     Log.i(`${DIAG_TAG} stage=rootChallengeResolved sheetVisible=${this.isSheetVisible}`);
     // 先进冷却再关窗:onDisappear 的 notifySheetDismissed 在冷却态下即为空操作。
+    // 进冷却会广播 COOLDOWN,详情页的 TopicReadController 据此让挂起的 timings 立刻补发;
+    // 补发成功后 ReadingTracker 自己会 notifyCleared 收起右上角图标 —— 所以这里不再手动收。
+    // 手动收是过去的将就:那时补发遥遥无期,图标只能提前收,代价是「图标没了蓝点还在」的误导。
+    // 现在图标显隐完全由真实上报结果驱动:补发又撞盾就该继续亮着。
     this.challengeRecovery?.notifySheetResolved();
-    // 盾已过:收起详情页右上角的过盾快捷入口(不等下一次 timings 上报成功才收,免得图标空挂着)。
-    ChallengeShortcutEventBus.notifyCleared();
     this.closeChallengePage();
     // 反馈:已过盾时验证页会秒关(源站 404 即通过),给个 toast 免得用户以为闪退/没反应。
     this.showToast('已通过 Cloudflare 验证');

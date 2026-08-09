@@ -21,6 +21,10 @@ const MIN_REPORTING_VISIBLE_MS: number = 1400;
 // 大幅降低 timings 请求频次 → 降低触发 CF 全局 429 速率盾的概率。
 // 后期调参验证多少最合适就改这一个值(单位 ms)。
 const REPORT_BATCH_INTERVAL_MS: number = 5000;
+// 撞盾后挂起发送的最长时间。正常路径由 notifyChallengeResolved()(过盾成功)提前解除;
+// 这个上限只是兜底 —— 万一过盾信号没来(盾自己好了、用户从别处过的盾、协调器压根没被触发),
+// 也不至于把积压的批次一直扣着。取值短于 NEXT_FLUSH_MS,让它先于 60s 常规兜底生效。
+const CHALLENGE_HOLD_MAX_MS: number = 45 * 1000;
 
 export type ReportTimingsFn =
   (topicId: number, timings: Map<number, number>, topicTime: number) => Promise<NetworkResult<string>>;
@@ -53,6 +57,9 @@ export class ReadingTracker {
   private consolidated: ConsolidatedTiming[] = [];
   private ajaxFailures: number = 0;
   private blockSendingTill: number = 0;
+  // 撞盾挂起的截止时间(0 = 未挂起)。撞盾的批次会退回队列,但在此之前不再发送:
+  // 盾没过之前重试全是白发,还会继续喂 CF 的速率盾。见 handleChallenge / notifyChallengeResolved。
+  private challengeHoldUntil: number = 0;
   // 上次实际发出上报的时间戳:用于把 rush(看到新楼即发)节流为每 REPORT_BATCH_INTERVAL_MS 一批。
   private lastReportAt: number = 0;
   // 本次浏览已"看到并已起闪"的未读楼层:避免每个 tick 对同一楼重复发起闪烁;
@@ -194,6 +201,26 @@ export class ReadingTracker {
     }
   }
 
+  // 过盾成功:解除撞盾挂起,并立刻把积压的批次补发出去。
+  //
+  // 必要性:timings 撞盾是静默的(notifyChallenge:false,不弹验证页免得打断阅读),所以过盾这件事
+  // 本身传不到这里。少了这条通路,撞盾那批要等 60s 常规兜底、或等用户滚出一个从没计过时的新楼
+  // 触发 rush 才会重发 —— 用户视角就是「盾过了、图标没了,蓝点却纹丝不动,滑一下才消」。
+  //
+  // 只解闸不改退避:429 之类的 blockSendingTill 该等还得等,那是另一回事。
+  notifyChallengeResolved(): void {
+    const wasHeld: boolean = this.challengeHoldUntil > 0;
+    this.challengeHoldUntil = 0;
+    // 没在跑(没进帖/已离页)或正在收尾:没有该补发的东西,也不该在页面销毁期发请求。
+    if (!this.running || this.deferSends) {
+      return;
+    }
+    Log.i(`${LOG_TAG} challenge resolved topicId=${this.topicId} wasHeld=${wasHeld} queued=${this.consolidated.length}`);
+    // 先 flush 把挂起期间新累计的时长并进队列(consolidate 会合并到同一批),再统一发一次。
+    this.flush();
+    this.sendNextConsolidatedTiming();
+  }
+
   private reset(): void {
     const now: number = Date.now();
     this.timings.clear();
@@ -208,6 +235,7 @@ export class ReadingTracker {
     this.consolidated = [];
     this.ajaxFailures = 0;
     this.blockSendingTill = 0;
+    this.challengeHoldUntil = 0;
     this.lastReportAt = now;
     this.seenBlinking.clear();
     this.deferSends = false;
@@ -317,6 +345,10 @@ export class ReadingTracker {
     if (this.deferSends) {
       return;
     }
+    // 撞盾挂起中:批次留在队列里,等过盾成功(notifyChallengeResolved)或挂起超时再发。
+    if (this.challengeHoldUntil > Date.now()) {
+      return;
+    }
     if (this.blockSendingTill > Date.now()) {
       return;
     }
@@ -417,10 +449,19 @@ export class ReadingTracker {
     }
   }
 
-  // 命中 CF 质询:静默丢弃本批。Referer 修复后 403 已很少,且多发生在从后台回前台的头一两分钟;
-  // 这些楼层仍在屏、会随下一次周期 flush 自然重试并成功(日志已验证),因此无需弹验证、无需特殊处理。
+  // 命中 CF 质询:本批退回队列并挂起发送,等过盾成功(notifyChallengeResolved)或挂起超时再补发。
+  //
+  // 为什么不能像以前那样直接丢:flush() 是**先把这段时长记进 totalTimings 再发请求**的,丢批之后
+  // 这些楼就卡在「记过账但从没上报成功」的夹缝态 —— rush 判定的 alreadyTotalled === 0 永远不再成立,
+  // 于是它们无论在屏多久都触发不了「看到新楼即发」,只能等 60s 兜底,或等用户滚出一个全新的楼
+  // 顺带把它们捎上(flush 是全量打包的)。这就是「过盾了也得滑一下才消蓝点」的由来。
+  //
+  // 为什么不能就地重试:盾没过之前每次都白发,还会继续喂 CF 的速率盾。所以退回队列后压住不发,
+  // 由过盾成功的信号来解闸。
   private handleChallenge(item: ConsolidatedTiming): void {
-    Log.i(`${LOG_TAG} challenge detected, drop batch silently (will retry on next flush) topicId=${item.topicId} posts=${item.timings.size}`);
+    this.consolidate(item.timings, item.topicTime);
+    this.challengeHoldUntil = Date.now() + CHALLENGE_HOLD_MAX_MS;
+    Log.i(`${LOG_TAG} challenge detected, requeue and hold topicId=${item.topicId} posts=${item.timings.size} holdMs=${CHALLENGE_HOLD_MAX_MS}`);
   }
 
   private handleFailure(item: ConsolidatedTiming, statusCode: number): void {
