@@ -42,7 +42,7 @@ import {
   requiresHdsLayoutSafeAreaAvoidance
 } from '../../common/ui/ImmersiveLightMaterial';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
-import { PROFILE_DRAFT_COUNT_KEY } from '../../common/constants/StorageKeys';
+import { ACTIVE_FORUM_NAME_KEY, PROFILE_DRAFT_COUNT_KEY } from '../../common/constants/StorageKeys';
 
 const LOG_TAG: string = '[ArkDO][Profile]';
 
@@ -77,6 +77,8 @@ export struct ProfilePage {
   @Prop @Watch('handleAccountChanged') isLoggedIn: boolean = false;
   @Prop isCheckingSession: boolean = false;
   @Prop hasCheckedSession: boolean = false;
+  // 当前论坛名镜像:未登录态要显示「登录哪个论坛」。
+  @StorageProp(ACTIVE_FORUM_NAME_KEY) private activeForumName: string = '';
   onLoginClick: () => void = () => {};
   // 打开站内 Web 页(草稿等尚未原生化的入口)与原生帖子详情,由 RootTabPage 注入。
   onOpenWeb: (url: string, title?: string) => void = () => {};
@@ -728,11 +730,16 @@ export struct ProfilePage {
         .borderRadius(34)
         .border({ width: 1, color: $r('app.color.border') })
 
-        Text(this.hasCheckedSession ? '登录论坛' : '检查登录状态')
+        // 标题带上论坛名:多站之后这是最要紧的信息 —— 用户可能刚切过站,不写清是哪个论坛,
+        // 会以为自己原来那个账号掉登录了。论坛名可以很长,单行截断。
+        Text(this.getAnonymousTitle())
           .fontSize(19)
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 16 })
+          .padding({ left: CARD_PADDING, right: CARD_PADDING })
 
         Text(this.getAnonymousSubtitle())
           .fontSize(13)
@@ -1132,11 +1139,21 @@ export struct ProfilePage {
     return count !== undefined ? `我的回复 ${formatCount(count)} ›` : '我的回复 ›';
   }
 
-  private getAnonymousSubtitle(): string {
-    if (this.hasCheckedSession) {
-      return '真诚、友善、团结、专业，共建你我引以为荣之社区';
+  private getAnonymousTitle(): string {
+    if (!this.hasCheckedSession) {
+      return '检查登录状态';
     }
-    return '正在检查登录状态';
+    return this.activeForumName.length > 0 ? `登录 ${this.activeForumName}` : '登录论坛';
+  }
+
+  // 原先这里放的是某个社区的口号原文 —— 既是他站内容,换站后也完全不成立。
+  // 改成中性表述,顺便说清「账号是论坛的、不是本应用的」:登录走的是站点自己的网页
+  // 登录页(LoginPage 里装的就是 AppConstants.LOGIN_URL),App 全程不经手密码。
+  private getAnonymousSubtitle(): string {
+    if (!this.hasCheckedSession) {
+      return '正在检查登录状态';
+    }
+    return '账号由该论坛提供,登录后即可参与讨论。登录在论坛自己的页面完成,ArkDO 不经手你的密码。';
   }
 
   private getCategoryFor(categoryId?: number): TopicCategory | undefined {
