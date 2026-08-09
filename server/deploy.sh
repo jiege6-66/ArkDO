@@ -24,8 +24,18 @@ fi
 python3 -c "import py_compile; py_compile.compile('$LOCAL_PY', doraise=True)"
 echo "✓ 本地语法检查通过"
 
+# 先确认连得上,且线上文件确实存在。
+# 原先这里是 `ssh ... cat ... 2>/dev/null | diff`,SSH 的错误被吞掉:连不上时 cat 输出为空,
+# diff 就把整个文件报成"新增",看起来像首次部署——而实际是压根没连上。那种误判很危险
+# (会让人以为线上是空的而直接确认部署),所以连接与存在性都要显式检查、失败即退出。
+if ! ssh -n -o ConnectTimeout=10 "$HOST" "test -f $REMOTE_DIR/relay.py"; then
+  echo "✗ 连不上 $HOST,或 $REMOTE_DIR/relay.py 不存在。" >&2
+  echo "  连接问题请先单独试 ssh $HOST;确属首次部署请手工创建 $REMOTE_DIR 后再跑本脚本。" >&2
+  exit 1
+fi
+
 echo "── 与线上的差异 ──"
-if ssh "$HOST" "cat $REMOTE_DIR/relay.py" 2>/dev/null | diff -u - "$LOCAL_PY"; then
+if ssh -n "$HOST" "cat $REMOTE_DIR/relay.py" | diff -u - "$LOCAL_PY"; then
   echo "(无差异)"
   [ "$DRY" = "--dry" ] && exit 0
 fi
@@ -35,18 +45,20 @@ if [ "$DRY" = "--dry" ]; then
   exit 0
 fi
 
+# 上面的 ssh 一律带 -n:ssh 默认会读走 stdin 转发给远端命令,那样这里的 read 会直接拿到
+# EOF,表现成"没确认就退出"(用管道喂 y 时尤其明显)。
 read -r -p "确认部署到 $HOST ? [y/N] " ok
 [ "$ok" = "y" ] || { echo "已取消"; exit 0; }
 
 # 先备份线上版本,出问题能立刻回滚。
-ssh "$HOST" "sudo cp $REMOTE_DIR/relay.py $REMOTE_DIR/relay.py.bak.\$(date +%Y%m%d_%H%M%S)"
+ssh -n "$HOST" "sudo cp $REMOTE_DIR/relay.py $REMOTE_DIR/relay.py.bak.\$(date +%Y%m%d_%H%M%S)"
 scp "$LOCAL_PY" "$HOST:/tmp/relay-new.py"
-ssh "$HOST" "sudo mv /tmp/relay-new.py $REMOTE_DIR/relay.py \
+ssh -n "$HOST" "sudo mv /tmp/relay-new.py $REMOTE_DIR/relay.py \
   && sudo chmod 644 $REMOTE_DIR/relay.py \
   && python3 -c \"import py_compile; py_compile.compile('$REMOTE_DIR/relay.py', doraise=True)\" \
   && sudo systemctl restart wp-relay"
 
 sleep 2
 echo "── 部署结果 ──"
-ssh "$HOST" "systemctl is-active wp-relay && sudo journalctl -u wp-relay -n 3 --no-pager"
+ssh -n "$HOST" "systemctl is-active wp-relay && sudo journalctl -u wp-relay -n 3 --no-pager"
 echo "✓ 完成。健康检查请访问 <RELAY_PUBLIC_BASE>/wp/health"
