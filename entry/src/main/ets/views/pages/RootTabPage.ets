@@ -229,6 +229,13 @@ export struct RootTabPage {
         this.bridge,
         () => {
           // 恢复成功:广播会话刷新——重载 host、复查登录态、刷新列表。
+          //
+          // 先关门再广播,与登录成功/登出/DoH 变更那三条路保持一致。同一批订阅者里,本页自己的
+          // handleSessionChanged → checkCurrentUser 跑在 ArkWebHost 之前,不先关门的话它会抢在
+          // loadUrl 之前把 current.json 注进旧文档 —— 那个请求必死于文档销毁,回来是
+          // NETWORK_FAILURE,又触发「网络自愈」再重载一次。连环重载会连累所有排队中的请求
+          // (真机日志里过盾补发的 timings 就是这么被拖到 15s 超时的)。
+          this.bridge.markHostReloading();
           SessionEventBus.notifySessionChanged();
         },
         () => {

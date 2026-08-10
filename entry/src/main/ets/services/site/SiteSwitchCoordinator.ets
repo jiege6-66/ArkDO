@@ -58,7 +58,7 @@ export class SiteSwitchCoordinator {
       Log.i(`${LOG_TAG} no active site, skip host reload`);
       return;
     }
-    // reloadHost 内部已 markHostReloading 关门闩,不必在外面再关一次。
+    // reloadHost 内部已 markHostLoadIssued(关门闩 + 记一笔在途重载),不必在外面再关一次。
     const ok: boolean = bridge.reloadHost();
     Log.i(`${LOG_TAG} host reload issued ok=${ok}`);
   }
