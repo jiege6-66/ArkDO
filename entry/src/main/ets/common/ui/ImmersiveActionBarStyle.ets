@@ -1,13 +1,16 @@
 import { ActionBarStyle, BlurStrategy } from '@kit.UIDesignKit';
 import { LengthMetrics } from '@ohos.arkui.node';
 import { ButtonModifier } from '@ohos.arkui.modifier';
+import { clampFabGlassRadius, FAB_GLASS_RADIUS_DEFAULT } from './FabGlassPrefs';
 
 class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
   private readonly blurEnabled: boolean;
+  private readonly blurRadius: number;
 
-  constructor(blurEnabled: boolean) {
+  constructor(blurEnabled: boolean, blurRadius: number) {
     super();
     this.blurEnabled = blurEnabled;
+    this.blurRadius = clampFabGlassRadius(blurRadius);
   }
 
   applyNormalAttribute(instance: ButtonAttribute): void {
@@ -20,15 +23,16 @@ class ImmersiveFloatingActionButtonModifier extends ButtonModifier {
     if (this.blurEnabled) {
       // 用 backgroundEffect 而非 COMPONENT_* 组件材质:后者模糊强度与不透明度绑死,越糊越白越不透,
       // 做不到「强磨砂 + 通透」。backgroundEffect 把两者拆开:radius 控制磨砂强度、color 的 alpha 控制
-      // 透不透,于是可以「大半径出强磨砂 + 低 alpha 底色保持看得穿」。想更/更不磨砂改 radius,
-      // 想更/更不透明改 hds_floating_action_bg 的 alpha。saturation 略提饱和,让透出来的底色不发灰。
+      // 透不透,于是可以「大半径出强磨砂 + 低 alpha 底色保持看得穿」。radius 由设置页滑块给
+      // (FabGlassPrefs,默认 28,即改造前的硬编码值);想更/更不透明改 hds_floating_action_bg 的
+      // alpha。saturation 略提饱和,让透出来的底色不发灰。
       //
       // 蒙版色用静态 color,不用 adaptiveColor: AdaptiveColor.AVERAGE。AVERAGE 会让蒙版色跟着背后
       // 内容走(观感更"活"),代价是每帧都要额外采样背景算一次均色。这个 FAB 在首页与详情页常驻可见,
       // 转场期间背景每帧都在变、结果无法复用,曾是掉帧的来源之一。观感差异在 52vp 的小按钮上很有限,
       // 不值得为它付这笔每帧开销。
       const glassEffect: BackgroundEffectOptions = {
-        radius: 28,
+        radius: this.blurRadius,
         color: $r('app.color.hds_floating_action_bg'),
         saturation: 1.2
       };
@@ -51,8 +55,12 @@ export const IMMERSIVE_ACTION_BAR_BLUR_STRATEGY: BlurStrategy = BlurStrategy.ENA
 // 后者会产生重复 id。
 export const IMMERSIVE_ACTION_BAR_BLUR_DISABLED: BlurStrategy = BlurStrategy.DISABLE;
 
-export function buildImmersiveFloatingActionButtonModifier(enabled: boolean): ButtonModifier {
-  return new ImmersiveFloatingActionButtonModifier(enabled);
+// radius 缺省仍是 28:调用点只有两个 FAB,都会显式传设置页的值,这个默认只兜住漏传的情况。
+export function buildImmersiveFloatingActionButtonModifier(
+  enabled: boolean,
+  radius: number = FAB_GLASS_RADIUS_DEFAULT
+): ButtonModifier {
+  return new ImmersiveFloatingActionButtonModifier(enabled, radius);
 }
 
 export function buildImmersiveFloatingActionStyle(size: number = 52): ActionBarStyle {

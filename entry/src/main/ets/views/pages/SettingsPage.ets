@@ -2,7 +2,14 @@ import { Log } from '../../services/logging/Log';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
-import { FAB_GLASS_ENABLED_STORAGE_KEY, FabGlassPrefs } from '../../common/ui/FabGlassPrefs';
+import {
+  FAB_GLASS_ENABLED_STORAGE_KEY,
+  FAB_GLASS_RADIUS_DEFAULT,
+  FAB_GLASS_RADIUS_MAX,
+  FAB_GLASS_RADIUS_MIN,
+  FAB_GLASS_RADIUS_STORAGE_KEY,
+  FabGlassPrefs
+} from '../../common/ui/FabGlassPrefs';
 import { SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { CARD_GAP, CARD_PADDING, CARD_RADIUS, PAGE_MARGIN } from '../../common/theme/Metrics';
 import { SCRIM } from '../../common/theme/Palette';
@@ -50,6 +57,8 @@ export struct SettingsPage {
   @StorageLink(THEME_MODE_STORAGE_KEY) themeMode: ThemeMode = ThemeMode.SYSTEM;
   // 「悬浮按钮玻璃效果」开关:镜像 AppStorage,onChange 落盘后两处 FAB 即时响应。默认关。
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
+  // 磨砂半径:滑块拖动时每帧回写 AppStorage(两处 FAB 跟手),松手才落盘。
+  @StorageProp(FAB_GLASS_RADIUS_STORAGE_KEY) private fabGlassRadius: number = FAB_GLASS_RADIUS_DEFAULT;
   // 当前论坛名:绑 AppStorage 镜像而非直接读 CurrentSite.displayName —— 后者是普通静态
   // getter,改名/切站后 ArkUI 不知道要重绘,副标题会一直停在旧值(要退回首页再进才更新)。
   @StorageProp(ACTIVE_FORUM_NAME_KEY) private activeForumName: string = '';
@@ -171,6 +180,11 @@ export struct SettingsPage {
         })
         this.HairlineInset()
         this.FabGlassRow()
+        // 半径只在开关打开时露出:关态下这个值不产生任何效果,摆着只会让人以为拖了没反应。
+        if (this.fabGlassEnabled) {
+          this.HairlineInset()
+          this.FabGlassRadiusRow()
+        }
       }
       .cardStyle()
 
@@ -319,6 +333,52 @@ export struct SettingsPage {
     .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 12 })
   }
 
+  // 磨砂强度滑块。两端标出极值,让人一眼知道还能调多少;拖动时首页/详情页的 FAB 已经在跟着变,
+  // 本页看不到它们,所以当前值也直接标在右上角,不至于全靠盲拖。
+  @Builder
+  private FabGlassRadiusRow() {
+    Column() {
+      Row() {
+        Text('磨砂强度')
+          .fontSize(15)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+        Text(`${this.fabGlassRadius}`)
+          .fontSize(13)
+          .fontColor($r('app.color.text_faint'))
+      }
+      .width('100%')
+
+      Row() {
+        Text(`${FAB_GLASS_RADIUS_MIN}`)
+          .fontSize(11)
+          .fontColor($r('app.color.text_faint'))
+        Slider({
+          value: this.fabGlassRadius,
+          min: FAB_GLASS_RADIUS_MIN,
+          max: FAB_GLASS_RADIUS_MAX,
+          step: 1,
+          style: SliderStyle.OutSet
+        })
+          .layoutWeight(1)
+          .selectedColor($r('app.color.ld_accent'))
+          .trackThickness(4)
+          .onChange((value: number, mode: SliderChangeMode) => {
+            this.setFabGlassRadius(value,
+              mode === SliderChangeMode.End || mode === SliderChangeMode.Click);
+          })
+        Text(`${FAB_GLASS_RADIUS_MAX}`)
+          .fontSize(11)
+          .fontColor($r('app.color.text_faint'))
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 12, bottom: 8 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
   @Builder
   private SettingCell(symbol: Resource, label: string, value: string, onCellClick?: () => void) {
     Row() {
@@ -422,6 +482,15 @@ export struct SettingsPage {
   // 玻璃效果开关:写盘 + 同步 AppStorage 镜像,首页/详情页 FAB 经 @StorageProp 即时响应,无需重启。
   private setFabGlassEnabled(enabled: boolean): void {
     FabGlassPrefs.setEnabled(this.getUIContext().getHostContext() as common.Context, enabled);
+  }
+
+  // 磨砂强度:每帧只更新内存 + AppStorage 镜像(两处 FAB 即时跟手),松手/点按才落盘,
+  // 避免拖动过程中每帧 store.flush() 卡顿。
+  private setFabGlassRadius(value: number, done: boolean): void {
+    FabGlassPrefs.setRadius(value);
+    if (done) {
+      FabGlassPrefs.flushRadius(this.getUIContext().getHostContext() as common.Context);
+    }
   }
 
   // ==================== 辅助 ====================

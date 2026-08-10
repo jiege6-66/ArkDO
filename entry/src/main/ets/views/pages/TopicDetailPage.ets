@@ -70,7 +70,11 @@ import {
   buildImmersiveFloatingActionButtonModifier,
   IMMERSIVE_ACTION_BAR_BLUR_DISABLED
 } from '../../common/ui/ImmersiveActionBarStyle';
-import { FAB_GLASS_ENABLED_STORAGE_KEY } from '../../common/ui/FabGlassPrefs';
+import {
+  FAB_GLASS_ENABLED_STORAGE_KEY,
+  FAB_GLASS_RADIUS_DEFAULT,
+  FAB_GLASS_RADIUS_STORAGE_KEY
+} from '../../common/ui/FabGlassPrefs';
 import {
   SMART_REACH_ANIMATION_DURATION,
   SMART_REACH_LEFT_HAND_STORAGE_KEY,
@@ -121,6 +125,8 @@ export struct TopicDetailPage {
   private smartReachLeftHanded: boolean = false;
   // 「悬浮按钮玻璃效果」开关(设置页-外观):开⇒模糊材质背板;关⇒当前透明样式。默认关。
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private fabGlassEnabled: boolean = false;
+  // 磨砂半径(设置页-外观的滑块)。与首页 FAB 共用同一个键,两处始终一致。
+  @StorageProp(FAB_GLASS_RADIUS_STORAGE_KEY) private fabGlassRadius: number = FAB_GLASS_RADIUS_DEFAULT;
   @State private replyFabAlignRules: AlignRuleOption = smartReachBottomAlignRules(false);
   @State @Watch('syncTopicBookmarkFromDetail') private detail: TopicDetail | undefined = undefined;
   // 标题书签图标的独立驱动态:detail 是 interface 的 @State,改字段不触发重渲染,故用基元 @State 镜像。
@@ -1905,7 +1911,7 @@ export struct TopicDetailPage {
       // 背景恒透明:玻璃态的磨砂底由 buttonModifier 里的 backgroundBlurStyle 组件材质提供,与首页 FAB 统一。
       backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
       // 始终挂载 modifier(内部按开关施加/复位),避免关闭时材质/描边残留。
-      buttonModifier: buildImmersiveFloatingActionButtonModifier(this.fabGlassEnabled),
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(this.fabGlassEnabled, this.fabGlassRadius),
       iconSize: LengthMetrics.vp(22),
       // 品牌蓝仅用于图标，仍能明确表达“回复”这个主操作。
       iconFillColor: ColorMetrics.resourceColor(REPLY_BLUE),

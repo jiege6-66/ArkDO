@@ -5,7 +5,11 @@ import {
   buildImmersiveFloatingActionButtonModifier,
   IMMERSIVE_ACTION_BAR_BLUR_DISABLED
 } from '../../common/ui/ImmersiveActionBarStyle';
-import { FAB_GLASS_ENABLED_STORAGE_KEY } from '../../common/ui/FabGlassPrefs';
+import {
+  FAB_GLASS_ENABLED_STORAGE_KEY,
+  FAB_GLASS_RADIUS_DEFAULT,
+  FAB_GLASS_RADIUS_STORAGE_KEY
+} from '../../common/ui/FabGlassPrefs';
 
 @Component
 export struct HomeFab {
@@ -13,6 +17,8 @@ export struct HomeFab {
   @Prop showBackToTop: boolean = false;
   // 「悬浮按钮玻璃效果」开关(设置页-外观):开⇒模糊材质背板;关⇒当前透明样式。默认关。
   @StorageProp(FAB_GLASS_ENABLED_STORAGE_KEY) private glassEnabled: boolean = false;
+  // 磨砂半径(设置页-外观的滑块)。modifier 每次 build 都是新实例,所以这个值一变就会重建生效。
+  @StorageProp(FAB_GLASS_RADIUS_STORAGE_KEY) private glassRadius: number = FAB_GLASS_RADIUS_DEFAULT;
   onCompose: () => void = () => {};
   onBackToTop: () => void = () => {};
 
@@ -34,7 +40,7 @@ export struct HomeFab {
       // 背景恒透明:玻璃态的磨砂底由 buttonModifier 里的 backgroundBlurStyle 组件材质提供,不再叠主题底色。
       backgroundColor: ColorMetrics.resourceColor(Color.Transparent),
       // 始终挂载 modifier(内部按开关施加/复位),避免关闭时材质/描边残留。
-      buttonModifier: buildImmersiveFloatingActionButtonModifier(this.glassEnabled),
+      buttonModifier: buildImmersiveFloatingActionButtonModifier(this.glassEnabled, this.glassRadius),
       iconSize: LengthMetrics.vp(22),
       iconFillColor: ColorMetrics.resourceColor(this.showBackToTop ? $r('app.color.fab_top_fg') : $r('app.color.fab_compose_bg')),
       baseIconSymbolGlyphModifier: this.symbolModifier($r('sys.symbol.square_and_pencil'), $r('app.color.fab_compose_bg')),

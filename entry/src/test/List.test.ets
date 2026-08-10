@@ -24,6 +24,7 @@ import notificationMarkReadTest from './NotificationMarkRead.test';
 import htmlLexerTest from './HtmlLexer.test';
 import profileFormatTest from './ProfileFormat.test';
 import immersiveLightMaterialTest from './ImmersiveLightMaterial.test';
+import fabGlassTest from './FabGlass.test';
 import floatingActionLayoutTest from './FloatingActionLayout.test';
 import immersiveTitleBarLayoutTest from './ImmersiveTitleBarLayout.test';
 import emojiCatalogTest from './EmojiCatalog.test';
@@ -70,6 +71,7 @@ export default function testsuite() {
   htmlLexerTest();
   profileFormatTest();
   immersiveLightMaterialTest();
+  fabGlassTest();
   floatingActionLayoutTest();
   immersiveTitleBarLayoutTest();
   emojiCatalogTest();
