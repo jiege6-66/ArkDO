@@ -8,6 +8,7 @@ import { FeedKey } from '../site/FeedPrefs';
 import { buildTopicListPath, TopicListQuery } from './TopicListQuery';
 import { buildLinkClicks } from './LinkClicks';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
+import { discourseErrorMessage } from '../network/DiscourseErrors';
 import { CreatePostResponse, CreateReplyPayload, CreateTopicPayload, DiscourseAcceptedAnswer,
   DiscourseBadgeDef, DiscourseBookmarkDeleteResponse, DiscourseBookmarkResponse, DiscourseBoost,
   DiscourseBoostUser, DiscourseGroupedSearchResult, DiscourseLatestResponse, DiscoursePendingPost,
@@ -533,7 +534,7 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<CreateReplyOutcome>(response);
+      return this.postFailure<CreateReplyOutcome>(response);
     }
     if (response.data === undefined) {
       return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应为空。');
@@ -607,7 +608,7 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<CreateTopicOutcome>(response);
+      return this.postFailure<CreateTopicOutcome>(response);
     }
     if (response.data === undefined) {
       return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应为空。');
@@ -1468,5 +1469,26 @@ export class TopicService {
 
   private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
     return unexpectedResponse<T>(statusCode, challengeState, message);
+  }
+
+  /**
+   * POST /posts 失败时的错误构造:优先把 Discourse 自己给的原因带上来。
+   *
+   * 发帖被拒绝几乎都是业务校验(附件超额、链接太多、正文太短、发得太频繁),Discourse 在
+   * 422 的 body 里回 `{"errors":["…"]}`,文案已按站点语言本地化。原先一律走 forwardFailure,
+   * 上层只能显示「站点返回 HTTP 422」—— 用户根本不知道自己踩了哪条,只会反复重试。
+   *
+   * 拿不到原因(网络失败、CF 挑战、HTML 错误页)时原样回落到 forwardFailure,不动既有语义:
+   * 挑战态尤其不能覆盖,上层要靠 error.code 判断该不该拉过盾流程。
+   */
+  private postFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
+    if (response.challengeState !== ChallengeState.NONE) {
+      return forwardFailure<T>(response);
+    }
+    const reason: string = discourseErrorMessage(response);
+    if (reason.length === 0) {
+      return forwardFailure<T>(response);
+    }
+    return unexpectedResponse<T>(response.statusCode, response.challengeState, reason);
   }
 }

@@ -940,6 +940,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
         success: false,
         statusCode: statusCode,
         challengeState: ChallengeState.NONE,
+        // 失败态也把 body 带上。Discourse 的 422 会在 body 里给 {"errors":["新用户不能上传附件"]}
+        // 这类**能直接展示给用户**的原因;原先这里丢掉 body,上层只能显示「站点返回 HTTP 422」,
+        // 用户完全不知道自己踩了哪条规则。success 仍为 false,既有调用方不会误读 data。
+        data: body,
         error: {
           code: NetworkErrorCode.UNEXPECTED_RESPONSE,
           message: `站点返回 HTTP ${statusCode}。`,
