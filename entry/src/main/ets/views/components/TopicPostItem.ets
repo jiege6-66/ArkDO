@@ -456,19 +456,23 @@ export struct TopicPostItem {
             Row({ space: 4 }) {
               Text(`${this.post.replyCount}`)
                 .fontSize(16)
-                .fontColor($r('app.color.icon_muted'))
+                // 这枚胶囊有自己的灰底(折叠 #E6E8EB / 展开 #D9DDE2),icon_muted 打上去浅色下只有
+                // 1.53:1、展开态 1.38:1(应用市场无障碍检测卡的就是这里)。单列 post_reply_control_fg:
+                // 浅 #575D66 → 5.41 / 4.87,深 #9DA3AE → 5.98 / 4.94,两种底色两种模式都过 4.5:1。
+                .fontColor($r('app.color.post_reply_control_fg'))
               // 加载中在按钮上就地转圈(替换 chevron);加载成功后才展开列表。
               // chevron 用结构化 if/else 分别渲染:ArkUI 对子组件对象类型属性的 diff 更新不可靠,
               // 若复用同一 FaIconView 只换 icon 属性,收起时箭头不会翻回向下(见 objectlink-state-source)。
+              // 箭头/转圈与数字同属一个控件,配色跟着数字走(同一枚灰底上也就一并满足对比度)。
               if (this.repliesLoading) {
                 LoadingProgress()
                   .width(14)
                   .height(14)
-                  .color($r('app.color.icon_muted'))
+                  .color($r('app.color.post_reply_control_fg'))
               } else if (this.repliesExpanded) {
-                FaIconView({ icon: this.faIcon('chevron-up'), color: $r('app.color.icon_muted'), iconSize: 14 })
+                FaIconView({ icon: this.faIcon('chevron-up'), color: $r('app.color.post_reply_control_fg'), iconSize: 14 })
               } else {
-                FaIconView({ icon: this.faIcon('chevron-down'), color: $r('app.color.icon_muted'), iconSize: 14 })
+                FaIconView({ icon: this.faIcon('chevron-down'), color: $r('app.color.post_reply_control_fg'), iconSize: 14 })
               }
             }
             .alignItems(VerticalAlign.Center)

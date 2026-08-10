@@ -133,6 +133,10 @@
       "value": "#8A9099"
     },
     {
+      "name": "chip_disabled_text",
+      "value": "#9096A0"
+    },
+    {
       "name": "text_body",
       "value": "#C9CED7"
     },
@@ -143,6 +147,10 @@
     {
       "name": "icon_muted",
       "value": "#5C626B"
+    },
+    {
+      "name": "post_reply_control_fg",
+      "value": "#9DA3AE"
     },
     {
       "name": "reaction_count_fg",

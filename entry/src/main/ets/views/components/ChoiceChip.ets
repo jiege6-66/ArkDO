@@ -7,10 +7,14 @@ import { FaIconDefinition, FaIconView, getFaIcon } from './FaIcon';
  * 规格(标准档 / compact 档):
  *  · 字号 14 / 13,行高 32 / 30,左右内边距 14 / 12,圆角 = 高度一半(正圆胶囊)
  *  · 选中 brand + info_soft_bg + Medium;未选 text_body + surface_muted + Regular
- *  · 禁用 text_tertiary + surface_muted + 整体 opacity 0.6,且不响应点击
+ *  · 禁用 chip_disabled_text + surface_muted(不压 opacity),且不响应点击
  *
  * 选中态 brand on info_soft_bg 的对比度亮/暗色分别是 4.54:1 与 4.52:1,刚好压在 WCAG AA(4.5:1)线上。
  * 14 号字是正文字号必须过 AA —— 后面若有人觉得选中色扎眼想调浅,会直接掉出合规区间,别改。
+ *
+ * 禁用态别再用「text_tertiary + 整体 opacity 0.6」那套:opacity 会把文字和底色一起往页面底色上拉,
+ * 亮色下实测只剩 1.5:1(应用市场上架的无障碍检测就是卡在这两枚未登录 chip 上)。改成不压透明度、
+ * 单靠一个本身就达标的灰(亮 4.9:1 / 暗 4.9:1,均相对 surface_muted 底)来表达「不可选」。
  */
 @Component
 export struct ChoiceChip {
@@ -70,7 +74,8 @@ export struct ChoiceChip {
     .margin({ right: 8, bottom: 8 })
     .backgroundColor(this.chipBackground())
     .borderRadius(this.compact ? 15 : 16)
-    .opacity(this.chipDisabled ? 0.6 : (this.pressed ? 0.7 : 1))
+    // 禁用态不再整体压暗:压暗的是「文字 + 底色」一起,对比度反而掉到 1.5:1。不可选由文字色表达。
+    .opacity(this.pressed ? 0.7 : 1)
     .alignItems(VerticalAlign.Center)
     .onTouch((event: TouchEvent) => {
       if (this.chipDisabled) {
@@ -107,7 +112,8 @@ export struct ChoiceChip {
 
   private chipForeground(): Resource {
     if (this.chipDisabled) {
-      return $r('app.color.text_tertiary');
+      // 专用灰:比正文浅到一眼看出「不可选」,又满足正文 4.5:1(在 surface_muted 底上亮 4.9 / 暗 4.9)。
+      return $r('app.color.chip_disabled_text');
     }
     return this.isHighlighted() ? $r('app.color.brand') : $r('app.color.text_body');
   }
