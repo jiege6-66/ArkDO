@@ -1044,6 +1044,10 @@ export struct RootTabPage {
           },
           onOpenWeb: (url: string, title?: string) => {
             this.openWebPage(url, title);
+          },
+          // 简介/网站里的链接:可能是站内帖子、他人主页,也可能是外站,交给统一路由判断。
+          onOpenLink: (url: string) => {
+            this.handleOpenLink(url);
           }
         })
       }

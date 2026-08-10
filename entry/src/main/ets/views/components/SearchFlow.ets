@@ -145,6 +145,10 @@ export struct SearchFlow {
           },
           onOpenWeb: (url: string, title?: string) => {
             this.navPathStack.pushPath(new NavPathInfo(SEARCH_FLOW_WEB, buildWebRouteParam(url, title)));
+          },
+          // 简介/网站里的链接:可能是站内帖子、他人主页,也可能是外站,交给搜索栈内的统一路由。
+          onOpenLink: (url: string) => {
+            this.handleOpenLink(url);
           }
         })
       }

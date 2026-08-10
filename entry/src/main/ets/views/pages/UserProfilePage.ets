@@ -21,6 +21,7 @@ import {
 } from '../../models/UserProfile';
 import { ArkWebNetworkBridge } from '../../services/network/ArkWebNetworkBridge';
 import { NetworkResult } from '../../services/network/NetworkTypes';
+import { RichInlineNode, RichInlineType } from '../../services/content/RichContentTypes';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
 import { UserProfileCache } from '../../services/user/UserProfileCache';
 import { UserProfileService } from '../../services/user/UserProfileService';
@@ -89,6 +90,8 @@ export struct UserProfilePage {
   // 互动圈头像可点:递归进目标用户的本页(带上 id 以免头像形状先圆后方闪)。
   onOpenUser: (username: string, displayName: string, avatarTemplate: string, userId: number) => void = () => {};
   onOpenWeb: (url: string, title?: string) => void = () => {};
+  // 简介/网站里的链接:交给宿主页经 LinkRouter 判断跳原生页还是 WebView(与正文链接同一入口)。
+  onOpenLink: (url: string) => void = () => {};
 
   @State private profileDetail?: UserProfileDetail = undefined;
   @State private summary?: UserSummary = undefined;
@@ -509,15 +512,39 @@ export struct UserProfilePage {
       .padding({ left: CARD_PADDING, right: CARD_PADDING, top: CARD_PADDING, bottom: 6 })
       .alignItems(VerticalAlign.Center)
 
-      if (this.getBio().length > 0) {
-        Text(this.getBio())
-          .fontSize(13.5)
-          .fontColor($r('app.color.text_body'))
-          .lineHeight(20)
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 2, bottom: 6 })
+      if (this.hasBio()) {
+        Text() {
+          ForEach(this.getBioInlines(), (token: RichInlineNode) => {
+            this.BioToken(token)
+          }, (token: RichInlineNode, index: number) => `${index}-${token.type}-${token.text}`)
+        }
+        .fontSize(13.5)
+        .fontColor($r('app.color.text_body'))
+        .lineHeight(20)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .padding({ left: CARD_PADDING, right: CARD_PADDING, top: 2, bottom: 6 })
+      }
+
+      // 资料设置里的「网站」:官网用户卡片单独一行,App 此前整个字段都没取。
+      if (this.getWebsiteName().length > 0) {
+        Row() {
+          FaIconView({ icon: this.faIcon('link'), iconSize: 12, color: $r('app.color.brand') })
+          Text(this.getWebsiteName())
+            .fontSize(13)
+            .fontColor($r('app.color.brand'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ left: 6 })
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: CARD_PADDING, right: CARD_PADDING, bottom: 6 })
+        .onClick(() => {
+          this.openProfileLink(this.profileDetail?.website ?? '');
+        })
       }
 
       // meta 行固定高度:资料回来前后卡片不跳动。
@@ -553,6 +580,32 @@ export struct UserProfilePage {
       }
     }
     .cardStyle()
+  }
+
+  // 简介里的一个行内节点。链接渲染成可点蓝字,表情走 ImageSpan;
+  // 换行退化成空格——身份区只给两行,真换行会把第二行整行占掉。
+  @Builder
+  private BioToken(token: RichInlineNode) {
+    if (token.type === RichInlineType.IMAGE && token.src && token.src.length > 0) {
+      ImageSpan(token.src)
+        .width(16)
+        .height(16)
+        .margin({ left: 1, right: 1 })
+        .verticalAlign(ImageSpanAlignment.CENTER)
+    } else if (token.type === RichInlineType.LINE_BREAK) {
+      Span(' ')
+    } else if (token.type === RichInlineType.LINK && token.href && token.href.length > 0) {
+      Span(token.text)
+        .fontColor($r('app.color.brand'))
+        .onClick(() => {
+          this.openProfileLink(token.href as string);
+        })
+    } else {
+      Span(token.text)
+        .fontColor($r('app.color.text_body'))
+        .fontWeight(token.bold ? FontWeight.Bold : FontWeight.Normal)
+        .fontStyle(token.italic ? FontStyle.Italic : FontStyle.Normal)
+    }
   }
 
   @Builder
@@ -1360,6 +1413,39 @@ export struct UserProfilePage {
   private getBio(): string {
     const bio: string | undefined = this.profileDetail?.bioExcerpt;
     return bio && bio.length > 0 ? bio : '';
+  }
+
+  private hasBio(): boolean {
+    return this.getBioInlines().length > 0;
+  }
+
+  // 简介的行内节点。缓存里的老资料只有纯文本(没有 bioInlines),退回单个文本节点。
+  private getBioInlines(): RichInlineNode[] {
+    const inlines: RichInlineNode[] | undefined = this.profileDetail?.bioInlines;
+    if (inlines && inlines.length > 0) {
+      return inlines;
+    }
+    const bio: string = this.getBio();
+    if (bio.length === 0) {
+      return [];
+    }
+    const fallback: RichInlineNode = { type: RichInlineType.TEXT, text: bio };
+    return [fallback];
+  }
+
+  private getWebsiteName(): string {
+    const name: string | undefined = this.profileDetail?.websiteName;
+    return name && name.length > 0 ? name : '';
+  }
+
+  // 简介 / 网站里的链接:上抛给统一路由(站内帖子 → 原生详情页,/u/x → 他人主页,
+  // /uploads/ → 原生下载,其余 → 内置 WebView),和正文链接同一条通路。
+  private openProfileLink(url: string): void {
+    if (url.length === 0) {
+      return;
+    }
+    Log.i(`${LOG_TAG} profile link tapped`);
+    this.onOpenLink(url);
   }
 
   // 信任等级标签:优先站点头衔(user.title),否则用 TL 默认名。与「我的」页同格式。

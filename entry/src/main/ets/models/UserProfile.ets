@@ -2,6 +2,7 @@
 // /u/{username}.json(资料)、/u/{username}/summary.json(统计+徽章)、/user_actions.json(最近活动)。
 import { TopicTag } from './Topic';
 import { User } from './User';
+import { RichInlineNode } from '../services/content/RichContentTypes';
 
 export interface UserProfileDetail {
   id: number;
@@ -22,8 +23,15 @@ export interface UserProfileDetail {
   flairBgColor?: string;
   flairColor?: string;
   flairName?: string;
-  // 个人简介纯文本(bio_excerpt);bio_cooked 是 HTML,身份区只要两行摘要故取前者。
+  // 个人简介纯文本(bio_excerpt):度量/兜底用。
   bioExcerpt?: string;
+  // 简介的行内节点(同一段 bio_excerpt 解析而来)。简介里的 <a> 是用户自己在资料里设的链接,
+  // 官网卡片渲染成蓝色可点;只留纯文本会把它抹成灰字,故保留 href 交给身份区渲染成 Span。
+  bioInlines?: RichInlineNode[];
+  // 资料设置里的「网站」(user_profile.website)。websiteName 是服务端算好的展示名(host+path),
+  // 缺省时退回完整 url。两者都属 untrusted_attributes:新号/低信任用户服务端不下发。
+  website?: string;
+  websiteName?: string;
   // discourse-follow 插件(站点已启用)。canFollow 决定关注按钮显不显示——
   // 看自己、或对方 allow_people_to_follow_me=false 时服务端给 false。
   // isFollowed 是当前登录者是否已关注 TA,决定按钮文案与配色。

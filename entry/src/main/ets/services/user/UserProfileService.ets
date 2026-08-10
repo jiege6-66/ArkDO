@@ -14,6 +14,8 @@ import {
 } from '../../models/UserProfile';
 import { User } from '../../models/User';
 import { HtmlText } from '../content/HtmlText';
+import { hasVisibleInlines, parseInlines } from '../content/InlineHtmlParser';
+import { RichInlineNode } from '../content/RichContentTypes';
 import { ChallengeState, JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { forwardFailure, unexpectedResponse } from '../network/NetworkResults';
 
@@ -51,8 +53,11 @@ interface DiscourseUserDetail {
   flair_bg_color?: string | null;
   flair_color?: string | null;
   flair_name?: string | null;
-  // bio_cooked 是 HTML,身份区只要两行摘要,取纯文本的 bio_excerpt。
+  // bio_excerpt 是带标签的 HTML(<a>/<img class="emoji">/<br>),按行内节点解析,别拍平成纯文本。
   bio_excerpt?: string | null;
+  // 资料设置里的「网站」:website 是完整 url,website_name 是服务端算的展示名(host+path)。
+  website?: string | null;
+  website_name?: string | null;
   // discourse-follow 插件字段(实测 /u/kevin.json 全部返回)。
   can_follow?: boolean;
   is_followed?: boolean;
@@ -366,11 +371,23 @@ export class UserProfileService {
         detail.statusEmoji = sourceUser.status.emoji;
       }
       if (sourceUser.bio_excerpt && sourceUser.bio_excerpt.length > 0) {
-        // bio_excerpt 实测带 HTML 实体与 <a> 标签,身份区是纯 Text,统一转纯文本。
+        // 纯文本仍留着:老缓存回灌、以及行内节点解析不出东西时的兜底。
         const bio: string = HtmlText.toPlainText(sourceUser.bio_excerpt);
         if (bio.length > 0) {
           detail.bioExcerpt = bio;
         }
+        // 简介里的 <a> 是用户在资料里设的链接(官网卡片是蓝色可点的),拍平成纯文本就丢了 href。
+        // 复用正文那套行内解析:链接/表情图/换行都能还原,href 也已 resolveUrl 成绝对地址。
+        const inlines: RichInlineNode[] = parseInlines(sourceUser.bio_excerpt);
+        if (hasVisibleInlines(inlines)) {
+          detail.bioInlines = inlines;
+        }
+      }
+      const website: string = sourceUser.website ? sourceUser.website.trim() : '';
+      if (website.length > 0) {
+        detail.website = website;
+        const websiteName: string = sourceUser.website_name ? sourceUser.website_name.trim() : '';
+        detail.websiteName = websiteName.length > 0 ? websiteName : website;
       }
       return {
         success: true,
