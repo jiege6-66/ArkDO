@@ -13,6 +13,7 @@ import { Log } from '../../services/logging/Log';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { JsonNetworkClient } from '../../services/network/NetworkTypes';
 import { MAX_PICK_FILES, UploadedFile, UploadOutcome, UploadService } from '../../services/upload/UploadService';
+import { VideoTranscodeHooks, VideoTranscodePlan } from '../../services/upload/VideoTranscoder';
 import { SiteSettingsService, SiteUploadSettings } from '../../services/site/SiteSettingsService';
 import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { LoginGate } from '../../services/session/LoginGate';
@@ -189,6 +190,10 @@ export struct ComposerPage {
   @State private uploadDone: number = 0;
   // 浮层文案里的名词(图片/文件/视频),按本批传的是什么变。
   @State private uploadLabel: string = '图片';
+  // 视频压缩进度:-1=没在压;0~100=百分比。压缩可能几十秒,必须给真进度和取消口子。
+  @State private compressPercent: number = -1;
+  // 第几遍压(超了会降档重来)。>1 时显示出来,否则进度条倒回 0 会像是卡住了。
+  @State private compressPass: number = 1;
   // 附件按钮是否显示:站点允许至少一个非图片扩展名才有意义。设置拉回来前先按 false,
   // 避免闪现一个点开发现空空如也的选择器。
   @State private canUploadAttachment: boolean = false;
@@ -513,6 +518,18 @@ export struct ComposerPage {
     }, 0);
   }
 
+  // 上传中浮层的一行字。压缩阶段优先(它才是耗时的那段),否则显示上传进度。
+  private overlayLabel(): string {
+    if (this.compressPercent >= 0) {
+      const round: string = this.compressPass > 1 ? `（第 ${this.compressPass} 遍）` : '';
+      return `视频压缩中${round} ${Math.round(this.compressPercent)}%`;
+    }
+    if (this.uploadTotal > 1) {
+      return `${this.uploadLabel}上传中 ${this.uploadDone}/${this.uploadTotal}`;
+    }
+    return `${this.uploadLabel}上传中…`;
+  }
+
   // 拉一次站点上传设置,决定附件按钮显不显示。失败时 SiteSettingsService 回落到 Discourse
   // 出厂默认(纯图片白名单),附件按钮自然不出现,与「这个站没开附件」的表现一致。
   private async loadUploadSettings(): Promise<void> {
@@ -578,8 +595,26 @@ export struct ComposerPage {
       return;
     }
     const uris: string[] = await service.pickVideos(1);
+    // 超过站点上限时 UploadService 会先压缩,这两个钩子把过程显示出来:
+    // onPlan 在探测完、真正开压前来一次(此时才知道要不要预警画质),onProgress 给百分比。
+    const hooks: VideoTranscodeHooks = {
+      onPlan: (plan: VideoTranscodePlan): void => {
+        this.compressPercent = 0;
+        this.compressPass = 1;
+        if (plan.willDegrade) {
+          this.showToast('视频较长，压缩后画质会明显下降');
+        }
+      },
+      onProgress: (percent: number, pass: number): void => {
+        this.compressPercent = percent;
+        this.compressPass = pass;
+      },
+      onCompressed: (): void => {
+        this.compressPercent = -1;
+      }
+    };
     await this.runUploadBatch(uris, '视频',
-      (uri: string): Promise<UploadOutcome> => service.uploadMediaUri(uri),
+      (uri: string): Promise<UploadOutcome> => service.uploadMediaUri(uri, hooks),
       (file: UploadedFile, uri: string): string => {
         // type 要写**真实**媒体类型而不是 .xz 的类型——播放器认这个属性,伪装才生效。
         // 服务端回显的 original_filename 已经是 .xz 了,只能从原始 uri 上取真后缀。
@@ -621,14 +656,23 @@ export struct ComposerPage {
         const caret: number = head.length + snippet.length;
         this.selStart = caret;
         this.selEnd = caret;
-      } else if (firstError.length === 0) {
-        firstError = outcome.error !== undefined ? outcome.error : `${label}上传失败`;
+      } else {
+        const reason: string = outcome.error !== undefined ? outcome.error : `${label}上传失败`;
+        // 空串是「用户自己取消的」约定信号:不提示,也不再继续这一批。
+        if (reason.length === 0) {
+          break;
+        }
+        if (firstError.length === 0) {
+          firstError = reason;
+        }
       }
       this.uploadDone = i + 1;
+      this.compressPercent = -1;
     }
     this.isUploading = false;
     this.uploadTotal = 0;
     this.uploadDone = 0;
+    this.compressPercent = -1;
     if (firstError.length > 0) {
       this.showToast(firstError);
     }
@@ -784,16 +828,28 @@ export struct ComposerPage {
       // 打乱插入位置(片段在 await 后按 selStart 插入)。多个时显示进度。
       if (this.isUploading) {
         Column() {
-          Row({ space: 10 }) {
-            LoadingProgress()
-              .width(22)
-              .height(22)
-              .color($r('app.color.brand'))
-            Text(this.uploadTotal > 1
-              ? `${this.uploadLabel}上传中 ${this.uploadDone}/${this.uploadTotal}`
-              : `${this.uploadLabel}上传中…`)
-              .fontSize(15)
-              .fontColor($r('app.color.text_primary'))
+          Column({ space: 12 }) {
+            Row({ space: 10 }) {
+              LoadingProgress()
+                .width(22)
+                .height(22)
+                .color($r('app.color.brand'))
+              Text(this.overlayLabel())
+                .fontSize(15)
+                .fontColor($r('app.color.text_primary'))
+            }
+            // 压缩阶段才给取消:一段 1080p 压下来可能几十秒,不给口子只能干等。
+            // 上传阶段不给——请求已经发出去了,取消也收不回来。
+            if (this.compressPercent >= 0) {
+              Button('取消', { type: ButtonType.Normal })
+                .fontSize(14)
+                .fontColor($r('app.color.text_secondary'))
+                .backgroundColor(Color.Transparent)
+                .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+                .onClick(() => {
+                  this.uploadService?.cancelTranscode();
+                })
+            }
           }
           .padding({ left: 20, right: 20, top: 14, bottom: 14 })
           .backgroundColor($r('app.color.surface_card'))

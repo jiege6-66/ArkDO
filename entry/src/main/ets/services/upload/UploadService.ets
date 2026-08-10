@@ -9,6 +9,7 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { discourseErrorMessage } from '../network/DiscourseErrors';
 import { IMAGE_EXTENSIONS, SiteSettingsService, SiteUploadSettings } from '../site/SiteSettingsService';
+import { VideoTranscodeHooks, VideoTranscodeResult, VideoTranscoder } from './VideoTranscoder';
 
 // POST /uploads/lookup-urls 的响应项:把 upload:// 短码换成真实 CDN 直链。
 interface DiscourseLookupUrlItem {
@@ -140,6 +141,8 @@ export class UploadService {
   private base64Helper: util.Base64Helper = new util.Base64Helper();
   // short_url → 真实 url。上传成功即登记,预览渲染时据此替换短码。
   private shortUrlToRealUrl: Map<string, string> = new Map();
+  // 正在跑的视频压缩,供上层取消。
+  private activeTranscoder?: VideoTranscoder;
 
   // context 只给 DocumentViewPicker 用(它要 UIAbilityContext);不传则「选文件」不可用,
   // 选图/选视频走相册 picker,不需要它。
@@ -256,12 +259,81 @@ export class UploadService {
   /**
    * 上传音视频(linux.do 专用路径)。改名成 .xz 绕过白名单,详见 DISGUISE_EXTENSION。
    * 走的是附件限额(max_attachment_size_kb),因为 .xz 不属于 Discourse 认定的图片扩展名。
+   *
+   * 超限时先压缩:手机实拍 1080p 约 17 Mbps,随便一段都远超 4 MB,不压等于这功能没法用。
+   * 压缩产物落沙箱,上传完(无论成败)一定删掉。见 VideoTranscoder。
    */
-  async uploadMediaUri(uri: string): Promise<UploadOutcome> {
+  async uploadMediaUri(uri: string, hooks?: VideoTranscodeHooks): Promise<UploadOutcome> {
     const settings: SiteUploadSettings = await this.settings();
+    const limitKb: number = settings.maxAttachmentSizeKb;
+    const limitBytes: number = UploadService.effectiveLimitBytes(limitKb);
     const originalName: string = UploadService.fileNameFromUri(uri);
     const disguised: string = `${UploadService.baseNameOf(originalName)}.${DISGUISE_EXTENSION}`;
-    return this.uploadRawFile(uri, disguised, DISGUISE_MIME, settings.maxAttachmentSizeKb, '视频');
+
+    const originalSize: number = UploadService.sizeOf(uri);
+    if (originalSize < 0) {
+      return { error: '视频读取失败' };
+    }
+    // 已经达标就别再编一遍:重编码是纯画质净赔。
+    if (originalSize <= limitBytes) {
+      return this.uploadRawFile(uri, disguised, DISGUISE_MIME, limitKb, '视频');
+    }
+
+    const context: common.Context | undefined = this.context;
+    if (!context) {
+      return { error: `视频 ${UploadService.humanSize(originalSize)} 超过本站上限 ${UploadService.humanSize(limitBytes)}` };
+    }
+
+    const transcoder: VideoTranscoder = new VideoTranscoder(context);
+    this.activeTranscoder = transcoder;
+    let compressed: VideoTranscodeResult;
+    try {
+      compressed = await transcoder.fit(uri, limitBytes, hooks);
+    } finally {
+      this.activeTranscoder = undefined;
+    }
+    const producedPath: string | undefined = compressed.path;
+    if (producedPath === undefined) {
+      // error 为空串 = 用户主动取消,上层不该再弹提示。
+      return { error: compressed.error !== undefined ? compressed.error : '视频压缩失败' };
+    }
+
+    // 让上层把浮层从「压缩中」切到「上传中」——压缩已经结束了,再显示 100% 是误导。
+    if (hooks?.onCompressed) {
+      hooks.onCompressed();
+    }
+    try {
+      return await this.uploadRawFile(producedPath, disguised, DISGUISE_MIME, limitKb, '视频');
+    } finally {
+      VideoTranscoder.discard(producedPath);
+    }
+  }
+
+  /** 中断正在进行的视频压缩。没有在压时是空操作。 */
+  async cancelTranscode(): Promise<void> {
+    const transcoder: VideoTranscoder | undefined = this.activeTranscoder;
+    if (transcoder) {
+      await transcoder.cancel();
+    }
+  }
+
+  /** 给定站点上限(KB)下,本次实际生效的字节上限。站点上限与客户端硬上限取小。 */
+  static effectiveLimitBytes(siteLimitKb: number): number {
+    return Math.min(siteLimitKb * 1024, CLIENT_MAX_UPLOAD_BYTES);
+  }
+
+  // 文件字节数;读不到返回 -1。
+  private static sizeOf(uri: string): number {
+    try {
+      const file: fs.File = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      try {
+        return fs.statSync(file.fd).size;
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (error) {
+      return -1;
+    }
   }
 
   // 原样读字节 → 查体积 → 上传。三条入口里附件与音视频共用。
@@ -494,7 +566,7 @@ export class UploadService {
   // 超限返回可展示的文案,没超返回空串。实际上限取「站点上限」与「客户端硬上限」的较小者。
   private static checkSize(bytes: number, siteLimitKb: number, kindLabel: string): string {
     const siteLimitBytes: number = siteLimitKb * 1024;
-    const effective: number = Math.min(siteLimitBytes, CLIENT_MAX_UPLOAD_BYTES);
+    const effective: number = UploadService.effectiveLimitBytes(siteLimitKb);
     if (bytes <= effective) {
       return '';
     }
