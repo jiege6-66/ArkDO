@@ -50,4 +50,20 @@ export class SiteCapabilities {
   static get tagIcons(): boolean {
     return CurrentSite.isLinuxDo;
   }
+
+  /**
+   * 编辑器的「上传音视频」入口。
+   *
+   * linux.do 的 authorized_extensions 里没有 mp4/mp3,站方是用一个主题组件绕过去的:
+   * 把视频改名成 .xz 传上去(Discourse 判白名单只看扩展名),再插一个写死
+   * type="video/mp4" 的裸 <video> 标签。我们跟着这套约定做,才能与网页端互通。
+   *
+   * ## 为什么不做成能力探测
+   * 「白名单里没有 mp4 但有 xz」这个条件在别的站上也可能成立,但那些站的管理员**并没有**
+   * 同意用户绕过限制 —— 站方装了那个主题组件,才等于表态默许。我们无从探测「装没装组件」,
+   * 所以只能按域名认。把绕过手法推广到所有站,是替别人的管理员做决定。
+   */
+  static get mediaUpload(): boolean {
+    return CurrentSite.isLinuxDo;
+  }
 }

@@ -12,10 +12,13 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { JsonNetworkClient } from '../../services/network/NetworkTypes';
-import { UploadService, UploadedImage } from '../../services/upload/UploadService';
+import { MAX_PICK_FILES, UploadedFile, UploadOutcome, UploadService } from '../../services/upload/UploadService';
+import { SiteSettingsService, SiteUploadSettings } from '../../services/site/SiteSettingsService';
+import { SiteCapabilities } from '../../services/site/SiteCapabilities';
+import { LoginGate } from '../../services/session/LoginGate';
 import { MarkdownRenderService } from '../../services/content/MarkdownRenderService';
 import { EmojiPreviewHtml } from '../../services/content/EmojiPreviewHtml';
-import { MarkdownToolbar } from '../components/MarkdownToolbar';
+import { MarkdownToolbar, ToolbarSpecial } from '../components/MarkdownToolbar';
 import { getEmojiUrl } from '../components/EmojiUrlRegistry';
 import { TopicCategory } from '../../models/Topic';
 import { CategoryIndex } from '../../services/site/CategoryIndex';
@@ -83,6 +86,16 @@ export struct ComposerPage {
   @StorageProp(SYS_BOTTOM_INSET_KEY) private sysBottomInset: number = 0;
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
+  /**
+   * 预览里音视频的取流委托。必须由上层注入,不能自己从 bridge 拿:
+   * downloadMedia 挂在具体的 ArkWebNetworkBridge 上,而本页只持有 JsonNetworkClient 接口
+   * ——那个接口有 9 个测试 FakeBridge 实现,为一次 UI 接线往接口上加方法不划算。
+   *
+   * 不接的后果:站内音视频(/uploads/… 被 CF 挡且 302 到跨源 CDN,只有宿主 webview 的下载
+   * 委托能拿到字节,见 MediaSource)在预览里一律播不了,而发出去之后在详情页却是好的
+   * —— 差别只在详情页接了这个回调。
+   */
+  onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   // 顶栏标题(回复/发帖)。
   headerTitle: string = '回复';
   placeholder: string = '写下你的回复…';
@@ -171,9 +184,14 @@ export struct ComposerPage {
   @State private isPreviewLoading: boolean = false;
   @State private isSubmitting: boolean = false;
   @State private isUploading: boolean = false;
-  // 上传进度:本批总张数 / 已完成张数,驱动上传中浮层的「上传中 x/N」。
+  // 上传进度:本批总个数 / 已完成个数,驱动上传中浮层的「上传中 x/N」。
   @State private uploadTotal: number = 0;
   @State private uploadDone: number = 0;
+  // 浮层文案里的名词(图片/文件/视频),按本批传的是什么变。
+  @State private uploadLabel: string = '图片';
+  // 附件按钮是否显示:站点允许至少一个非图片扩展名才有意义。设置拉回来前先按 false,
+  // 避免闪现一个点开发现空空如也的选择器。
+  @State private canUploadAttachment: boolean = false;
   // 编辑内容区透明度:编辑↔预览切换时做交叉淡入(配合 animateTo)。
   @State private contentOpacity: number = 1;
   // 当前键盘高度(vp);0=键盘收起。窗口常驻全屏,不能用 RESIZE(避让区与 expandSafeArea 打架、
@@ -210,8 +228,10 @@ export struct ComposerPage {
     // 不再从 0 起跳后被 avoidAreaChange 二次上移(消除「回缩一下」)。
     this.keyboardHeight = this.initialKeyboardHeight;
     if (this.bridge) {
-      this.uploadService = new UploadService(this.bridge);
+      // context 给「选文件」的 DocumentViewPicker 用(选图/选视频走相册,不需要它)。
+      this.uploadService = new UploadService(this.bridge, this.getUIContext().getHostContext() as common.Context);
       this.draftService = new DraftService(this.bridge);
+      this.loadUploadSettings();
     }
     // 带入正文里若有 upload:// 短码(草稿续写/编辑旧帖的老图片),挂载即后台解析真实直链。
     // 不 await:用户此刻多半在打字,等他点预览时映射早已就绪,省掉点预览那一下的网络等待
@@ -493,37 +513,125 @@ export struct ComposerPage {
     }, 0);
   }
 
-  // 选图并逐张上传:成功即在光标处插入图片 markdown 短码。上传中置灰图片按钮。
-  private async pickAndUpload(): Promise<void> {
-    if (!this.uploadService || this.isUploading) {
+  // 拉一次站点上传设置,决定附件按钮显不显示。失败时 SiteSettingsService 回落到 Discourse
+  // 出厂默认(纯图片白名单),附件按钮自然不出现,与「这个站没开附件」的表现一致。
+  private async loadUploadSettings(): Promise<void> {
+    if (!this.bridge) {
       return;
     }
-    const uris: string[] = await this.uploadService.pickImages(MAX_PICK);
+    const settings: SiteUploadSettings = await SiteSettingsService.load(this.bridge);
+    this.canUploadAttachment = UploadService.nonImageExtensions(settings).length > 0;
+  }
+
+  // 工具栏上传类按钮的统一入口。三条路的差别只在「选什么」和「插什么」,
+  // 选取→逐个上传→插入正文的骨架是同一套,见 runUploadBatch。
+  private handleUpload(kind: ToolbarSpecial): void {
+    switch (kind) {
+      case ToolbarSpecial.Image:
+        this.pickAndUploadImages();
+        break;
+      case ToolbarSpecial.Attachment:
+        this.pickAndUploadAttachments();
+        break;
+      case ToolbarSpecial.Media:
+        this.pickAndUploadMedia();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private async pickAndUploadImages(): Promise<void> {
+    const service: UploadService | undefined = this.uploadService;
+    if (!service || this.isUploading) {
+      return;
+    }
+    const uris: string[] = await service.pickImages(MAX_PICK);
+    await this.runUploadBatch(uris, '图片',
+      (uri: string): Promise<UploadOutcome> => service.uploadImageUri(uri),
+      (file: UploadedFile): string => `\n${UploadService.buildImageMarkdown(file)}\n`);
+  }
+
+  private async pickAndUploadAttachments(): Promise<void> {
+    const service: UploadService | undefined = this.uploadService;
+    if (!service || this.isUploading) {
+      return;
+    }
+    // 等级门前置:Discourse 对非 TL1+ 的附件数上限是 newuser_max_attachments(默认 0),
+    // 拦在这里免得用户传完整个文件才在发帖时吃 422。等级未知时放行,由服务端裁决。
+    const settings: SiteUploadSettings = await SiteSettingsService.load(this.bridge!);
+    if (!LoginGate.canUploadAttachment(settings.newuserMaxAttachments)) {
+      this.showToast('本站不允许新用户上传附件');
+      return;
+    }
+    const uris: string[] = await service.pickFiles(MAX_PICK_FILES);
+    await this.runUploadBatch(uris, '文件',
+      (uri: string): Promise<UploadOutcome> => service.uploadFileUri(uri),
+      (file: UploadedFile): string => `\n${UploadService.buildAttachmentMarkdown(file)}\n`);
+  }
+
+  // 音视频(仅 linux.do)。改名 .xz 上传 + 插裸 <video> 标签,详见 UploadService 的
+  // DISGUISE_EXTENSION 与 SiteCapabilities.mediaUpload。
+  private async pickAndUploadMedia(): Promise<void> {
+    const service: UploadService | undefined = this.uploadService;
+    if (!service || this.isUploading) {
+      return;
+    }
+    const uris: string[] = await service.pickVideos(1);
+    await this.runUploadBatch(uris, '视频',
+      (uri: string): Promise<UploadOutcome> => service.uploadMediaUri(uri),
+      (file: UploadedFile, uri: string): string => {
+        // type 要写**真实**媒体类型而不是 .xz 的类型——播放器认这个属性,伪装才生效。
+        // 服务端回显的 original_filename 已经是 .xz 了,只能从原始 uri 上取真后缀。
+        const mime: string = UploadService.mimeFor(UploadService.extensionOf(UploadService.fileNameFromUri(uri)));
+        const mediaMime: string = mime.startsWith('video/') || mime.startsWith('audio/') ? mime : 'video/mp4';
+        // 前后留空行是必须的:markdown-it 开着 breaks:true,只隔一个换行的话 <video> 会被当成
+        // 行内 HTML,标签之间的换行统统变成 <br> 塞进标签内部。空行让它成为 html_block 原样透传。
+        return `\n\n${UploadService.buildVideoHtml(file, mediaMime)}\n\n`;
+      });
+  }
+
+  /**
+   * 逐个上传并在光标处插入结果。上传中置灰工具栏上传按钮 + 盖遮罩。
+   *
+   * 串行而非并发:站点有 max_uploads_per_minute(默认 10)限流,并发发出去反而更容易被拒;
+   * 而且插入位置按 selStart 算,乱序返回会让正文顺序与用户选的顺序对不上。
+   */
+  private async runUploadBatch(uris: string[], label: string,
+    upload: (uri: string) => Promise<UploadOutcome>,
+    snippetOf: (file: UploadedFile, uri: string) => string): Promise<void> {
     if (uris.length === 0) {
       return;
     }
     this.isUploading = true;
+    this.uploadLabel = label;
     this.uploadTotal = uris.length;
     this.uploadDone = 0;
+    // 一批里可能只坏一个(比如其中一张 GIF 超了 4 MB)。逐条记原因,批量结束后一次性告知,
+    // 避免连弹好几个 toast 互相盖掉。
+    let firstError: string = '';
     for (let i: number = 0; i < uris.length; i++) {
-      const img: UploadedImage | undefined = await this.uploadService.uploadUri(uris[i]);
-      if (img) {
-        // 图片是纯插入:在当前光标处插入图片 markdown 短码,光标移到其后。
-        const snippet: string = `\n${UploadService.buildImageMarkdown(img)}\n`;
+      const outcome: UploadOutcome = await upload(uris[i]);
+      const file: UploadedFile | undefined = outcome.file;
+      if (file) {
+        const snippet: string = snippetOf(file, uris[i]);
         const head: string = this.text.substring(0, this.selStart);
         const tail: string = this.text.substring(this.selEnd);
         this.text = head + snippet + tail;
         const caret: number = head.length + snippet.length;
         this.selStart = caret;
         this.selEnd = caret;
-      } else {
-        this.showToast('有图片上传失败');
+      } else if (firstError.length === 0) {
+        firstError = outcome.error !== undefined ? outcome.error : `${label}上传失败`;
       }
       this.uploadDone = i + 1;
     }
     this.isUploading = false;
     this.uploadTotal = 0;
     this.uploadDone = 0;
+    if (firstError.length > 0) {
+      this.showToast(firstError);
+    }
   }
 
   // 切到预览:离屏编译 markdown→HTML,解析图片和表情短码后再交叉淡入切模式(无白屏)。
@@ -635,11 +743,13 @@ export struct ComposerPage {
         if (this.mode === ComposerMode.Edit) {
           MarkdownToolbar({
             disabled: this.isUploading,
+            showAttachment: this.canUploadAttachment,
+            showMedia: SiteCapabilities.mediaUpload,
             onAction: (action: MdAction): void => {
               this.applyToolbarAction(action);
             },
-            onPickImage: (): void => {
-              this.pickAndUpload();
+            onUpload: (kind: ToolbarSpecial): void => {
+              this.handleUpload(kind);
             }
           })
         }
@@ -670,8 +780,8 @@ export struct ComposerPage {
         .opacity(0)
         .hitTestBehavior(HitTestMode.None)
 
-      // 图片上传中浮层:半透明遮罩 + 居中「上传中 x/N」胶囊。Block 拦截交互,避免上传期间移动光标
-      // 打乱插入位置(短码在 await 后按 selStart 插入)。多张时显示进度。
+      // 上传中浮层:半透明遮罩 + 居中「上传中 x/N」胶囊。Block 拦截交互,避免上传期间移动光标
+      // 打乱插入位置(片段在 await 后按 selStart 插入)。多个时显示进度。
       if (this.isUploading) {
         Column() {
           Row({ space: 10 }) {
@@ -679,7 +789,9 @@ export struct ComposerPage {
               .width(22)
               .height(22)
               .color($r('app.color.brand'))
-            Text(this.uploadTotal > 1 ? `图片上传中 ${this.uploadDone}/${this.uploadTotal}` : '图片上传中…')
+            Text(this.uploadTotal > 1
+              ? `${this.uploadLabel}上传中 ${this.uploadDone}/${this.uploadTotal}`
+              : `${this.uploadLabel}上传中…`)
               .fontSize(15)
               .fontColor($r('app.color.text_primary'))
           }
@@ -1388,7 +1500,8 @@ export struct ComposerPage {
             if (this.previewHtml.length > 0) {
               PostRichContent({
                 cookedHtml: this.previewHtml,
-                fallbackText: this.text
+                fallbackText: this.text,
+                onResolveMedia: this.onResolveMedia
               })
             } else {
               Text('（无内容可预览）')

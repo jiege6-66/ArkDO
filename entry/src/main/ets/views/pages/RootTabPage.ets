@@ -964,6 +964,10 @@ export struct RootTabPage {
         DraftsPage({
           bridge: this.bridge,
           isArkWebReady: this.isArkWebReady,
+          // 透传到续写编辑器的预览:站内音视频要经下载委托过盾才拿得到字节。
+          onResolveMedia: (url: string): Promise<string> => {
+            return this.bridge.downloadMedia(url);
+          },
           username: (param as DraftsRouteParam).username,
           onBack: () => {
             this.popNavigation();
@@ -1779,6 +1783,7 @@ export struct RootTabPage {
     this.currentUser = undefined;
     this.applySidebarPrefs(undefined);
     LoginGate.setLoggedIn(false);
+    LoginGate.clearUserPrivileges();
     AppStorage.setOrCreate(PROFILE_DRAFT_COUNT_KEY, 0);
     this.notificationService.stop();
     // 登出:清掉自愈基准,让下一个账号登录时重新兑现自己的订阅。
@@ -1821,6 +1826,16 @@ export struct RootTabPage {
         this.currentUser?.draftCount !== undefined ? this.currentUser.draftCount : 0);
       // 同步全局登录态镜像:供深层页面/楼层动作的写操作闸门(LoginGate)读取。
       LoginGate.setLoggedIn(this.currentUser !== undefined);
+      // 信任等级镜像同源同帧更新:编辑器据此判附件按钮要不要置灰。登出时复位成「未知」,
+      // 免得下一个账号沿用上一个的等级。
+      const checkedUser: User | undefined = this.currentUser;
+      if (checkedUser !== undefined) {
+        LoginGate.setUserPrivileges(
+          checkedUser.trustLevel !== undefined ? checkedUser.trustLevel : 0,
+          checkedUser.admin === true || checkedUser.moderator === true);
+      } else {
+        LoginGate.clearUserPrivileges();
+      }
       Log.i(`${LOG_TAG} current user checked loggedIn=${this.currentUser !== undefined} username=${this.currentUser?.username ?? ''} hasAvatar=${this.currentUser?.avatarTemplate !== undefined}`);
       // 登录:本次响应已带未读数,立即广播一次(铃铛与头像同帧出现),再启动前台轮询;
       // 登出:停表并清零。

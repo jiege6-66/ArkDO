@@ -6,6 +6,9 @@ const STORAGE_KEY_LOGGED_IN: string = 'arkdoIsLoggedIn';
 /** 全局登录态在 AppStorage 中的 key，供宿主 webview 等通过 @StorageProp 响应式绑定（如 MessageBus 启停）。 */
 export const LOGGED_IN_STORAGE_KEY: string = STORAGE_KEY_LOGGED_IN;
 
+/** 信任等级「还没查到」。区别于 TL0(已确认是新用户),两者要走不同分支。 */
+export const TRUST_LEVEL_UNKNOWN: number = -1;
+
 export type RequireLoginListener = () => void;
 // 登录态由「未登录」翻成「已登录」时触发:供已在场的页面(如详情页)补做只在登录后才能起的动作。
 export type LoginStateListener = () => void;
@@ -19,6 +22,9 @@ export class LoginGate {
   private static nextListenerId: number = 0;
   private static loginStateListeners: Map<number, LoginStateListener> = new Map();
   private static nextLoginStateListenerId: number = 0;
+  // 只驻内存,不落盘 —— 理由见 setUserPrivileges。
+  private static trustLevelValue: number = TRUST_LEVEL_UNKNOWN;
+  private static staffValue: boolean = false;
 
   // 由 EntryAbility.onCreate 在任何页面读取 AppStorage 之前调用一次:把登录态镜像双向绑定到磁盘。
   // 冷启动即从磁盘恢复上次「检查成功」的登录态,否则默认 false → 已登录用户在首个 /session/current.json
@@ -39,6 +45,55 @@ export class LoginGate {
 
   static isLoggedIn(): boolean {
     return AppStorage.get<boolean>(STORAGE_KEY_LOGGED_IN) === true;
+  }
+
+  /**
+   * 同步当前用户的信任等级与管理身份。与 setLoggedIn 同一处调用(会话检查成功后)。
+   *
+   * 编辑器用它决定附件按钮要不要置灰:Discourse 的 PostValidator#max_attachments_validator
+   * 对非 TL1+ 且非私信的帖子,把附件数卡在 newuser_max_attachments(默认 0)。
+   *
+   * ## 为什么不持久化(loggedIn 却持久化了)
+   * 信任等级是**按站点**的:linux.do 上 TL3,换到新加的站就是 TL0。持久化会让切站后的
+   * 首个会话检查回来前用错等级 —— 而这里用错的代价是「让用户传完整个文件再吃 422」,
+   * 比 loggedIn 用错(白弹一次登录页)难受得多。所以宁可开局是「未知」。
+   */
+  static setUserPrivileges(trustLevel: number, staff: boolean): void {
+    LoginGate.trustLevelValue = trustLevel;
+    LoginGate.staffValue = staff;
+  }
+
+  /** 登出/切站时复位成「未知」。 */
+  static clearUserPrivileges(): void {
+    LoginGate.trustLevelValue = TRUST_LEVEL_UNKNOWN;
+    LoginGate.staffValue = false;
+  }
+
+  /** 当前信任等级;-1 表示还没查到(见 TRUST_LEVEL_UNKNOWN)。 */
+  static trustLevel(): number {
+    return LoginGate.trustLevelValue;
+  }
+
+  static isStaff(): boolean {
+    return LoginGate.staffValue;
+  }
+
+  /**
+   * 能否发附件。判据照抄网页版 frontend/discourse/app/models/user.js 的
+   * isAllowedToUploadAFile:staff、或 TL>0、或站点把 newuser_max_attachments 开了非 0。
+   *
+   * **等级未知时一律放行**。宁可让用户传完被服务端拒(我们会把 422 的原因显示出来),
+   * 也不要因为会话还没查回来就把功能藏掉 —— 后者看起来像 App 坏了。
+   */
+  static canUploadAttachment(newuserMaxAttachments: number): boolean {
+    if (LoginGate.staffValue) {
+      return true;
+    }
+    const level: number = LoginGate.trustLevelValue;
+    if (level === TRUST_LEVEL_UNKNOWN) {
+      return true;
+    }
+    return level > 0 || newuserMaxAttachments > 0;
   }
 
   // 写操作前置闸门:已登录返回 true 放行;未登录返回 false 并请求弹登录页。

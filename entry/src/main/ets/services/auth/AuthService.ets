@@ -29,6 +29,11 @@ interface DiscourseCurrentUser {
   // sidebar_category_ids 同理(且已与用户可见版块求过交集)。tagging_enabled 关掉时前者整个不出现。
   sidebar_tags?: DiscourseSidebarTag[];
   sidebar_category_ids?: number[];
+  // 信任等级与管理身份。CurrentUserSerializer 里声明为 :trust_level / :admin? / :moderator?,
+  // 序列化后的键名是不带问号的 trust_level / admin / moderator。编辑器用它判能否传附件。
+  trust_level?: number;
+  admin?: boolean;
+  moderator?: boolean;
 }
 
 // SidebarTagSerializer:id/name/slug/description/pm_only。description 暂不用(抽屉一行放不下)。
@@ -101,7 +106,10 @@ export class AuthService {
           unreadHighPriorityNotifications: typeof sourceUser.unread_high_priority_notifications === 'number' ? sourceUser.unread_high_priority_notifications : 0,
           draftCount: typeof sourceUser.draft_count === 'number' ? sourceUser.draft_count : 0,
           sidebarTags: this.mapSidebarTags(sourceUser.sidebar_tags),
-          sidebarCategoryIds: this.mapSidebarCategoryIds(sourceUser.sidebar_category_ids)
+          sidebarCategoryIds: this.mapSidebarCategoryIds(sourceUser.sidebar_category_ids),
+          trustLevel: typeof sourceUser.trust_level === 'number' ? sourceUser.trust_level : 0,
+          admin: sourceUser.admin === true,
+          moderator: sourceUser.moderator === true
         }
       };
     } catch (error) {

@@ -647,6 +647,10 @@ export struct HomePage {
         ComposerPage({
           bridge: this.bridge,
           isArkWebReady: this.isArkWebReady,
+          // 预览里的音视频要经下载委托过盾才拿得到字节(同详情页楼层)。
+          onResolveMedia: (url: string): Promise<string> => {
+            return this.bridge.downloadMedia(url);
+          },
           headerTitle: '发帖',
           placeholder: '正文（支持 Markdown）',
           minChars: 1,

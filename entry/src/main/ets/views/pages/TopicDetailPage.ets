@@ -973,6 +973,10 @@ export struct TopicDetailPage {
       ComposerPage({
         bridge: this.bridge,
         isArkWebReady: this.isArkWebReady,
+        // 与楼层用同一条下载委托,预览里的音视频才播得动(见 ComposerPage.onResolveMedia)。
+        onResolveMedia: (url: string): Promise<string> => {
+          return this.bridge.downloadMedia(url);
+        },
         headerTitle: this.composerHeaderTitle,
         placeholder: this.composerFullPlaceholder,
         initialText: this.composerInitialText,

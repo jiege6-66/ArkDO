@@ -33,4 +33,14 @@ export interface User {
   // 首页筛选抽屉把它们各自置顶,省得在几百个标签、几十个版块里翻;空数组=没配置过,抽屉照旧只给热门标签。
   sidebarTags?: SidebarTag[];
   sidebarCategoryIds?: number[];
+  // 信任等级(0~4)与管理身份。来自 /session/current.json 的 current_user
+  // (CurrentUserSerializer 的 trust_level / admin? / moderator?)。
+  //
+  // 编辑器据此提前拦上传:Discourse 的附件门是 PostValidator#max_attachments_validator ——
+  // 非 TL1+ 且非私信时,附件数不得超过 newuser_max_attachments(默认 0)。网页版同样在前端
+  // 先判一次(frontend/discourse/app/models/user.js 的 isAllowedToUploadAFile)。
+  // 不判就让用户传完整个文件再吃一个 422,白等一场。
+  trustLevel?: number;
+  admin?: boolean;
+  moderator?: boolean;
 }

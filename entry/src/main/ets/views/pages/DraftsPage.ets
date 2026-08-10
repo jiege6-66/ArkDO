@@ -42,6 +42,9 @@ export struct DraftsPage {
   bridge: JsonNetworkClient | undefined = undefined;
   isArkWebReady: boolean = false;
   username: string = '';
+  // 纯透传给续写用的 ComposerPage:它的预览要靠这条委托才播得了站内音视频。
+  // 本页只持有 JsonNetworkClient 接口,拿不到 downloadMedia,故由 RootTabPage 注入。
+  onResolveMedia: (url: string) => Promise<string> = () => Promise.reject(new Error('媒体下载未接入'));
   onBack: () => void = () => {};
   // 回帖草稿 → 进对应主题的原生详情页。
   onOpenTopic: (topicId: number, title: string) => void = () => {};
@@ -110,6 +113,7 @@ export struct DraftsPage {
         ComposerPage({
           bridge: this.bridge,
           isArkWebReady: this.isArkWebReady,
+          onResolveMedia: this.onResolveMedia,
           headerTitle: '继续编辑',
           placeholder: '正文（支持 Markdown）',
           minChars: 1,
