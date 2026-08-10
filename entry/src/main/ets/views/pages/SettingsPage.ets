@@ -201,7 +201,8 @@ export struct SettingsPage {
           this.onOpenNetwork();
         })
         this.HairlineInset()
-        this.SettingCell($r('sys.symbol.gearshape'), '实验性功能', '', () => {
+        // 齿轮在设置页里等于没图标(整页都是"设置"),换成"施法中"更能表达尚在试验。
+        this.SettingCell($r('sys.symbol.wand_and_stars'), '实验性功能', '', () => {
           this.onOpenExperimental();
         })
         // 站点管理的「正门」。抽屉里那行「我的站点」只是快捷方式,而它自己可以被开关藏起来——
@@ -236,7 +237,7 @@ export struct SettingsPage {
   @Builder
   private ForumCell() {
     Row() {
-      SymbolGlyph($r('sys.symbol.message'))
+      SymbolGlyph($r('sys.symbol.forum'))
         .fontSize(20)
         .fontColor([$r('app.color.text_secondary')])
       Text('论坛')
@@ -305,7 +306,7 @@ export struct SettingsPage {
   @Builder
   private FabGlassRow() {
     Row() {
-      SymbolGlyph($r('sys.symbol.circle_dashed'))
+      SymbolGlyph($r('sys.symbol.background_blurred'))
         .fontSize(20)
         .fontColor([$r('app.color.text_secondary')])
       Column() {
@@ -430,7 +431,9 @@ export struct SettingsPage {
         this.disclaimerDialogController.open();
       })
       this.HairlineInset()
-      this.SettingCell($r('sys.symbol.exclamationmark_circle'), '诊断日志', '', () => {
+      // 不用 exclamationmark_circle:它在项目里到处是「出错了」的标记,挂在入口上像在报警;
+      // 也和上一行「关于」的 info_circle 撞成一对分不清的圆圈。
+      this.SettingCell($r('sys.symbol.stethoscope'), '诊断日志', '', () => {
         this.onOpenDiagnostics();
       })
     }
