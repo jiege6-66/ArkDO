@@ -96,7 +96,7 @@ export struct LdcCreditWebHost {
       return;
     }
     try {
-      this.bridge.markHostReloading();
+      this.bridge.markHostLoadIssued();
       this.controller.loadUrl(url);
     } catch (error) {
       // loadUrl 抛异常时不会有后续 onPageEnd,立即放行等待者以免请求悬住。
@@ -113,7 +113,8 @@ export struct LdcCreditWebHost {
     this.clearBootWatchdog();
     Log.i(`${LOG_TAG} load failed reason=${reason}`);
     // 放行排队的注入 fetch,让它们快速失败暴露「加载失败/重试」,而不是悬住到超时。
-    this.bridge.markHostReady();
+    // 这条路上不会再有 onPageEnd 来销账,故无条件开闸。
+    this.bridge.forceHostReady(reason);
     this.onLoadFailed();
   }
 

@@ -17,6 +17,9 @@ const MEDIA_DOWNLOAD_TIMEOUT_MS: number = 120000;
 const BODY_LOG_CHUNK_SIZE: number = 3000;
 // 响应体转储上限:仅对挑战/错误/异常响应保留头部证据(判定是挑战页还是数据),截断以控制日志体积。
 const BODY_LOG_MAX_CHARS: number = 1500;
+// 单个请求最多为「宿主重载」让路几轮。每轮各自带 HOST_RELOAD_READY_TIMEOUT_MS 超时,
+// 所以这也是等待时长的硬上限,防止连环重载把请求无限期压住。
+const HOST_READY_MAX_ROUNDS: number = 3;
 
 function logNetwork(message: string): void {
   Log.i(`[ArkDO][Network] ${message}`);
@@ -180,6 +183,13 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   // 因此排队等待,直到重载后的 onPageEnd 再执行。默认 false = 就绪,不影响正常请求。
   private reloading: boolean = false;
   private readyWaiters: Array<() => void> = [];
+  // 已发出、但还没等到「自己那一次」onPageEnd 的 loadUrl 笔数。
+  //
+  // 光靠 reloading 这个布尔量不够:两次重载叠在一起时(典型链路 —— 过盾成功广播会话变更触发重载,
+  // 抢在关门前发出的请求因文档被销毁而失败,又触发一次网络自愈重载),第一次的 onPageEnd 会把门闩
+  // 打开、放行整个队列,而此时第二次 loadUrl 已经在途 —— 请求注进一个马上被销毁的文档,回调永远
+  // 不来,只能干等到执行器 15s 超时。计数保证「最后一次重载真正落地」才放行。
+  private outstandingLoads: number = 0;
   // host webview 控制器与其原生下载委托:附件下载走它,天然带会话 Cookie、自动跟随 302 到 CDN、不受 CORS 限制。
   private controller?: webview.WebviewController;
   private downloadContext?: Context;
@@ -359,9 +369,17 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
-  // host webview 开始 loadUrl 重载：关闭门闩，随后的注入式 fetch 排队等待。
+  // 只关门,不计数。给「先关门,随后由别处真正 loadUrl」的调用方用(登录成功/登出/DoH 变更:
+  // 它们广播 SessionEventBus,由 ArkWebHost 去发 loadUrl)。抢在广播之前关门,才能让同一批
+  // 监听者里跑在 ArkWebHost 之前的那些请求也排进队列,而不是注进一个即将被销毁的文档。
   markHostReloading(): void {
     this.reloading = true;
+  }
+
+  // 关门 + 记一笔在途重载。给真正调 loadUrl 的地方用,必须与其后的 markHostReady() 配对。
+  markHostLoadIssued(): void {
+    this.reloading = true;
+    this.outstandingLoads++;
   }
 
   // 主动重载 host 首页:一次真实页面导航,让 CF 挑战 JS 在真浏览器环境里运行以拿 cf_clearance
@@ -372,7 +390,7 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       return false;
     }
     try {
-      this.markHostReloading();
+      this.markHostLoadIssued();
       this.controller.loadUrl(AppConstants.HOST_BOOTSTRAP_URL);
       return true;
     } catch (error) {
@@ -393,8 +411,32 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return this.executor !== undefined;
   }
 
-  // host webview 重载完成（onPageEnd）：放行所有排队的 fetch，令其注入到刷新后的文档。
+  // host webview 一次重载落地(onPageEnd),或那次 loadUrl 抛异常需要销账时调用:
+  // 销掉一笔在途重载,只有全部落地才放行队列。还有更新的重载在途就继续压着 —— 现在放行等于
+  // 把请求注进一个马上被下一次 loadUrl 销毁的文档。
   markHostReady(): void {
+    if (this.outstandingLoads > 0) {
+      this.outstandingLoads--;
+    }
+    if (this.outstandingLoads > 0) {
+      logNetwork(`host page settled but ${this.outstandingLoads} reload(s) still in flight, keep gate closed`);
+      return;
+    }
+    this.releaseHostWaiters();
+  }
+
+  // 兜底放行:清零在途计数并无条件开闸。给「不会再有 onPageEnd 了」的路径用 —— 首屏加载失败、
+  // 看门狗超时、排队超时。计数万一因某次 loadUrl 没能产出 onPageEnd 而漂移,也由这里兜回来,
+  // 不至于让门闩永久关死。
+  forceHostReady(reason: string): void {
+    if (this.outstandingLoads > 0 || this.reloading) {
+      logNetwork(`force host ready reason=${reason} dropped=${this.outstandingLoads}`);
+    }
+    this.outstandingLoads = 0;
+    this.releaseHostWaiters();
+  }
+
+  private releaseHostWaiters(): void {
     this.reloading = false;
     if (this.readyWaiters.length === 0) {
       return;
@@ -492,15 +534,27 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
-  private whenHostReady(): Promise<void> {
-    if (!this.reloading) {
-      return Promise.resolve();
+  // 醒来后要复查一次门闩再走:放行与本请求真正注入之间隔着一个微任务,期间完全可能又有新的
+  // loadUrl 发出(会话变更/网络自愈常常连着来)。复查命中就重新排队,轮数设上限,免得重载风暴里
+  // 无限续等 —— 超出上限就照发,让它走正常的失败/重试路径,总好过一直悬着。
+  private async whenHostReady(): Promise<void> {
+    for (let round: number = 0; round < HOST_READY_MAX_ROUNDS; round++) {
+      if (!this.reloading) {
+        return;
+      }
+      await this.awaitHostReadyOnce();
     }
+    if (this.reloading) {
+      logNetwork(`host still reloading after ${HOST_READY_MAX_ROUNDS} rounds, proceed anyway`);
+    }
+  }
+
+  private awaitHostReadyOnce(): Promise<void> {
     return new Promise<void>((resolve: () => void) => {
       // 兜底超时:万一重载信号丢失(onPageEnd 始终不触发),自愈放行并恢复就绪态,
       // 既不让本次请求永久悬住,也避免后续请求持续等待。
       const timeoutId: number = setTimeout(() => {
-        this.markHostReady();
+        this.forceHostReady('waiterTimeout');
       }, AppConstants.HOST_RELOAD_READY_TIMEOUT_MS);
       this.readyWaiters.push(() => {
         clearTimeout(timeoutId);

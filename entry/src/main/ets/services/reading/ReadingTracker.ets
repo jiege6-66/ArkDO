@@ -13,7 +13,11 @@ const NEXT_FLUSH_MS: number = 60 * 1000;
 const PAUSE_UNLESS_SCROLLED_MS: number = 1000 * 60 * 3;
 const MAX_TRACKING_TIME_MS: number = 1000 * 60 * 6;
 const AJAX_FAILURE_DELAYS: number[] = [5000, 10000, 20000, 40000];
-const ALLOWED_AJAX_FAILURES: number[] = [405, 429, 500, 501, 502, 503, 504];
+// 可退避重试的失败。0 不是 HTTP 状态码,而是「请求压根没拿到响应」:桥层超时、Failed to fetch、
+// 宿主未就绪。这类恰恰最该重试 —— 它几乎总意味着 host webview 正在重载,而不是服务端拒绝;
+// 当成不可重试直接丢,这批楼层的已读就白记了。重试有上限(AJAX_FAILURE_DELAYS 只有 4 档,
+// 第 5 次即 exhausted 丢弃),所以不会留下反复重试的僵尸批次。
+const ALLOWED_AJAX_FAILURES: number[] = [0, 405, 429, 500, 501, 502, 503, 504];
 // 单次上报常在 1s 内返回,"呼吸"窗口太短会看不清;保证至少完整来回一次(变浅再变回,700ms×2)再收尾。
 const MIN_REPORTING_VISIBLE_MS: number = 1400;
 // ── 攒批上报间隔(可调)──────────────────────────────────────────────

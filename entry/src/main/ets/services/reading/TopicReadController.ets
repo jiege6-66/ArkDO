@@ -135,8 +135,10 @@ export class TopicReadController {
    * 闸门在 startIfNeeded 这一处套上,周期 flush、离页 drain、延迟 flush 三条路径就全覆盖了,
    * 不必逐个调用点去改。
    *
-   * 返回 statusCode 0 的失败:tracker 只对 405/429/5xx 退避重试,0 会被直接丢弃,
-   * 不会留下一个反复重试的僵尸批次。
+   * 返回 statusCode 0 的失败:tracker 现在把 0 也当作可退避重试(桥层超时/未就绪该重试,
+   * 见 ALLOWED_AJAX_FAILURES 的注释)。切站后这批会被重试,但每次都在这道闸门直接
+   * Promise.resolve 掉、根本不碰网络,且退避档位只有 4 级,第 5 次即 exhausted 丢弃 ——
+   * 所以依然不会留下反复打网络的僵尸批次。
    */
   private guardBySite(reportFn: ReportTimingsFn, topicId: number, logTag: string): ReportTimingsFn {
     const epoch: number = CurrentSite.epoch;

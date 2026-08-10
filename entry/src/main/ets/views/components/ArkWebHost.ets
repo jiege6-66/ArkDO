@@ -171,8 +171,9 @@ export struct ArkWebHost {
       if (!this.hasNotifiedReady) {
         this.startBootWatchdog();
       }
-      // 重载开始前先关门:注入式 fetch 会排队等到重载后的 onPageEnd 再执行,避免落在被销毁的文档上。
-      this.bridge.markHostReloading();
+      // 重载开始前先关门并记一笔在途:注入式 fetch 会排队等到重载后的 onPageEnd 再执行,避免落在
+      // 被销毁的文档上。记账是为了让「连着两次重载」时,第一次的 onPageEnd 不会提前放行队列。
+      this.bridge.markHostLoadIssued();
       this.controller.loadUrl(AppConstants.HOST_BOOTSTRAP_URL);
     } catch (error) {
       // loadUrl 抛异常时不会有后续 onPageEnd,需立即放行等待者以免请求悬住。
@@ -194,7 +195,8 @@ export struct ArkWebHost {
     this.hasReportedFailure = true;
     this.clearBootWatchdog();
     Log.i(`${LOG_TAG} stage=hostLoadFailed reason=${reason} ts=${Date.now()}`);
-    this.bridge.markHostReady();
+    // 这条路上不会再有 onPageEnd 来销账,必须无条件开闸,否则排队的 fetch 只能干等到超时。
+    this.bridge.forceHostReady(reason);
     this.onLoadFailed();
   }
 
