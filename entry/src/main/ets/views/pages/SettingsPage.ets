@@ -1,6 +1,8 @@
+import { showToast as promptToast } from '../../common/utils/Toast';
 import { Log } from '../../services/logging/Log';
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
-import { bundleManager, common } from '@kit.AbilityKit';
+import { bundleManager, common, OpenLinkOptions } from '@kit.AbilityKit';
+import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { THEME_MODE_STORAGE_KEY, ThemeManager, ThemeMode } from '../../common/theme/ThemeManager';
 import {
   FAB_GLASS_ENABLED_STORAGE_KEY,
@@ -25,6 +27,9 @@ import { SiteCapabilities } from '../../services/site/SiteCapabilities';
 import { buildImmersiveTitleBarStyle } from '../../common/ui/ImmersiveTitleBarStyle';
 
 const LOG_TAG: string = '[ArkDO][Settings]';
+// 官网。关于弹框里点它跳浏览器 —— 原先那行是「开发者 @JoeyYin」,点了跳站内用户主页,
+// 而用户名是写死的:换到别的论坛就变成「用户不存在」。官网没有这个问题。
+const OFFICIAL_SITE_URL: string = 'https://arkdo.app';
 
 // 与个人中心同款鸿蒙设置页式卡片分组:灰底 + 无描边圆角卡片。
 //
@@ -592,6 +597,34 @@ struct AboutDialog {
     }
   }
 
+  // 打开官网。与 WebViewPage 的「用浏览器打开」同一套:openLink 先试 App Linking
+  // (域名被某 App 认领就直接进那个 App),没认领再按隐式 Want 交给浏览器;
+  // 设备上一个浏览器都没有时(模拟器常见)会失败,那时把地址复制走,别让用户走进死胡同。
+  private openOfficialSite(): void {
+    try {
+      const options: OpenLinkOptions = { appLinkingOnly: false };
+      (this.getUIContext().getHostContext() as common.UIAbilityContext).openLink(OFFICIAL_SITE_URL, options)
+        .catch((err: BusinessError) => {
+          Log.i(`${LOG_TAG} open official site failed code=${err.code}`);
+          this.copyOfficialSite();
+        });
+    } catch (error) {
+      Log.i(`${LOG_TAG} open official site threw: ${JSON.stringify(error)}`);
+      this.copyOfficialSite();
+    }
+  }
+
+  private copyOfficialSite(): void {
+    try {
+      const data: pasteboard.PasteData =
+        pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, OFFICIAL_SITE_URL);
+      pasteboard.getSystemPasteboard().setDataSync(data);
+      promptToast(this.getUIContext(), '打不开浏览器，官网地址已复制');
+    } catch (error) {
+      Log.i(`${LOG_TAG} copy official site failed: ${JSON.stringify(error)}`);
+    }
+  }
+
   build() {
     Column() {
       Text('ArkDO')
@@ -599,9 +632,13 @@ struct AboutDialog {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
 
-      Text('第三方论坛客户端')
+      // 副标题说清「支持什么」而不是「是谁的客户端」——后者容易被读成与某个具体论坛有隶属关系,
+      // 上架审核正是据此认定本应用与 Linux.DO 相关。措辞与应用市场描述保持同一套。
+      Text('支持基于 Discourse（开源论坛程序）搭建的站点')
         .fontSize(13)
+        .lineHeight(19)
         .fontColor($r('app.color.text_secondary'))
+        .textAlign(TextAlign.Center)
         .margin({ top: 8 })
 
       Text(this.version.length > 0 ? `版本 ${this.version}` : '版本 —')
@@ -610,16 +647,16 @@ struct AboutDialog {
         .margin({ top: 14 })
 
       Row() {
-        Text('开发者 ')
+        Text('官网 ')
           .fontSize(14)
           .fontColor($r('app.color.text_secondary'))
-        Text('@JoeyYin')
+        Text(OFFICIAL_SITE_URL)
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.ld_accent'))
           .onClick(() => {
             this.controller?.close();
-            this.onOpenDeveloper();
+            this.openOfficialSite();
           })
       }
       .margin({ top: 6 })
