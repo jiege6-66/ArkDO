@@ -518,6 +518,43 @@ export struct ComposerPage {
     }, 0);
   }
 
+  /**
+   * 把裸 HTML 片段垫成一个独立的 markdown 块:前后各保证有一个空行,**但只补缺的部分**。
+   *
+   * 空行是必须的:预览用的 markdown-it 开着 breaks:true,片段前没空行时 <video> 会被当作
+   * 行内 HTML,标签之间的换行统统变成 <br> 塞进标签内部,播放器就解析不出来了。
+   *
+   * 但无脑写死 `\n\n…\n\n` 会在光标本来就已经空了一行的地方再堆两行,正文里凭空多出
+   * 大片空白 —— 所以这里按上下文实际缺多少补多少。
+   */
+  private padAsBlock(snippet: string): string {
+    const head: string = this.text.substring(0, this.selStart);
+    const tail: string = this.text.substring(this.selEnd);
+    return `${ComposerPage.gapBefore(head)}${snippet}${ComposerPage.gapAfter(tail)}`;
+  }
+
+  // 片段之前还差几个换行才能凑出一个空行。开头即插入点时不需要垫。
+  private static gapBefore(head: string): string {
+    if (head.length === 0) {
+      return '';
+    }
+    if (head.endsWith('\n\n')) {
+      return '';
+    }
+    return head.endsWith('\n') ? '\n' : '\n\n';
+  }
+
+  // 片段之后同理。末尾即插入点时不需要垫(文末天然终结这个块)。
+  private static gapAfter(tail: string): string {
+    if (tail.length === 0) {
+      return '';
+    }
+    if (tail.startsWith('\n\n')) {
+      return '';
+    }
+    return tail.startsWith('\n') ? '\n' : '\n\n';
+  }
+
   // 上传中浮层的一行字。压缩阶段优先(它才是耗时的那段),否则显示上传进度。
   private overlayLabel(): string {
     if (this.compressPercent >= 0) {
@@ -620,9 +657,7 @@ export struct ComposerPage {
         // 服务端回显的 original_filename 已经是 .xz 了,只能从原始 uri 上取真后缀。
         const mime: string = UploadService.mimeFor(UploadService.extensionOf(UploadService.fileNameFromUri(uri)));
         const mediaMime: string = mime.startsWith('video/') || mime.startsWith('audio/') ? mime : 'video/mp4';
-        // 前后留空行是必须的:markdown-it 开着 breaks:true,只隔一个换行的话 <video> 会被当成
-        // 行内 HTML,标签之间的换行统统变成 <br> 塞进标签内部。空行让它成为 html_block 原样透传。
-        return `\n\n${UploadService.buildVideoHtml(file, mediaMime)}\n\n`;
+        return this.padAsBlock(UploadService.buildVideoHtml(file, mediaMime));
       });
   }
 

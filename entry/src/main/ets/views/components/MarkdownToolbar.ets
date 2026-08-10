@@ -18,8 +18,8 @@ interface ToolbarButton {
 // 工具栏按钮清单(顺序即展示顺序)。上传类按钮带 special 标记,其余携带 MdAction 由父级统一 apply。
 const TOOLBAR_BUTTONS: ToolbarButton[] = [
   { iconId: 'image', special: ToolbarSpecial.Image },
-  { iconId: 'file-arrow-up', special: ToolbarSpecial.Attachment },
   { iconId: 'video', special: ToolbarSpecial.Media },
+  { iconId: 'file-arrow-up', special: ToolbarSpecial.Attachment },
   { iconId: 'bold', action: { kind: MdActionKind.Wrap, before: '**', after: '**', placeholder: '粗体' } },
   { iconId: 'italic', action: { kind: MdActionKind.Wrap, before: '_', after: '_', placeholder: '斜体' } },
   { iconId: 'quote-left', action: { kind: MdActionKind.LinePrefix, prefix: '> ' } },

@@ -104,7 +104,7 @@ export class VideoTranscoder {
 
     let probe: VideoProbe;
     try {
-      probe = await this.probe(sourceUri);
+      probe = await VideoTranscoder.probeVideo(sourceUri);
     } catch (error) {
       const err: BusinessError = error as BusinessError;
       Log.i(`${LOG_TAG} probe failed code=${err.code} msg=${err.message}`);
@@ -146,9 +146,10 @@ export class VideoTranscoder {
         return { error: '' };
       }
       const targetShort: number = Math.min(sourceShort, LADDER[tierIndex].short);
-      const size: TargetSize = VideoTranscoder.scaleTo(probe.width, probe.height, targetShort);
+      const size: VideoSize | undefined = VideoTranscoder.scaleTo(probe.width, probe.height, targetShort);
       const outputPath: string = `${this.context.cacheDir}/arkdo_transcode_${Date.now()}_${pass}.mp4`;
-      Log.i(`${LOG_TAG} pass=${pass} ${size.width}x${size.height} videoBps=${Math.round(videoBps)}`);
+      const sizeLabel: string = size ? `${size.width}x${size.height}` : `${probe.width}x${probe.height}(原样)`;
+      Log.i(`${LOG_TAG} pass=${pass} ${sizeLabel} videoBps=${Math.round(videoBps)}`);
 
       let produced: number = -1;
       try {
@@ -219,7 +220,7 @@ export class VideoTranscoder {
   }
 
   // 跑一遍完整转码,返回产物字节数。失败/取消抛异常。
-  private async runPass(sourceUri: string, outputPath: string, size: TargetSize,
+  private async runPass(sourceUri: string, outputPath: string, size: VideoSize | undefined,
     videoBps: number, pass: number, hooks?: VideoTranscodeHooks): Promise<number> {
     // 三个资源分别可能开失败,各自的清理必须挂在能覆盖到它的 finally 上,
     // 否则「开 dst 时抛异常」会把已经开着的 src fd 泄漏掉。
@@ -253,7 +254,7 @@ export class VideoTranscoder {
 
   // 配置并跑完一次转码。资源生命周期由调用方 runPass 管。
   private async driveTranscode(transcoder: media.AVTranscoder, srcFile: fs.File, dstFile: fs.File,
-    size: TargetSize, videoBps: number, pass: number, hooks?: VideoTranscodeHooks): Promise<void> {
+    size: VideoSize | undefined, videoBps: number, pass: number, hooks?: VideoTranscodeHooks): Promise<void> {
     // 完成信号只从 'complete' 事件来(start() 只是把任务发出去就返回了)。
     const finished: Promise<void> = new Promise<void>((resolve: () => void, reject: (reason: Error) => void) => {
       this.abortPass = reject;
@@ -277,35 +278,47 @@ export class VideoTranscoder {
       fileFormat: media.ContainerFormatType.CFT_MPEG_4,
       videoCodec: media.CodecMimeType.VIDEO_AVC,
       videoBitrate: videoBps,
-      videoFrameWidth: size.width,
-      videoFrameHeight: size.height,
       audioCodec: media.CodecMimeType.AUDIO_AAC,
       audioBitrate: AUDIO_BITRATE,
       // B 帧显著降体积(SDK 原话 "reduce file size"),正是我们要的。
       enableBFrame: true
     };
+    // 只在真要缩小时才给分辨率。不缩就整个不传,由转码器沿用源尺寸(见 scaleTo)。
+    if (size) {
+      config.videoFrameWidth = size.width;
+      config.videoFrameHeight = size.height;
+    }
     await transcoder.prepare(config);
     await transcoder.start();
     await finished;
   }
 
-  // 读时长与原始宽高。AVMetadata 的字段全是字符串,duration 单位毫秒。
-  private async probe(sourceUri: string): Promise<VideoProbe> {
+  /**
+   * 读时长、编码方向宽高、旋转角。AVMetadata 的字段全是字符串,duration 单位毫秒。
+   *
+   * ## 编码方向 vs 播放方向:两个用途要的不是同一个
+   * 带 90/270 度旋转的视频,元数据里的宽高是**编码方向**的(如 1920x1080 + rotate 90,
+   * 播放出来才是竖的)。这两处要区别对待,搞混了两边都会错:
+   *
+   *  · 喂给 prepare() 的目标分辨率 —— 用**编码方向**,原样不换。prepare 拿目标宽高跟
+   *    编码尺寸比,换成播放方向的 1080x1920 会让 height 1920 > 源 1080 而报 401。
+   *    官方 FAQ 那句「据元数据的宽高设置目标分辨率」说的正是原样用。
+   *  · 写进 <video> 标签的宽高 —— 用**播放方向**(见 displaySize)。那是给渲染器算
+   *    版面宽高比的,写编码方向的话竖屏视频会被摆进一个横向框里。
+   *
+   * 画质决策不受影响:阶梯按短边 min(w,h) 算,互换不改变这个集合。
+   */
+  static async probeVideo(sourceUri: string): Promise<VideoProbe> {
     const file: fs.File = fs.openSync(sourceUri, fs.OpenMode.READ_ONLY);
     const extractor: media.AVMetadataExtractor = await media.createAVMetadataExtractor();
     try {
       extractor.fdSrc = { fd: file.fd };
       const meta: media.AVMetadata = await extractor.fetchMetadata();
-      const width: number = VideoTranscoder.parseNumber(meta.videoWidth);
-      const height: number = VideoTranscoder.parseNumber(meta.videoHeight);
-      const rotation: number = VideoTranscoder.parseNumber(meta.videoOrientation);
-      // 带 90/270 度旋转时,元数据里的宽高是**编码方向**的,播放出来是转过的。
-      // 目标分辨率要按播放方向算,否则竖屏视频会被按横屏尺寸编码、放出来变形。
-      const rotated: boolean = rotation === 90 || rotation === 270;
       return {
         durationSeconds: VideoTranscoder.parseNumber(meta.duration) / 1000,
-        width: rotated ? height : width,
-        height: rotated ? width : height
+        width: VideoTranscoder.parseNumber(meta.videoWidth),
+        height: VideoTranscoder.parseNumber(meta.videoHeight),
+        rotation: VideoTranscoder.parseNumber(meta.videoOrientation)
       };
     } finally {
       try {
@@ -315,6 +328,18 @@ export class VideoTranscoder {
       }
       fs.closeSync(file);
     }
+  }
+
+  /**
+   * 播放方向的宽高(应用旋转角后)。写 <video> 标签的宽高属性用这个。
+   * 转码只等比缩放、不改变宽高比,所以拿源视频的比例给产物用是对的。
+   */
+  static displaySize(probe: VideoProbe): VideoSize {
+    const rotated: boolean = probe.rotation === 90 || probe.rotation === 270;
+    return {
+      width: rotated ? probe.height : probe.width,
+      height: rotated ? probe.width : probe.height
+    };
   }
 
   // 在给定码率下,从原始短边出发能站住的最高一档。
@@ -331,10 +356,17 @@ export class VideoTranscoder {
     return LADDER.length - 1;
   }
 
-  // 等比缩到目标短边,并把宽高都取偶数(H.264 要求偶数尺寸)。永不放大。
-  private static scaleTo(width: number, height: number, targetShort: number): TargetSize {
+  /**
+   * 等比缩到目标短边,宽高取偶数(H.264 要求)。
+   * 返回 undefined = 不需要缩,此时**不要**给 prepare 传宽高,让它自己保持源分辨率 ——
+   * prepare 对「目标大于源」报 401,原样回传源尺寸只是白给自己一个踩线的机会。
+   */
+  private static scaleTo(width: number, height: number, targetShort: number): VideoSize | undefined {
     const sourceShort: number = Math.min(width, height);
-    const factor: number = sourceShort > targetShort ? targetShort / sourceShort : 1;
+    if (sourceShort <= targetShort) {
+      return undefined;
+    }
+    const factor: number = targetShort / sourceShort;
     return {
       width: VideoTranscoder.evenize(width * factor),
       height: VideoTranscoder.evenize(height * factor)
@@ -376,13 +408,16 @@ export class VideoTranscoder {
   }
 }
 
-interface VideoProbe {
+/** 视频元数据。width/height 是**编码方向**的,播放方向见 VideoTranscoder.displaySize。 */
+export interface VideoProbe {
   durationSeconds: number;
   width: number;
   height: number;
+  /** 旋转角(度)。90/270 表示播放时宽高互换。 */
+  rotation: number;
 }
 
-interface TargetSize {
+export interface VideoSize {
   width: number;
   height: number;
 }

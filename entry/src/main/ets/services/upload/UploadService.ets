@@ -9,7 +9,7 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { discourseErrorMessage } from '../network/DiscourseErrors';
 import { IMAGE_EXTENSIONS, SiteSettingsService, SiteUploadSettings } from '../site/SiteSettingsService';
-import { VideoTranscodeHooks, VideoTranscodeResult, VideoTranscoder } from './VideoTranscoder';
+import { VideoSize, VideoTranscodeHooks, VideoTranscodeResult, VideoTranscoder } from './VideoTranscoder';
 
 // POST /uploads/lookup-urls 的响应项:把 upload:// 短码换成真实 CDN 直链。
 interface DiscourseLookupUrlItem {
@@ -103,6 +103,10 @@ export const MAX_PICK_FILES: number = 5;
  */
 const DISGUISE_EXTENSION: string = 'xz';
 const DISGUISE_MIME: string = 'application/x-xz';
+
+// <video> 标签宽高属性的长边基准。取 640 是为了让横向 16:9 正好落到站方组件那个
+// 640x360,产物在网页端与主题组件插出来的完全一致。
+const VIDEO_BOX_LONG_SIDE: number = 640;
 
 // 常见扩展名 → MIME。Discourse 服务端实际按文件名重新判定(MiniMime.lookup_by_filename),
 // 这里给个像样的值即可,认不出就 octet-stream。
@@ -274,9 +278,20 @@ export class UploadService {
     if (originalSize < 0) {
       return { error: '视频读取失败' };
     }
+    // 播放方向尺寸,给 <video> 标签的宽高属性用。/uploads.json 对 .xz 回的 width/height
+    // 是 null(服务端只认得图片),不自己量就只能写死一个横向框,竖屏视频会被摆歪。
+    // 读元数据很快,失败也不致命(退回默认框),故不阻断上传。
+    let display: VideoSize | undefined;
+    try {
+      display = VideoTranscoder.displaySize(await VideoTranscoder.probeVideo(uri));
+    } catch (error) {
+      Log.i('[ArkDO][Upload] probe for display size failed, falling back to default box');
+    }
+
     // 已经达标就别再编一遍:重编码是纯画质净赔。
     if (originalSize <= limitBytes) {
-      return this.uploadRawFile(uri, disguised, DISGUISE_MIME, limitKb, '视频');
+      const direct: UploadOutcome = await this.uploadRawFile(uri, disguised, DISGUISE_MIME, limitKb, '视频');
+      return UploadService.withDisplaySize(direct, display);
     }
 
     const context: common.Context | undefined = this.context;
@@ -303,10 +318,22 @@ export class UploadService {
       hooks.onCompressed();
     }
     try {
-      return await this.uploadRawFile(producedPath, disguised, DISGUISE_MIME, limitKb, '视频');
+      const uploaded: UploadOutcome = await this.uploadRawFile(producedPath, disguised, DISGUISE_MIME, limitKb, '视频');
+      return UploadService.withDisplaySize(uploaded, display);
     } finally {
       VideoTranscoder.discard(producedPath);
     }
+  }
+
+  // 服务端对非图片不给宽高(width/height 为 null → 这里是 0),用本地量到的播放方向尺寸补上。
+  // 转码只等比缩放,宽高比不变,所以拿源视频的比例给产物用是对的。
+  private static withDisplaySize(outcome: UploadOutcome, display: VideoSize | undefined): UploadOutcome {
+    const file: UploadedFile | undefined = outcome.file;
+    if (file && display && file.width <= 0 && display.width > 0 && display.height > 0) {
+      file.width = display.width;
+      file.height = display.height;
+    }
+    return outcome;
   }
 
   /** 中断正在进行的视频压缩。没有在压时是空操作。 */
@@ -511,15 +538,40 @@ export class UploadService {
   /**
    * 音视频的裸 <video> 标签(linux.do 专用)。
    *
-   * 三个要点,都不能改:
+   * 四个要点,都不能改:
    *  · 用 shortPath 而不是 upload:// —— 短码只在 markdown 的链接/图片 token 里被
    *    upload-protocol 规则改写,写进原始 HTML 不会被解析,出来就是个死链。
    *  · type 写真实媒体类型而非 .xz 的类型 —— 播放器认 type 属性,这正是伪装能生效的原因。
+   *  · 宽高按**真实比例**算,不能像站方组件那样写死 640x360 —— 我们自己的渲染器会读这两个
+   *    属性去定版面(CookedHtmlParser 取 width/height → PostRichContent 算宽高比),
+   *    写死横向框会把竖屏视频摆歪。
    *  · 保留降级文案 —— 与站方主题组件插出来的内容保持一致,别人编辑这条帖子时看不出差别。
    */
   static buildVideoHtml(file: UploadedFile, mediaMimeType: string): string {
     const src: string = file.shortPath.length > 0 ? file.shortPath : file.url;
-    return `<video width="640" height="360" controls>\n  <source src="${src}" type="${mediaMimeType}">\n  您的浏览器不支持 HTML5 video 标签。\n</video>`;
+    const box: VideoBox = UploadService.videoBox(file.width, file.height);
+    return `<video width="${box.width}" height="${box.height}" controls>\n  <source src="${src}" type="${mediaMimeType}">\n  您的浏览器不支持 HTML5 video 标签。\n</video>`;
+  }
+
+  /**
+   * <video> 标签的宽高属性:等比缩到长边 VIDEO_BOX_LONG_SIDE。
+   * 横向 16:9 会正好得到 640x360 —— 与站方主题组件的产物一致,不引入观感差异;
+   * 竖屏则得到 360x640,这才是原先写死 640x360 时错掉的那一类。
+   * 量不到尺寸时退回 640x360(总得给个值,横向是更常见的情形)。
+   */
+  private static videoBox(width: number, height: number): VideoBox {
+    if (width <= 0 || height <= 0) {
+      return { width: VIDEO_BOX_LONG_SIDE, height: Math.round(VIDEO_BOX_LONG_SIDE * 9 / 16) };
+    }
+    const longSide: number = Math.max(width, height);
+    if (longSide <= VIDEO_BOX_LONG_SIDE) {
+      return { width: Math.round(width), height: Math.round(height) };
+    }
+    const factor: number = VIDEO_BOX_LONG_SIDE / longSide;
+    return {
+      width: Math.max(1, Math.round(width * factor)),
+      height: Math.max(1, Math.round(height * factor))
+    };
   }
 
   // markdown 链接文字里的 [ ] | 会破坏语法,与官方 uploads.js 一样直接剔除。
@@ -870,6 +922,13 @@ interface EncodedFile {
   height: number;
 }
 
+// <video> 标签的宽高属性值(不是真实像素,是等比缩到 VIDEO_BOX_LONG_SIDE 的展示框)。
+interface VideoBox {
+  width: number;
+  height: number;
+}
+
+// 图片重编码的目标尺寸。
 interface TargetSize {
   width: number;
   height: number;
