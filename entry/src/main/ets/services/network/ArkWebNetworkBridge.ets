@@ -14,6 +14,17 @@ import { createFetchScript, createFormScript, createHeaderedFetchScript, createI
 import { MessageBusEventBus } from '../message/MessageBusEventBus';
 
 const MEDIA_DOWNLOAD_TIMEOUT_MS: number = 120000;
+// 下载意图在队列里的最长存活时间。startDownload 成功返回不等于下载真的起得来(被 CF 拦、
+// 连接失败、用户从系统层取消),那种情况下 onBeforeDownload 永远不来,意图就永久留在队里 ——
+// 而队列是按 FIFO 认「这次回调是媒体还是附件」的,留一个死意图会让**此后所有**下载整体错位一格:
+// 媒体被存进附件目录、等待者只能等满 120s 超时,附件则被当成媒体吞掉、不再弹「已下载」。
+//
+// 这个值要对齐的是「startDownload 到 onBeforeDownload 的间隔」,**不是**整个下载耗时:
+// onBeforeDownload 是下载启动时的第一个回调,在任何字节传输之前就会到,正常只隔几百毫秒
+// (它的作用就是让我们指定保存路径)。所以取十几秒足够宽松。
+// 早先按媒体下载超时(120s+)来取是把两件事搞混了,后果是最常见的那条路径根本盖不住:
+// 下载起不来、用户立刻重试时,死意图才几秒大、不会被清掉,照样错位。
+const DOWNLOAD_INTENT_TTL_MS: number = 15000;
 const BODY_LOG_CHUNK_SIZE: number = 3000;
 // 响应体转储上限:仅对挑战/错误/异常响应保留头部证据(判定是挑战页还是数据),截断以控制日志体积。
 const BODY_LOG_MAX_CHARS: number = 1500;
@@ -67,10 +78,13 @@ class PendingJsonRequest {
 class DownloadIntent {
   isMedia: boolean;
   url: string;
+  // 入队时刻。onBeforeDownload 迟迟不来的意图会被当作「这次下载压根没起来」丢弃,见 pruneStaleIntents。
+  queuedAt: number;
 
   constructor(isMedia: boolean, url: string) {
     this.isMedia = isMedia;
     this.url = url;
+    this.queuedAt = Date.now();
   }
 }
 
@@ -281,6 +295,19 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     return promise;
   }
 
+  // 丢掉队首那些早就该被消费掉的意图。只从队首扫(队列按入队时间有序),遇到还新鲜的就停。
+  private pruneStaleIntents(): void {
+    const deadline: number = Date.now() - DOWNLOAD_INTENT_TTL_MS;
+    let dropped: number = 0;
+    while (this.downloadIntents.length > 0 && this.downloadIntents[0].queuedAt < deadline) {
+      this.downloadIntents.shift();
+      dropped++;
+    }
+    if (dropped > 0) {
+      Log.i(`[ArkDO][Network] dropped ${dropped} stale download intent(s)`);
+    }
+  }
+
   private settleMediaSuccess(url: string, path: string): void {
     this.mediaInflight.delete(url);
     this.mediaCache.set(url, path);
@@ -294,6 +321,14 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
   private settleMediaFailure(url: string, reason: Object): void {
     this.mediaInflight.delete(url);
+    // 刻意**保留** guid→url 映射,即使这次是超时失败。
+    //
+    // 那条映射是迟到的下载回调唯一的身份凭据:120s 超时先响之后,字节仍可能在 130s 到达,
+    // 此时若映射已被清掉,onDownloadFinish 认不出它是媒体 —— 会落进附件分支,
+    // 给一个只是想播放视频的用户弹「已下载:xxx.mp4」,而且 settleMediaSuccess 不跑、
+    // mediaCache 不写,文件明明已经躺在 media_cache 里,再点播放还要从头重下一遍。
+    // 保留映射则相反:迟到的完成回调照常写缓存,用户重试直接命中。
+    // 代价只是「既不完成也不失败」的下载会留下一条几十字节的记录,随进程消亡,可以接受。
     const waiter: MediaDownloadWaiter | undefined = this.mediaWaiters.get(url);
     if (waiter) {
       this.mediaWaiters.delete(url);
@@ -315,6 +350,8 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
       const delegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
       delegate.onBeforeDownload((item: webview.WebDownloadItem) => {
         // 先按发起顺序出队意图:委托的 getUrl() 已是 CDN 直链,无法回认,故靠 FIFO 顺序辨别媒体/附件。
+        // 出队前先清掉过期意图,避免一次「起不来的下载」把队列永久错开一格(见 DOWNLOAD_INTENT_TTL_MS)。
+        this.pruneStaleIntents();
         const intent: DownloadIntent | undefined = this.downloadIntents.shift();
         const isMedia: boolean = intent !== undefined && intent.isMedia;
         // 媒体下到独立目录(便于整目录清理、不误删用户附件);附件仍到 download。
@@ -595,36 +632,55 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     this.executor = executor;
   }
 
-  async getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
-    const requestPath: string = this.normalizePath(path);
-    logNetwork(`GET ${requestPath} start`);
+  private hostNotReadyFailure(verb: string, requestPath: string): NetworkResult<string> {
+    logNetwork(`${verb} ${requestPath} skipped: ArkWeb host is not ready`);
+    return {
+      success: false,
+      statusCode: 0,
+      challengeState: ChallengeState.NONE,
+      error: {
+        code: NetworkErrorCode.NETWORK_FAILURE,
+        message: 'ArkWeb 宿主尚未就绪。',
+        requiresChallenge: false
+      }
+    };
+  }
 
-    if (!AppConstants.HAS_ACTIVE_SITE) {
-      return this.noActiveSiteFailure('GET', requestPath);
+  /**
+   * 所有走「注入 fetch → 信封 → 挑战判定」的请求的公共骨架。
+   *
+   * 抽出来之前,getJson / postForm / postJson / uploadImage / putJson / sendFormWithBody 各自
+   * 复制了同一段二十来行(查站点 → 查 executor → 等门闩 → run → JSON.parse → convertEnvelope
+   * → catch),已经漂出过两处不一致:putJson 里有一段永远走不到的重复站点判断且日志动词标成了
+   * 'GET',而除 getJson/putJson 外的写方法**根本没有站点判断** —— 未选论坛时推送等后台链路
+   * 发出的写请求会拼出没有 host 的地址,报错难以理解。集中到这里后这两类问题都不可能再出现。
+   *
+   * verb 只用于日志(区分 GET / GET(headered) / POST(json) / UPLOAD…);method 参与
+   * convertEnvelope 的判定(POST 会额外打印 CSRF 诊断),两者刻意分开。
+   *
+   * requireActiveSite=false 只给挂在副站点文档上的桥实例用(credit.linux.do):它的地址不由
+   * 当前论坛派生,拿主站的「有没有选论坛」去拦它是错的。
+   */
+  private async execute(verb: string, requestPath: string, method: string,
+    buildScript: () => string, options?: JsonRequestOptions,
+    requireActiveSite: boolean = true): Promise<NetworkResult<string>> {
+    if (requireActiveSite && !AppConstants.HAS_ACTIVE_SITE) {
+      return this.noActiveSiteFailure(verb, requestPath);
     }
 
-    if (!this.executor) {
-      logNetwork(`GET ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
+    const executor: ArkWebJsonExecutor | undefined = this.executor;
+    if (!executor) {
+      return this.hostNotReadyFailure(verb, requestPath);
     }
 
     await this.whenHostReady();
 
     try {
-      const rawResult: string = await this.executor.run(createFetchScript(requestPath));
-      logNetwork(`GET ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
+      const rawResult: string = await executor.run(buildScript());
+      logNetwork(`${verb} ${requestPath} raw envelope received length=${rawResult.length}`);
+      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, method, options);
     } catch (error) {
-      logNetwork(`GET ${requestPath} failed before response envelope`);
+      logNetwork(`${verb} ${requestPath} failed before response envelope`);
       return {
         success: false,
         statusCode: 0,
@@ -638,6 +694,12 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     }
   }
 
+  async getJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
+    const requestPath: string = this.normalizePath(path);
+    logNetwork(`GET ${requestPath} start`);
+    return this.execute('GET', requestPath, 'GET', (): string => createFetchScript(requestPath), options);
+  }
+
   /**
    * 带自定义头 + Referer 的 GET。与 getJson 同一条链路(注入 fetch → 信封 → 挑战判定),只是允许
    * 调用方补请求头与 Referer。给挂在副站点文档上的桥实例用(credit.linux.do 的接口要求
@@ -647,40 +709,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
     options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
     logNetwork(`GET(headered) ${requestPath} start headerCount=${headers.length}`);
-
-    if (!this.executor) {
-      logNetwork(`GET(headered) ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const rawResult: string = await this.executor.run(createHeaderedFetchScript(requestPath, headers, referrer));
-      logNetwork(`GET(headered) ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'GET', options);
-    } catch (error) {
-      logNetwork(`GET(headered) ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 请求失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    // 不查「有没有选论坛」:这条路是给副站点(credit.linux.do)的桥实例用的,它的地址
+    // 不由当前论坛派生。
+    return this.execute('GET(headered)', requestPath, 'GET',
+      (): string => createHeaderedFetchScript(requestPath, headers, referrer), options, false);
   }
 
   /**
@@ -709,172 +741,36 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
 
   async postForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
-    logNetwork(`POST ${requestPath} start bodyLength=${body.length}`);
-
-    if (!this.executor) {
-      logNetwork(`POST ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(createFormScript('POST', requestPath, body, referrer));
-      logNetwork(`POST ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
-    } catch (error) {
-      logNetwork(`POST ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 请求失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    const referrer: string = options?.referrer ? options.referrer : '';
+    logNetwork(`POST ${requestPath} start bodyLength=${body.length} referrer=${referrer}`);
+    return this.execute('POST', requestPath, 'POST',
+      (): string => createFormScript('POST', requestPath, body, referrer), options);
   }
 
   async postJson(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
-    logNetwork(`POST(json) ${requestPath} start bodyLength=${body.length}`);
-
-    if (!this.executor) {
-      logNetwork(`POST(json) ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(createPostJsonScript(requestPath, body, referrer));
-      logNetwork(`POST(json) ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
-    } catch (error) {
-      logNetwork(`POST(json) ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 请求失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    const referrer: string = options?.referrer ? options.referrer : '';
+    logNetwork(`POST(json) ${requestPath} start bodyLength=${body.length} referrer=${referrer}`);
+    return this.execute('POST(json)', requestPath, 'POST',
+      (): string => createPostJsonScript(requestPath, body, referrer), options);
   }
 
   // 上传图片到 /uploads.json:base64 是压缩后图片字节的 base64。脚本在 host 文档内 atob 还原字节 →
   // Blob → FormData → fetch(过 CF、带 cookie)。CSRF 复用同源逻辑;不手动设 Content-Type(FormData 自带 boundary)。
   async uploadImage(base64: string, fileName: string, mimeType: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = '/uploads.json';
+    const referrer: string = options?.referrer ? options.referrer : '';
     logNetwork(`UPLOAD ${requestPath} start fileName=${fileName} base64Length=${base64.length}`);
-
-    if (!this.executor) {
-      logNetwork(`UPLOAD ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(createUploadScript(base64, fileName, mimeType, referrer));
-      logNetwork(`UPLOAD ${requestPath} raw envelope received length=${rawResult.length}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'POST', options);
-    } catch (error) {
-      logNetwork(`UPLOAD ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 上传失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    return this.execute('UPLOAD', requestPath, 'POST',
+      (): string => createUploadScript(base64, fileName, mimeType, referrer), options);
   }
 
   async putJson(path: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
-    logNetwork(`PUT ${requestPath} start`);
-
-    if (!AppConstants.HAS_ACTIVE_SITE) {
-      return this.noActiveSiteFailure('POST', requestPath);
-    }
-
-    if (!AppConstants.HAS_ACTIVE_SITE) {
-      return this.noActiveSiteFailure('GET', requestPath);
-    }
-
-    if (!this.executor) {
-      logNetwork(`PUT ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(createPutScript(requestPath, referrer));
-      logNetwork(`PUT ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, 'PUT', options);
-    } catch (error) {
-      logNetwork(`PUT ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 请求失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    const referrer: string = options?.referrer ? options.referrer : '';
+    logNetwork(`PUT ${requestPath} start referrer=${referrer}`);
+    return this.execute('PUT', requestPath, 'PUT',
+      (): string => createPutScript(requestPath, referrer), options);
   }
 
   async putForm(path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
@@ -889,42 +785,10 @@ export class ArkWebNetworkBridge implements JsonNetworkClient {
   // 仅 HTTP method 不同。
   private async sendFormWithBody(method: string, path: string, body: string, options?: JsonRequestOptions): Promise<NetworkResult<string>> {
     const requestPath: string = this.normalizePath(path);
-    logNetwork(`${method} ${requestPath} start bodyLength=${body.length}`);
-
-    if (!this.executor) {
-      logNetwork(`${method} ${requestPath} skipped: ArkWeb host is not ready`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 宿主尚未就绪。',
-          requiresChallenge: false
-        }
-      };
-    }
-
-    await this.whenHostReady();
-
-    try {
-      const referrer: string = options?.referrer ? options.referrer : '';
-      const rawResult: string = await this.executor.run(createFormScript(method, requestPath, body, referrer));
-      logNetwork(`${method} ${requestPath} raw envelope received length=${rawResult.length} referrer=${referrer}`);
-      return this.convertEnvelope(requestPath, JSON.parse(rawResult) as WebFetchEnvelope, method, options);
-    } catch (error) {
-      logNetwork(`${method} ${requestPath} failed before response envelope`);
-      return {
-        success: false,
-        statusCode: 0,
-        challengeState: ChallengeState.NONE,
-        error: {
-          code: NetworkErrorCode.NETWORK_FAILURE,
-          message: 'ArkWeb 请求失败。',
-          requiresChallenge: false
-        }
-      };
-    }
+    const referrer: string = options?.referrer ? options.referrer : '';
+    logNetwork(`${method} ${requestPath} start bodyLength=${body.length} referrer=${referrer}`);
+    return this.execute(method, requestPath, method,
+      (): string => createFormScript(method, requestPath, body, referrer), options);
   }
 
   private ensureWebviewExecutor(controller: webview.WebviewController): WebviewJsonExecutor {
