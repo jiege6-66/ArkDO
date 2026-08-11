@@ -107,8 +107,11 @@ export struct PostRichContent {
   // 与 onOpenLink 分开是因为可点的不止链接:灯箱大图、引用卡跳转也走 onOpenLink,
   // 但官方一律不计入点击数,混在一起会把统计打歪。
   onTrackLink: (url: string) => void = () => {};
-  // 引用卡右上角 arrow-up 点击:跳到被引用楼层。同帖(topicId==当前帖)由页面滚动定位,跨帖走 fallbackUrl 开详情。
+  // 引用卡右上角跳转箭头点击:跳到被引用楼层。同帖(topicId==当前帖)由页面滚动定位,跨帖走 fallbackUrl 开详情。
   onJumpToQuote: (topicId: number, postNumber: number, fallbackUrl: string) => void = () => {};
+  // 当前渲染的是第几楼:同帖引用卡据此判断跳转箭头朝上还是朝下(见 TopicQuoteBlock)。
+  // 0 = 无楼层上下文(编辑器预览、公告弹层),此时统一退回 arrow-up。
+  currentPostNumber: number = 0;
   // 取被引用楼层的全文 cooked:页面先翻已加载楼层,没有再 GET /posts/by_number 拉取。拿不到返回 ''。
   onResolveQuotedPost: (topicId: number, postNumber: number) => Promise<string> = () => Promise.resolve('');
   // 音视频播放:把媒体 URL 交给页面(经 bridge 下载委托过 CF)下到沙箱,返回本地路径。
@@ -583,13 +586,13 @@ export struct PostRichContent {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 话题/帖子引用卡(<aside class="quote" data-topic>):头部(圆头像 + 标题 + 分类徽章 + 折叠 chevron + 跳转 arrow-up)。
+  // 话题/帖子引用卡(<aside class="quote" data-topic>):头部(圆头像 + 标题 + 分类徽章 + 折叠 chevron + 跳转箭头)。
   // 折叠态始终显示 aside 内 blockquote 的截断预览;拿得到被引用楼层全文(同帖已加载)时才出 chevron,
-  // 展开显示该楼全文,再点收起。点 arrow-up 定位/跳转到被引用楼层。正文走 BlockView 同实例递归渲染。
+  // 展开显示该楼全文,再点收起。点跳转箭头定位/跳转到被引用楼层。正文走 BlockView 同实例递归渲染。
   @Builder
   private TopicQuoteBlock(block: RichBlock, marginTop: number, path: string) {
     Column() {
-      // 头部:头像 + (标题 / 分类) + 折叠 chevron + 跳转 arrow-up。
+      // 头部:头像 + (标题 / 分类) + 折叠 chevron + 跳转箭头。
       Row() {
         UserAvatar({ user: this.quoteAvatarUser(block), avatarSize: 24 })
           .margin({ right: 8 })
@@ -636,10 +639,11 @@ export struct PostRichContent {
           }
         }
 
-        // 跳转:同帖回复引用 → arrow-up(往上定位本帖楼层);跨帖引用 → arrow-right(打开另一个帖子)。
+        // 跳转:同帖回复引用 → 按被引用楼层在本楼之前/之后给 arrow-up / arrow-down(与官网
+        // quoted-content.gjs 的 navigateToPostIcon 一致);跨帖引用 → arrow-right(打开另一个帖子)。
         Row() {
           FaIconView({
-            icon: this.faIconOf(block.quoteIsReply ? 'arrow-up' : 'arrow-right'),
+            icon: this.faIconOf(this.quoteJumpIcon(block)),
             color: $r('app.color.text_tertiary'),
             iconSize: 16
           })
@@ -679,6 +683,18 @@ export struct PostRichContent {
     })
     .margin({ top: marginTop })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  // 引用卡跳转箭头的朝向。跨帖引用打开的是另一个帖子,与楼层前后无关 → 固定 arrow-right
+  // (官网这里不给按钮、把标题做成链接,移动端热区太小,我们保留独立按钮)。
+  // 同帖引用对齐官网 quoted-content.gjs:被引用楼在本楼之后朝下、之前(或同楼)朝上;
+  // currentPostNumber 为 0 表示没有楼层上下文(编辑器预览、公告弹层),退回 arrow-up。
+  private quoteJumpIcon(block: RichBlock): string {
+    if (!block.quoteIsReply) {
+      return 'arrow-right';
+    }
+    const quoted: number = block.quotePostNumber ? block.quotePostNumber : 0;
+    return this.currentPostNumber > 0 && quoted > this.currentPostNumber ? 'arrow-down' : 'arrow-up';
   }
 
   private isQuoteExpanded(path: string): boolean {

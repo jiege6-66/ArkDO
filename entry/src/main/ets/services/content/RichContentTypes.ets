@@ -126,7 +126,7 @@ export interface RichBlock {
   quoteTopicId?: number;
   quotePostNumber?: number;
   quoteCategory?: TopicCategory;
-  // 同帖回复引用(title 只有「显示名:」无话题链接):跳转是在本帖内往上定位到那一楼 → 用 arrow-up;
-  // 跨帖引用(有话题链接)则是打开另一个帖子 → 用 chevron-right。
+  // 同帖回复引用(title 只有「显示名:」无话题链接):跳转是在本帖内定位到那一楼 → 按被引用楼在
+  // 本楼之后/之前给 arrow-down / arrow-up;跨帖引用(有话题链接)则是打开另一个帖子 → 用 arrow-right。
   quoteIsReply?: boolean;
 }

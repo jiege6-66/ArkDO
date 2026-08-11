@@ -208,6 +208,7 @@ export struct TopicPostItem {
             onJumpToQuote: this.onJumpToQuote,
             onResolveQuotedPost: this.onResolveQuotedPost,
             onResolveMedia: this.onResolveMedia,
+            currentPostNumber: this.post.postNumber,
             polls: this.post.polls ? this.post.polls : [],
             linkClicks: this.post.linkClicks,
             onTrackLink: (url: string) => {
@@ -576,6 +577,7 @@ export struct TopicPostItem {
                     onJumpToQuote: this.onJumpToQuote,
                     onResolveQuotedPost: this.onResolveQuotedPost,
                     onResolveMedia: this.onResolveMedia,
+                    currentPostNumber: reply.postNumber,
                     linkClicks: reply.linkClicks,
                     onTrackLink: (url: string) => {
                       this.onTrackLinkClick(reply, url);

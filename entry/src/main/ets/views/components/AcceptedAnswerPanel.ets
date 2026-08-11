@@ -158,6 +158,7 @@ struct AcceptedAnswerCard {
                 onResolveMedia: this.onResolveMedia,
                 onJumpToQuote: this.onJumpToQuote,
                 onResolveQuotedPost: this.onResolveQuotedPost,
+                currentPostNumber: this.answer.postNumber,
                 polls: []
               })
                 .width('100%')
