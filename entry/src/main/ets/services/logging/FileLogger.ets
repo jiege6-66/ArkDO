@@ -58,7 +58,7 @@ export class FileLogger {
     }
     const line: string = `${FileLogger.timestamp()} ${level} ${message}\n`;
     FileLogger.buffer.push(line);
-    FileLogger.bufferBytes += line.length;
+    FileLogger.bufferBytes += FileLogger.utf8Length(line);
     if (FileLogger.bufferBytes >= FLUSH_SIZE_THRESHOLD) {
       FileLogger.flush();
     } else {
@@ -73,10 +73,11 @@ export class FileLogger {
       return;
     }
     const chunk: string = FileLogger.buffer.join('');
+    const chunkBytes: number = FileLogger.bufferBytes;
     FileLogger.buffer = [];
     FileLogger.bufferBytes = 0;
     try {
-      if (FileLogger.currentFileBytes + chunk.length > MAX_FILE_BYTES) {
+      if (FileLogger.currentFileBytes + chunkBytes > MAX_FILE_BYTES) {
         FileLogger.rotate();
         FileLogger.currentFileBytes = 0;
       }
@@ -177,6 +178,8 @@ export class FileLogger {
     FileLogger.persist(context, PREF_KEY_VERBOSE, value);
   }
 
+  // 刻意不走 AppSettingsStore:它经 Log 门面写日志,而 Log 又要回头调 FileLogger.append,
+  // 在 init 尚未完成时形成循环依赖。这里是全 app 唯一还直接开 preferences 的地方。
   private static loadPreferences(context: common.Context): void {
     try {
       const store: preferences.Preferences = preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
@@ -307,6 +310,37 @@ export class FileLogger {
     const ss: string = FileLogger.pad(now.getSeconds(), 2);
     const ms: string = FileLogger.pad(now.getMilliseconds(), 3);
     return `${mm}-${dd} ${hh}:${mi}:${ss}.${ms}`;
+  }
+
+  /**
+   * 字符串写成 UTF-8 后的字节数。
+   *
+   * 必须自己算,不能用 `String.length` —— 那是 UTF-16 码元数,而 writeSync 落盘的是 UTF-8。
+   * 本项目的日志几乎全是中文(一个汉字 length 记 1、实际 3 字节),用 length 的话:
+   *  · 64 KB 的刷盘门槛实际要攒到约 190 KB 才触发,而 flush() 是 UI 线程上的同步写,
+   *    单次写三倍大意味着单次卡顿也是三倍;
+   *  · 1 MB 的轮转阈值同样偏晚,「单文件 ≤1 MB、总占用 ≤3 MB」的承诺兑现不了;
+   *  · 设置页显示的日志占用偏小。
+   *
+   * 代理对(emoji)按 4 字节算:高代理后面跟着低代理,合起来是一个 4 字节的 UTF-8 序列,
+   * 故遇到高代理时直接记 4 并跳过下一个码元。
+   */
+  private static utf8Length(text: string): number {
+    let bytes: number = 0;
+    for (let index: number = 0; index < text.length; index++) {
+      const code: number = text.charCodeAt(index);
+      if (code < 0x80) {
+        bytes += 1;
+      } else if (code < 0x800) {
+        bytes += 2;
+      } else if (code >= 0xD800 && code <= 0xDBFF && index + 1 < text.length) {
+        bytes += 4;
+        index++;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
   }
 
   private static pad(value: number, width: number): string {
