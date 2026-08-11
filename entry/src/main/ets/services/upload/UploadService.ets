@@ -9,7 +9,8 @@ import { AppConstants } from '../../common/constants/AppConstants';
 import { JsonNetworkClient, NetworkResult } from '../network/NetworkTypes';
 import { discourseErrorMessage } from '../network/DiscourseErrors';
 import { IMAGE_EXTENSIONS, SiteSettingsService, SiteUploadSettings } from '../site/SiteSettingsService';
-import { VideoSize, VideoTranscodeHooks, VideoTranscodeResult, VideoTranscoder } from './VideoTranscoder';
+import { VideoProbe, VideoSize, VideoTranscodeHooks, VideoTranscodeResult, VideoTranscoder } from './VideoTranscoder';
+import { LoginGate, TRUST_LEVEL_UNKNOWN } from '../session/LoginGate';
 
 // POST /uploads/lookup-urls 的响应项:把 upload:// 短码换成真实 CDN 直链。
 interface DiscourseLookupUrlItem {
@@ -88,8 +89,15 @@ const PNG_CHUNK_SCAN_BYTES: number = 4096;
  */
 const CLIENT_MAX_UPLOAD_BYTES: number = 32 * 1024 * 1024;
 
-// 一次最多选几个文件/视频。
+// 一次最多选几张图。相册多选,给得比文件宽松些(选图常常一次好几张)。
+export const MAX_PICK_IMAGES: number = 9;
+// 一次最多选几个文件/视频。附件单个体积远大于图,给得更保守。
 export const MAX_PICK_FILES: number = 5;
+
+// upload:// 短码的形状:base62 摘要 + 扩展名。
+// 只给 resolvePreviewHtml 的 replace() 用 —— replace 每次都会把 lastIndex 归零,共享安全。
+// prefetchShortUrls 走的是 exec() 循环,它会推进 lastIndex,必须各自 new 一个,不能共用这个。
+const SHORT_URL_PATTERN: RegExp = new RegExp('upload://[A-Za-z0-9]+\\.[A-Za-z0-9]+', 'g');
 
 /**
  * linux.do 传音视频时伪装用的扩展名。
@@ -110,23 +118,27 @@ const VIDEO_BOX_LONG_SIDE: number = 640;
 
 // 常见扩展名 → MIME。Discourse 服务端实际按文件名重新判定(MiniMime.lookup_by_filename),
 // 这里给个像样的值即可,认不出就 octet-stream。
-const MIME_BY_EXTENSION: Record<string, string> = {
-  'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
-  'webp': 'image/webp', 'avif': 'image/avif', 'heic': 'image/heic', 'heif': 'image/heif',
-  'svg': 'image/svg+xml', 'bmp': 'image/bmp', 'ico': 'image/x-icon', 'jxl': 'image/jxl',
-  'mp4': 'video/mp4', 'm4v': 'video/mp4', 'mov': 'video/quicktime', 'webm': 'video/webm',
-  'mkv': 'video/x-matroska', '3gp': 'video/3gpp', 'avi': 'video/x-msvideo',
-  'mp3': 'audio/mpeg', 'm4a': 'audio/mp4', 'aac': 'audio/aac', 'wav': 'audio/wav',
-  'ogg': 'audio/ogg', 'oga': 'audio/ogg', 'opus': 'audio/opus', 'flac': 'audio/flac',
-  'pdf': 'application/pdf', 'txt': 'text/plain', 'md': 'text/markdown', 'csv': 'text/csv',
-  'json': 'application/json', 'yml': 'text/yaml', 'yaml': 'text/yaml',
-  'zip': 'application/zip', '7z': 'application/x-7z-compressed', 'gz': 'application/gzip',
-  'xz': 'application/x-xz', 'tar': 'application/x-tar', 'rar': 'application/vnd.rar',
-  'doc': 'application/msword',
-  'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'xls': 'application/vnd.ms-excel',
-  'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-};
+//
+// 用 Map 而不是对象字面量:键来自用户选的文件名(extensionOf 的输出),而对象查表会命中
+// 原型链 —— 一个叫 `x.constructor` 的文件会让 `MIME[ext]` 返回 Object 构造函数而不是
+// undefined,于是一个函数被当成 MIME 串塞进上传脚本。Map 没有这个面。
+const MIME_BY_EXTENSION: Map<string, string> = new Map<string, string>([
+  ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['png', 'image/png'], ['gif', 'image/gif'],
+  ['webp', 'image/webp'], ['avif', 'image/avif'], ['heic', 'image/heic'], ['heif', 'image/heif'],
+  ['svg', 'image/svg+xml'], ['bmp', 'image/bmp'], ['ico', 'image/x-icon'], ['jxl', 'image/jxl'],
+  ['mp4', 'video/mp4'], ['m4v', 'video/mp4'], ['mov', 'video/quicktime'], ['webm', 'video/webm'],
+  ['mkv', 'video/x-matroska'], ['3gp', 'video/3gpp'], ['avi', 'video/x-msvideo'],
+  ['mp3', 'audio/mpeg'], ['m4a', 'audio/mp4'], ['aac', 'audio/aac'], ['wav', 'audio/wav'],
+  ['ogg', 'audio/ogg'], ['oga', 'audio/ogg'], ['opus', 'audio/opus'], ['flac', 'audio/flac'],
+  ['pdf', 'application/pdf'], ['txt', 'text/plain'], ['md', 'text/markdown'], ['csv', 'text/csv'],
+  ['json', 'application/json'], ['yml', 'text/yaml'], ['yaml', 'text/yaml'],
+  ['zip', 'application/zip'], ['7z', 'application/x-7z-compressed'], ['gz', 'application/gzip'],
+  ['xz', 'application/x-xz'], ['tar', 'application/x-tar'], ['rar', 'application/vnd.rar'],
+  ['doc', 'application/msword'],
+  ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['xls', 'application/vnd.ms-excel'],
+  ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+]);
 
 /**
  * 上传服务:选文件 → 按需处理 → base64 → 经 host webview multipart 传 /uploads.json。
@@ -224,24 +236,31 @@ export class UploadService {
    * 提前按原图判会把本来能传的图误拒。
    */
   async uploadImageUri(uri: string): Promise<UploadOutcome> {
-    let encoded: EncodedFile | undefined;
+    const settings: SiteUploadSettings = await this.settings();
+    let encoded: EncodeOutcome;
     try {
-      encoded = await this.encodeForUpload(uri);
+      encoded = await this.encodeForUpload(uri, settings.maxImageSizeKb);
     } catch (error) {
       const err: BusinessError = error as BusinessError;
       Log.i(`[ArkDO][Upload] encode failed code=${err.code} msg=${err.message}`);
       return { error: '图片读取失败' };
     }
-    if (!encoded) {
+    // 原样上传的分支已在读盘前判过超限(见 encodeForUpload),这里拿到的是可展示文案。
+    if (encoded.error !== undefined) {
+      return { error: encoded.error };
+    }
+    const file: EncodedFile | undefined = encoded.file;
+    if (!file) {
       return { error: '图片读取失败' };
     }
 
-    const settings: SiteUploadSettings = await this.settings();
-    const overLimit: string = UploadService.checkSize(encoded.byteLength, settings.maxImageSizeKb, '图片');
+    // 重编码分支还要再判一次:服务端量的是它收到的字节数,原图 6 MB 但压完 800 KB 是能过的,
+    // 所以那条路只能等编完才知道结果。
+    const overLimit: string = UploadService.checkSize(file.byteLength, settings.maxImageSizeKb, '图片');
     if (overLimit.length > 0) {
       return { error: overLimit };
     }
-    return this.uploadEncoded(encoded);
+    return this.uploadEncoded(file);
   }
 
   /**
@@ -281,9 +300,12 @@ export class UploadService {
     // 播放方向尺寸,给 <video> 标签的宽高属性用。/uploads.json 对 .xz 回的 width/height
     // 是 null(服务端只认得图片),不自己量就只能写死一个横向框,竖屏视频会被摆歪。
     // 读元数据很快,失败也不致命(退回默认框),故不阻断上传。
+    // probe 本体留着往下传给 fit(),省掉压缩路径里那次重复探测。
+    let probe: VideoProbe | undefined;
     let display: VideoSize | undefined;
     try {
-      display = VideoTranscoder.displaySize(await VideoTranscoder.probeVideo(uri));
+      probe = await VideoTranscoder.probeVideo(uri);
+      display = VideoTranscoder.displaySize(probe);
     } catch (error) {
       Log.i('[ArkDO][Upload] probe for display size failed, falling back to default box');
     }
@@ -303,7 +325,7 @@ export class UploadService {
     this.activeTranscoder = transcoder;
     let compressed: VideoTranscodeResult;
     try {
-      compressed = await transcoder.fit(uri, limitBytes, hooks);
+      compressed = await transcoder.fit(uri, limitBytes, hooks, probe);
     } finally {
       this.activeTranscoder = undefined;
     }
@@ -459,12 +481,18 @@ export class UploadService {
 
   // 预览用:把 markdown-it 编译出的 HTML 里 <img src="upload://…"> 的短码换成真实直链。
   // CookedHtmlParser 对 upload:// 原样返回、无法加载,故预览前必须替换成本次上传拿到的直链。
+  //
+  // 单遍正则 + 查表,而不是「对映射表每一条做一次全文 split/join」—— 后者是
+  // O(已上传条数 × 正文长度),传了十几张图之后每次预览渲染都要把全文扫十几遍。
+  // 表里没有的短码原样留着(可能是别处传的),交给 prefetchShortUrls 去补。
   resolvePreviewHtml(html: string): string {
-    let result: string = html;
-    this.shortUrlToRealUrl.forEach((realUrl: string, shortUrl: string) => {
-      result = result.split(shortUrl).join(realUrl);
+    if (this.shortUrlToRealUrl.size === 0) {
+      return html;
+    }
+    return html.replace(SHORT_URL_PATTERN, (match: string): string => {
+      const real: string | undefined = this.shortUrlToRealUrl.get(match);
+      return real !== undefined ? real : match;
     });
-    return result;
   }
 
   // 预解析正文里「本会话没上传过」的 upload:// 短码:草稿续写/编辑旧帖时,图片是以前传的,
@@ -586,21 +614,40 @@ export class UploadService {
     return SiteSettingsService.load(this.bridge);
   }
 
-  /** 该扩展名是否被站点允许(含 staff 专属白名单)。 */
+  /**
+   * 当前用户实际可用的扩展名白名单。
+   *
+   * authorized_extensions_for_staff 顾名思义只对版主/管理员生效(服务端在
+   * lib/validators/upload_validator.rb 里也是按 user.staff? 才并进去的)。普通用户身上
+   * 也算进来的话,会在「选文件」对话框里看到一堆自己传不了的后缀,选完传上去才被拒。
+   */
+  private static allowedExtensions(settings: SiteUploadSettings): string[] {
+    // 身份未知时**按 staff 放行**,与 LoginGate.canUploadAttachment 同一条约定:
+    // staffValue 初值是 false,只有 /session/current.json 落地才会写真;登出与切站又清回 false。
+    // 所以对版主/管理员来说,首次会话检查回来之前(以及那次检查因撞盾/离线而失败时,整个会话)
+    // isStaff() 都是 false。此时若按"非 staff"处理,选择器会把他真能传的后缀过滤掉、
+    // uploadFileUri 还会直接回一句「本站不允许上传 .xxx 文件」—— 而服务端其实是收的。
+    // 宁可放行让服务端裁决(我们会把 422 的原因显示出来),也不要凭一个尚未就位的身份藏掉功能。
+    const privileged: boolean =
+      LoginGate.isStaff() || LoginGate.trustLevel() === TRUST_LEVEL_UNKNOWN;
+    if (!privileged) {
+      return settings.authorizedExtensions;
+    }
+    return settings.authorizedExtensions.concat(settings.authorizedExtensionsForStaff);
+  }
+
+  /** 该扩展名是否被站点允许(staff 才额外享有 staff 白名单)。 */
   private static isAuthorized(extension: string, settings: SiteUploadSettings): boolean {
     if (extension.length === 0) {
       return false;
     }
-    if (settings.authorizedExtensions.indexOf(extension) >= 0) {
-      return true;
-    }
-    return settings.authorizedExtensionsForStaff.indexOf(extension) >= 0;
+    return UploadService.allowedExtensions(settings).indexOf(extension) >= 0;
   }
 
-  /** 站点允许的非图片扩展名。选文件对话框的后缀过滤用它。 */
+  /** 当前用户能传的非图片扩展名。选文件对话框的后缀过滤用它。 */
   static nonImageExtensions(settings: SiteUploadSettings): string[] {
     const result: string[] = [];
-    const all: string[] = settings.authorizedExtensions.concat(settings.authorizedExtensionsForStaff);
+    const all: string[] = UploadService.allowedExtensions(settings);
     for (let index: number = 0; index < all.length; index++) {
       const ext: string = all[index];
       if (!UploadService.isImageExtension(ext) && result.indexOf(ext) < 0) {
@@ -676,34 +723,49 @@ export class UploadService {
   }
 
   static mimeFor(extension: string): string {
-    const known: string | undefined = MIME_BY_EXTENSION[extension];
+    const known: string | undefined = MIME_BY_EXTENSION.get(extension);
     return known !== undefined ? known : 'application/octet-stream';
   }
 
   // ==================== 图片编码 ====================
 
-  // 把 uri 编码成可上传的字节。策略对齐 Discourse 官方 composer:只有 jpeg/png 且体积过门槛才重编码,
-  // 带透明通道编 WebP(不支持则 PNG)以保住 alpha,其余格式(gif/webp/bmp/…)一律原样传。
-  // 重编码失败、或结果反而更大,都退回原图字节——原图永远是安全兜底。
-  private async encodeForUpload(uri: string): Promise<EncodedFile | undefined> {
+  /**
+   * 把 uri 编码成可上传的字节。策略对齐 Discourse 官方 composer:只有 jpeg/png 且体积过门槛才重编码,
+   * 带透明通道编 WebP(不支持则 PNG)以保住 alpha,其余格式(gif/webp/bmp/…)一律原样传。
+   * 重编码失败、或结果反而更大,都退回原图字节——原图永远是安全兜底。
+   *
+   * limitKb 是本站图片上限。**所有原样上传的分支都在 readRaw 之前先判超限** —— 与 uploadRawFile
+   * 同一条规则:readRaw 会 `new ArrayBuffer(size)` 再 base64(峰值约 2.3 倍文件体积),
+   * 一个 80 MB 的动图会在「告诉用户传不了」之前先吃掉近 200 MB。
+   * 重编码分支不在这里判:它的产物体积要编完才知道,由调用方在拿到结果后再判。
+   */
+  private async encodeForUpload(uri: string, limitKb: number): Promise<EncodeOutcome> {
     const file: fs.File = fs.openSync(uri, fs.OpenMode.READ_ONLY);
     try {
       const originalSize: number = fs.statSync(file.fd).size;
       const format: string = this.sniffFormat(file);
       const raw: RawDescriptor = UploadService.rawDescriptor(format);
+      // 原样上传前的守卫:超限就直接回文案,一个字节都不读进内存。
+      const rawGuard: () => EncodeOutcome = (): EncodeOutcome => {
+        const overLimit: string = UploadService.checkSize(originalSize, limitKb, '图片');
+        if (overLimit.length > 0) {
+          return { error: overLimit };
+        }
+        return { file: this.readRaw(file, originalSize, raw.fileName, raw.mimeType) };
+      };
 
       // gif/webp/bmp 等不重编码:gif 会丢动画,其余官方端同样不碰。
       if (!raw.optimizable) {
-        return this.readRaw(file, originalSize, raw.fileName, raw.mimeType);
+        return rawGuard();
       }
       // HEIC 论坛多半不在 authorized_extensions 里,原样传会被拒,故无视体积门槛一律转码。
       const mustConvert: boolean = format === 'heic';
       if (!mustConvert && originalSize < BYTES_OPTIMIZATION_THRESHOLD) {
-        return this.readRaw(file, originalSize, raw.fileName, raw.mimeType);
+        return rawGuard();
       }
       // APNG 的动画帧会被解码器丢掉只剩首帧,故原样传。
       if (format === 'png' && this.isAnimatedPng(file)) {
-        return this.readRaw(file, originalSize, raw.fileName, raw.mimeType);
+        return rawGuard();
       }
 
       let optimized: EncodedFile | undefined;
@@ -713,7 +775,8 @@ export class UploadService {
         const err: BusinessError = error as BusinessError;
         Log.i(`[ArkDO][Upload] optimize failed code=${err.code} msg=${err.message}, keeping original`);
       }
-      return optimized ? optimized : this.readRaw(file, originalSize, raw.fileName, raw.mimeType);
+      // 退回原图这条路同样要过守卫:压不动的大图(编完反而更大)不该被整个读进内存。
+      return optimized !== undefined ? { file: optimized } : rawGuard();
     } finally {
       fs.closeSync(file);
     }
@@ -783,11 +846,40 @@ export class UploadService {
 
     const buffer: ArrayBuffer = new ArrayBuffer(pixelMap.getPixelBytesNumber());
     await pixelMap.readPixelsToBuffer(buffer);
-    const bytes: Uint8Array = new Uint8Array(buffer);
     // 逐行按 stride 走:行尾可能有对齐填充,填充字节是 0,顺序扫会把它误判成透明像素。
     const width: number = info.size.width;
     const height: number = info.size.height;
     const stride: number = info.stride > 0 ? info.stride : width * 4;
+
+    // 判定必须精确,不能抽样:漏判一个透明像素就会去编 JPEG,透明区被拍平成黑色 ——
+    // 这是肉眼可见的损坏,而反向猜错(以为有透明、其实没有)只是多编一份 PNG/WebP。
+    // 所以这里不省"扫多少",只省"每个像素多贵"。
+    //
+    // 命中透明会立刻返回,故最坏情况是「有 alpha 通道但整幅不透明」—— 恰恰是最常见的输入
+    // (截图 PNG)。用 Uint32Array 一次取出整个像素,比逐字节算下标快数倍:
+    // RGBA_8888 与 BGRA_8888 的 alpha 都落在像素的第 4 字节,小端下即 u32 的最高字节,
+    // 故两种排布共用同一条判断。
+    //
+    // 取 alpha 必须用无符号右移而不是 `& 0xFF000000`:JS 的位与会把两边转成有符号 int32,
+    // 0xFF000000 变成负数,与字面量 0xFF000000(正的 4278190080)永远不相等 ——
+    // 那样写会把每个像素都判成透明。`>>> 24` 直接得到 0~255 的 alpha,没有这个坑。
+    //
+    // stride 不是 4 的倍数时(RGBA 下理论上不会,兜底)退回逐字节。
+    if (stride % 4 === 0) {
+      const words: Uint32Array = new Uint32Array(buffer);
+      const rowWords: number = stride / 4;
+      for (let y: number = 0; y < height; y++) {
+        const rowStart: number = y * rowWords;
+        for (let x: number = 0; x < width; x++) {
+          if ((words[rowStart + x] >>> 24) !== 255) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    const bytes: Uint8Array = new Uint8Array(buffer);
     for (let y: number = 0; y < height; y++) {
       const rowStart: number = y * stride;
       for (let x: number = 3; x < width * 4; x += 4) {
@@ -910,6 +1002,12 @@ interface RawDescriptor {
   fileName: string;
   mimeType: string;
   optimizable: boolean;
+}
+
+// encodeForUpload 的结果:要么拿到可上传的字节,要么在读盘前就判定超限(error 是可展示文案)。
+interface EncodeOutcome {
+  file?: EncodedFile;
+  error?: string;
 }
 
 // 编码后待上传的字节。byteLength 是真实字节数(不是 base64 长度),体积上限按它判。

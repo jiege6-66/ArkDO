@@ -29,6 +29,7 @@ import { RealtimePostsPrefs } from '../services/realtime/RealtimePostsPrefs';
 import { FabGlassPrefs } from '../common/ui/FabGlassPrefs';
 import { TopicListStylePrefs } from '../common/theme/TopicListStylePrefs';
 import { AnimatedAvatarPrefs } from '../services/avatar/AnimatedAvatarPrefs';
+import { VideoTranscoder } from '../services/upload/VideoTranscoder';
 
 const DOMAIN = 0x0000;
 
@@ -83,6 +84,9 @@ export default class EntryAbility extends UIAbility {
     this.loadIconAssets();
     // 冷启动清空音视频缓存目录,避免下载文件无限堆积占存储。
     ArkWebNetworkBridge.clearMediaCacheDir(this.context);
+    // 同理清掉遗留的视频转码产物:压缩一段 1080p 要十几秒,期间被系统回收或崩溃时
+    // UploadService 的 discard 根本不会跑,几十 MB 的临时 mp4 就永久留在 cacheDir 里。
+    VideoTranscoder.clearStaleOutputs(this.context);
     this.loadPushRelayConfig();
     this.registerPushTokenUpdate();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');

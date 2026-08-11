@@ -58,12 +58,22 @@ interface DiscourseClientSettings {
   newuser_max_embedded_media?: number;
 }
 
-// Discourse 出厂默认值,拉取失败时的兜底。
+/**
+ * Discourse 出厂默认值,拉取失败时的兜底。数字逐项对齐 config/site_settings.yml。
+ *
+ * 白名单单列一份而不是复用 IMAGE_EXTENSIONS:那张表是「Discourse 认定为图片的扩展名」
+ * (决定走哪条体积上限,来自 lib/file_helper.rb),与「默认允许上传哪些扩展名」
+ * (authorized_extensions)是两回事 —— 后者不含 ico。两者恰好高度重合,但语义不同,
+ * 混用会在其中一张表改动时悄悄带歪另一处。
+ */
+const DEFAULT_AUTHORIZED_EXTENSIONS: string[] =
+  ['jpg', 'jpeg', 'png', 'gif', 'heic', 'heif', 'webp', 'avif', 'svg', 'jxl'];
+
 function defaultSettings(): SiteUploadSettings {
   return {
     maxImageSizeKb: 10240,
     maxAttachmentSizeKb: 10240,
-    authorizedExtensions: IMAGE_EXTENSIONS.slice(),
+    authorizedExtensions: DEFAULT_AUTHORIZED_EXTENSIONS.slice(),
     authorizedExtensionsForStaff: [],
     newuserMaxAttachments: 0,
     newuserMaxEmbeddedMedia: 5
@@ -76,7 +86,10 @@ export class SiteSettingsService {
   private static cachedHost: string = '';
   private static cachedSettings: SiteUploadSettings | undefined = undefined;
   // 同一时刻只允许一发在途:编辑器可能同时问附件上限和白名单,不必打两次。
+  // **必须连 host 一起记**:切站时上一个站的请求可能还在飞,只看「有没有在途」就复用的话,
+  // 新站会拿到旧站的上传上限与白名单(而且随后 fetch 收尾还会把 cachedHost 写成旧站)。
   private static inflight: Promise<SiteUploadSettings> | undefined = undefined;
+  private static inflightHost: string = '';
 
   /**
    * 取当前站点的上传设置。命中缓存直接返回,否则拉一次。
@@ -89,15 +102,20 @@ export class SiteSettingsService {
       return cached;
     }
     const inflight: Promise<SiteUploadSettings> | undefined = SiteSettingsService.inflight;
-    if (inflight) {
+    if (inflight && SiteSettingsService.inflightHost === host) {
       return inflight;
     }
     const task: Promise<SiteUploadSettings> = SiteSettingsService.fetch(bridge, host);
     SiteSettingsService.inflight = task;
+    SiteSettingsService.inflightHost = host;
     try {
       return await task;
     } finally {
-      SiteSettingsService.inflight = undefined;
+      // 只销自己那一笔:切站后本次收尾时,in-flight 位可能已经被新站的请求占了。
+      if (SiteSettingsService.inflight === task) {
+        SiteSettingsService.inflight = undefined;
+        SiteSettingsService.inflightHost = '';
+      }
     }
   }
 
@@ -140,6 +158,15 @@ export class SiteSettingsService {
         typeof parsed.newuser_max_embedded_media === 'number' ? parsed.newuser_max_embedded_media : fallback.newuserMaxEmbeddedMedia
     };
     // 只在拿到真数据后才写缓存;失败态不缓存,下次进编辑器还会再试。
+    //
+    // 还要确认「拉的时候是哪个站,现在还是不是」:用户可能在这次请求在途期间切了站,
+    // 而两个站的响应回来的先后顺序是不定的。晚回来的旧站请求若无条件写缓存,
+    // cachedHost 就会被按回旧站 —— 不会给出错数据(load/snapshot 都比 host),
+    // 但 snapshot() 会返回 undefined 让编辑器的附件按钮退回保守态,下次 load() 还得重发一遍。
+    if (AppConstants.HOST !== host) {
+      Log.i(`${LOG_TAG} site switched while loading (${host} -> ${AppConstants.HOST}), not caching`);
+      return settings;
+    }
     SiteSettingsService.cachedHost = host;
     SiteSettingsService.cachedSettings = settings;
     Log.i(`${LOG_TAG} loaded host=${host} image=${settings.maxImageSizeKb}KB attachment=${settings.maxAttachmentSizeKb}KB exts=${settings.authorizedExtensions.length}`);

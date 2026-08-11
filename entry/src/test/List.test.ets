@@ -44,6 +44,7 @@ import lotteryTopicRuleTest from './LotteryTopicRule.test';
 import linkClicksTest from './LinkClicks.test';
 import topicListStyleTest from './TopicListStyle.test';
 import breakpointManagerTest from './BreakpointManager.test';
+import uploadPermissionsTest from './UploadPermissions.test';
 import readingTrackerRetryTest from './ReadingTrackerRetry.test';
 
 export default function testsuite() {
@@ -92,5 +93,6 @@ export default function testsuite() {
   linkClicksTest();
   topicListStyleTest();
   breakpointManagerTest();
+  uploadPermissionsTest();
   readingTrackerRetryTest();
 }

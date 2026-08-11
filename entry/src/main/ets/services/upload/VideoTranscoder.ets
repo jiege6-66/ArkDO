@@ -83,6 +83,9 @@ const MAX_PASSES: number = 3;
 const RETRY_SHRINK: number = 0.9;
 // 低于此短边就认为画质已经明显劣化,提示用户。
 const DEGRADED_SHORT_SIDE: number = 360;
+// 转码产物的文件名前缀。冷启动清扫(clearStaleOutputs)靠它认出「是我们留下的」,
+// 故此处与产物命名必须共用同一个常量。
+const TRANSCODE_FILE_PREFIX: string = 'arkdo_transcode_';
 
 export class VideoTranscoder {
   private context: common.Context;
@@ -98,17 +101,25 @@ export class VideoTranscoder {
   /**
    * 把 sourceUri 压到 targetBytes 以内。成功返回沙箱里的 mp4 路径。
    * 全程不抛异常,失败以 result.error 返回可展示文案。
+   *
+   * known 是调用方已经探过的元数据。探测要开 fd、建 extractor、解容器头,而 UploadService
+   * 为了给 <video> 标签算播放方向尺寸本来就先探了一次 —— 传进来就不必再探第二遍。
    */
-  async fit(sourceUri: string, targetBytes: number, hooks?: VideoTranscodeHooks): Promise<VideoTranscodeResult> {
+  async fit(sourceUri: string, targetBytes: number, hooks?: VideoTranscodeHooks,
+    known?: VideoProbe): Promise<VideoTranscodeResult> {
     this.cancelled = false;
 
     let probe: VideoProbe;
-    try {
-      probe = await VideoTranscoder.probeVideo(sourceUri);
-    } catch (error) {
-      const err: BusinessError = error as BusinessError;
-      Log.i(`${LOG_TAG} probe failed code=${err.code} msg=${err.message}`);
-      return { error: '读不出这个视频的信息，无法压缩' };
+    if (known !== undefined) {
+      probe = known;
+    } else {
+      try {
+        probe = await VideoTranscoder.probeVideo(sourceUri);
+      } catch (error) {
+        const err: BusinessError = error as BusinessError;
+        Log.i(`${LOG_TAG} probe failed code=${err.code} msg=${err.message}`);
+        return { error: '读不出这个视频的信息，无法压缩' };
+      }
     }
     if (probe.durationSeconds <= 0 || probe.width <= 0 || probe.height <= 0) {
       return { error: '读不出这个视频的时长或尺寸，无法压缩' };
@@ -147,7 +158,7 @@ export class VideoTranscoder {
       }
       const targetShort: number = Math.min(sourceShort, LADDER[tierIndex].short);
       const size: VideoSize | undefined = VideoTranscoder.scaleTo(probe.width, probe.height, targetShort);
-      const outputPath: string = `${this.context.cacheDir}/arkdo_transcode_${Date.now()}_${pass}.mp4`;
+      const outputPath: string = `${this.context.cacheDir}/${TRANSCODE_FILE_PREFIX}${Date.now()}_${pass}.mp4`;
       const sizeLabel: string = size ? `${size.width}x${size.height}` : `${probe.width}x${probe.height}(原样)`;
       Log.i(`${LOG_TAG} pass=${pass} ${sizeLabel} videoBps=${Math.round(videoBps)}`);
 
@@ -216,6 +227,33 @@ export class VideoTranscoder {
       fs.unlinkSync(path);
     } catch (error) {
       // 文件本来就不存在(压缩没跑到产出这步)时会抛,无害。
+    }
+  }
+
+  /**
+   * 冷启动清扫遗留的转码产物。正常路径上 discard() 已经删干净了,这里兜的是**没有正常路径**
+   * 的那种收场:压 1080p 要十几秒,期间切后台被系统回收、或崩溃,finally 根本不会跑,
+   * 产物(可能几十 MB)就永久留在 cacheDir 里。
+   *
+   * 与 ArkWebNetworkBridge.clearMediaCacheDir 同一时机、同一理由调用。只删我们自己的前缀,
+   * 不动 cacheDir 里别人的东西。
+   */
+  static clearStaleOutputs(context: common.Context): void {
+    try {
+      const names: string[] = fs.listFileSync(context.cacheDir);
+      let removed: number = 0;
+      for (let index: number = 0; index < names.length; index++) {
+        const name: string = names[index];
+        if (name.startsWith(TRANSCODE_FILE_PREFIX)) {
+          VideoTranscoder.discard(`${context.cacheDir}/${name}`);
+          removed++;
+        }
+      }
+      if (removed > 0) {
+        Log.i(`${LOG_TAG} cleared ${removed} stale transcode output(s)`);
+      }
+    } catch (error) {
+      Log.i(`${LOG_TAG} clear stale outputs failed`);
     }
   }
 
@@ -309,23 +347,29 @@ export class VideoTranscoder {
    * 画质决策不受影响:阶梯按短边 min(w,h) 算,互换不改变这个集合。
    */
   static async probeVideo(sourceUri: string): Promise<VideoProbe> {
+    // fd 先开、extractor 后建,两者的清理必须各自挂在能覆盖到它的 finally 上 ——
+    // 与 runPass 同一条规则:把 createAVMetadataExtractor() 留在 try 外面的话,
+    // 它一旦 reject,已经开着的 src fd 就再也关不掉了(每传一个视频泄一个)。
     const file: fs.File = fs.openSync(sourceUri, fs.OpenMode.READ_ONLY);
-    const extractor: media.AVMetadataExtractor = await media.createAVMetadataExtractor();
     try {
-      extractor.fdSrc = { fd: file.fd };
-      const meta: media.AVMetadata = await extractor.fetchMetadata();
-      return {
-        durationSeconds: VideoTranscoder.parseNumber(meta.duration) / 1000,
-        width: VideoTranscoder.parseNumber(meta.videoWidth),
-        height: VideoTranscoder.parseNumber(meta.videoHeight),
-        rotation: VideoTranscoder.parseNumber(meta.videoOrientation)
-      };
-    } finally {
+      const extractor: media.AVMetadataExtractor = await media.createAVMetadataExtractor();
       try {
-        await extractor.release();
-      } catch (error) {
-        // 忽略:释放失败不影响已经取到的元数据。
+        extractor.fdSrc = { fd: file.fd };
+        const meta: media.AVMetadata = await extractor.fetchMetadata();
+        return {
+          durationSeconds: VideoTranscoder.parseNumber(meta.duration) / 1000,
+          width: VideoTranscoder.parseNumber(meta.videoWidth),
+          height: VideoTranscoder.parseNumber(meta.videoHeight),
+          rotation: VideoTranscoder.parseNumber(meta.videoOrientation)
+        };
+      } finally {
+        try {
+          await extractor.release();
+        } catch (error) {
+          // 忽略:释放失败不影响已经取到的元数据。
+        }
       }
+    } finally {
       fs.closeSync(file);
     }
   }

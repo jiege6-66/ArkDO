@@ -12,7 +12,7 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { Log } from '../../services/logging/Log';
 import { SYS_BOTTOM_INSET_KEY, SYS_TOP_INSET_KEY } from '../../common/utils/ImmersiveWindow';
 import { JsonNetworkClient } from '../../services/network/NetworkTypes';
-import { MAX_PICK_FILES, UploadedFile, UploadOutcome, UploadService } from '../../services/upload/UploadService';
+import { MAX_PICK_FILES, MAX_PICK_IMAGES, UploadedFile, UploadOutcome, UploadService } from '../../services/upload/UploadService';
 import { VideoTranscodeHooks, VideoTranscodePlan } from '../../services/upload/VideoTranscoder';
 import { SiteSettingsService, SiteUploadSettings } from '../../services/site/SiteSettingsService';
 import { SiteCapabilities } from '../../services/site/SiteCapabilities';
@@ -43,8 +43,6 @@ import {
 import { EmojiDeleteResult, EmojiShortcodeEdit } from '../../utils/EmojiShortcodeEdit';
 
 const LOG_TAG: string = '[ArkDO][Composer]';
-// 一次最多选图张数(对齐 Discourse composer 手感)。
-const MAX_PICK: number = 9;
 // 发帖最多可选标签数(对齐站点 max_tags_per_topic)。
 const MAX_TAGS: number = 8;
 // 自动存草稿防抖:停止输入这么久才真发一次(对齐官方 composer 的「边写边存」节奏)。
@@ -600,7 +598,7 @@ export struct ComposerPage {
     if (!service || this.isUploading) {
       return;
     }
-    const uris: string[] = await service.pickImages(MAX_PICK);
+    const uris: string[] = await service.pickImages(MAX_PICK_IMAGES);
     await this.runUploadBatch(uris, '图片',
       (uri: string): Promise<UploadOutcome> => service.uploadImageUri(uri),
       (file: UploadedFile): string => `\n${UploadService.buildImageMarkdown(file)}\n`);
@@ -680,34 +678,47 @@ export struct ComposerPage {
     // 一批里可能只坏一个(比如其中一张 GIF 超了 4 MB)。逐条记原因,批量结束后一次性告知,
     // 避免连弹好几个 toast 互相盖掉。
     let firstError: string = '';
-    for (let i: number = 0; i < uris.length; i++) {
-      const outcome: UploadOutcome = await upload(uris[i]);
-      const file: UploadedFile | undefined = outcome.file;
-      if (file) {
-        const snippet: string = snippetOf(file, uris[i]);
-        const head: string = this.text.substring(0, this.selStart);
-        const tail: string = this.text.substring(this.selEnd);
-        this.text = head + snippet + tail;
-        const caret: number = head.length + snippet.length;
-        this.selStart = caret;
-        this.selEnd = caret;
-      } else {
-        const reason: string = outcome.error !== undefined ? outcome.error : `${label}上传失败`;
-        // 空串是「用户自己取消的」约定信号:不提示,也不再继续这一批。
-        if (reason.length === 0) {
-          break;
+    // 收尾必须放 finally:isUploading 既驱动上传遮罩,也是三个上传入口的重入闸
+    // (pickAndUpload* 开头都是 `if (this.isUploading) return`)。upload() 万一抛出来,
+    // 不兜的话遮罩永远挂着、上传入口全部失效,用户只能关掉编辑器重开。
+    // 这里的 upload() 目前各条路都在内部 catch 了,但那是靠「每个被调方都不抛」维持的约定,
+    // 不该由本函数去赌。
+    try {
+      for (let i: number = 0; i < uris.length; i++) {
+        const outcome: UploadOutcome = await upload(uris[i]);
+        const file: UploadedFile | undefined = outcome.file;
+        if (file) {
+          const snippet: string = snippetOf(file, uris[i]);
+          const head: string = this.text.substring(0, this.selStart);
+          const tail: string = this.text.substring(this.selEnd);
+          this.text = head + snippet + tail;
+          const caret: number = head.length + snippet.length;
+          this.selStart = caret;
+          this.selEnd = caret;
+        } else {
+          const reason: string = outcome.error !== undefined ? outcome.error : `${label}上传失败`;
+          // 空串是「用户自己取消的」约定信号:不提示,也不再继续这一批。
+          if (reason.length === 0) {
+            break;
+          }
+          if (firstError.length === 0) {
+            firstError = reason;
+          }
         }
-        if (firstError.length === 0) {
-          firstError = reason;
-        }
+        this.uploadDone = i + 1;
+        this.compressPercent = -1;
       }
-      this.uploadDone = i + 1;
+    } catch (error) {
+      Log.i(`${LOG_TAG} upload batch threw, aborting label=${label}`);
+      if (firstError.length === 0) {
+        firstError = `${label}上传失败`;
+      }
+    } finally {
+      this.isUploading = false;
+      this.uploadTotal = 0;
+      this.uploadDone = 0;
       this.compressPercent = -1;
     }
-    this.isUploading = false;
-    this.uploadTotal = 0;
-    this.uploadDone = 0;
-    this.compressPercent = -1;
     if (firstError.length > 0) {
       this.showToast(firstError);
     }
