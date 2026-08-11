@@ -1,10 +1,9 @@
 import { Log } from '../../services/logging/Log';
 import { common } from '@kit.AbilityKit';
-import { preferences } from '@kit.ArkData';
+import { AppSettingsStore } from '../prefs/AppSettingsStore';
 
 const LOG_TAG: string = '[ArkDO][FabGlass]';
-// 与 ThemeManager / RealtimeTopicsPrefs / FeedPrefs 共用同一个 preferences 库，只是键不同。
-const PREF_STORE_NAME: string = 'app_settings';
+// 共享 app_settings 库(实例只开一次,见 AppSettingsStore),只是键不同。
 const PREF_KEY_ENABLED: string = 'fab_glass_enabled';
 const PREF_KEY_RADIUS: string = 'fab_glass_radius';
 
@@ -56,21 +55,14 @@ export class FabGlassPrefs {
   /** 冷启动调用一次：读盘回填内存镜像并种入 AppStorage，保证任何页面挂载前镜像已就绪（默认关）。 */
   static load(context: common.UIAbilityContext | common.Context): boolean {
     if (!FabGlassPrefs.loaded) {
-      try {
-        const store: preferences.Preferences =
-          preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
-        const value: preferences.ValueType = store.getSync(PREF_KEY_ENABLED, false);
-        FabGlassPrefs.cachedEnabled = value === true;
-        const rawRadius: preferences.ValueType = store.getSync(PREF_KEY_RADIUS, FAB_GLASS_RADIUS_DEFAULT);
-        FabGlassPrefs.cachedRadius =
-          clampFabGlassRadius(typeof rawRadius === 'number' ? rawRadius : FAB_GLASS_RADIUS_DEFAULT);
-        FabGlassPrefs.loaded = true;
-      } catch (error) {
-        // 读失败按默认处理：纯外观开关，不该因存储异常影响启动。
-        Log.i(`${LOG_TAG} load failed, fallback to defaults`);
-        FabGlassPrefs.cachedEnabled = false;
-        FabGlassPrefs.cachedRadius = FAB_GLASS_RADIUS_DEFAULT;
-      }
+      // 与 BooleanPref.load 同理：读失败先用默认值顶上，但不置 loaded，下次 load() 还要再试。
+      // 记成"已加载"的话，一次偶发的存储异常会让用户的设置整个会话都出不来。
+      const enabled: boolean | undefined =
+        AppSettingsStore.tryGetBoolean(context, PREF_KEY_ENABLED, false);
+      FabGlassPrefs.cachedEnabled = enabled !== undefined ? enabled : false;
+      FabGlassPrefs.cachedRadius =
+        clampFabGlassRadius(AppSettingsStore.getNumber(context, PREF_KEY_RADIUS, FAB_GLASS_RADIUS_DEFAULT));
+      FabGlassPrefs.loaded = enabled !== undefined;
     }
     FabGlassPrefs.mirror();
     return FabGlassPrefs.cachedEnabled;
@@ -81,15 +73,8 @@ export class FabGlassPrefs {
     FabGlassPrefs.cachedEnabled = enabled;
     FabGlassPrefs.loaded = true;
     FabGlassPrefs.mirror();
-    try {
-      const store: preferences.Preferences =
-        preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
-      store.putSync(PREF_KEY_ENABLED, enabled);
-      store.flush();
-      Log.i(`${LOG_TAG} enabled=${enabled}`);
-    } catch (error) {
-      Log.i(`${LOG_TAG} save failed enabled=${enabled}`);
-    }
+    AppSettingsStore.putBoolean(context, PREF_KEY_ENABLED, enabled);
+    Log.i(`${LOG_TAG} enabled=${enabled}`);
   }
 
   /** 拖动滑块：只更新内存与镜像(两处 FAB 即时跟手)，不落盘。返回钳制后的值供设置页回显。 */
@@ -102,15 +87,8 @@ export class FabGlassPrefs {
   /** 滑块松手时调一次：把当前半径落盘。 */
   static flushRadius(context: common.UIAbilityContext | common.Context): void {
     FabGlassPrefs.loaded = true;
-    try {
-      const store: preferences.Preferences =
-        preferences.getPreferencesSync(context, { name: PREF_STORE_NAME });
-      store.putSync(PREF_KEY_RADIUS, FabGlassPrefs.cachedRadius);
-      store.flush();
-      Log.i(`${LOG_TAG} radius=${FabGlassPrefs.cachedRadius}`);
-    } catch (error) {
-      Log.i(`${LOG_TAG} save failed radius=${FabGlassPrefs.cachedRadius}`);
-    }
+    AppSettingsStore.putNumber(context, PREF_KEY_RADIUS, FabGlassPrefs.cachedRadius);
+    Log.i(`${LOG_TAG} radius=${FabGlassPrefs.cachedRadius}`);
   }
 
   private static mirror(): void {
