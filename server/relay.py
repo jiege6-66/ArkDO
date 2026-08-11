@@ -7,7 +7,7 @@ Listens on 127.0.0.1:8787; put a TLS reverse proxy (e.g. Caddy) in front and for
 /wp/* and /subscription/* here. See server/README.md for deployment.
 Deps: stdlib + `cryptography` (system site-packages). No pip needed.
 """
-import json, os, re, base64, secrets, threading, datetime, time, urllib.parse, urllib.request, urllib.error
+import json, os, re, base64, copy, secrets, threading, datetime, time, urllib.parse, urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -39,6 +39,12 @@ MAX_SUBSCRIPTIONS = int(os.environ.get("RELAY_MAX_SUBS", "5000"))
 STALE_DISABLED_DAYS = int(os.environ.get("RELAY_STALE_DAYS", "30"))
 # 日志轮转:超过这个字节数就滚存一份 .1(只留一代)。
 LOG_MAX_BYTES = int(os.environ.get("RELAY_LOG_MAX_BYTES", str(2 * 1024 * 1024)))
+# 单次请求体上限。/wp/* 不能挂鉴权与限流(见 do_POST),故必须靠它挡住"声明一个巨大的
+# Content-Length 让进程去分配内存"这类请求。Web Push 载荷实际只有几 KB,64 KB 已经很宽松。
+MAX_BODY_BYTES = int(os.environ.get("RELAY_MAX_BODY_BYTES", str(64 * 1024)))
+# 本进程前面有几层可信反代。限流按 X-Forwarded-For 右起第这么多段取来源 IP,详见 client_ip。
+# 1 = Caddy 直接对外(Caddyfile.example 描述的拓扑);前面再套 CDN/WAF 就要相应加。
+TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("RELAY_TRUSTED_HOPS", "1")))
 # 是否把通知标题等用户内容写进日志。默认关闭,仅排障时临时打开。
 LOG_CONTENT = os.environ.get("RELAY_LOG_CONTENT", "") == "1"
 PUSHKIT_PROJECT_ID = os.environ.get("PUSHKIT_PROJECT_ID", "")
@@ -64,6 +70,8 @@ PUSHKIT_SEND_URL = "https://push-api.cloud.huawei.com/v3/%s/messages:send"
 # 可重入锁:register/disable 等"读-改-写"必须整段持锁,而内部还会调 load_db/save_db,故用 RLock。
 # 原先 load_db 与 save_db 各自单独加锁,中间是放开的 → 并发写会丢更新(后写者覆盖先写者)。
 _lock = threading.RLock()
+# subs.json 的进程内缓存(见 load_db / save_db)。整个读写都在 _lock 里。
+_db_cache = {"loaded": False, "data": {}}
 _rate_lock = threading.Lock()
 _rate_buckets = {}
 # subId -> 上次测试推送的时间戳
@@ -83,8 +91,19 @@ def b64u_dec(s: str) -> bytes:
     return base64.urlsafe_b64decode(s)
 
 
+def utcnow() -> datetime.datetime:
+    """当前 UTC 时间(无时区标注)。
+
+    datetime.utcnow() 在 3.12 起已废弃(3.12+ 会告警,未来版本会移除)。改用带时区的
+    now(timezone.utc) 再把 tzinfo 去掉 —— 保持与既有 subs.json 里那些不带偏移量的
+    ISO 串同构,免得 prune_subscriptions 的 fromisoformat 比较踩到"有时区 vs 无时区"的
+    TypeError。
+    """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 def log(msg: str):
-    line = "[%sZ] %s" % (datetime.datetime.utcnow().isoformat(), msg)
+    line = "[%sZ] %s" % (utcnow().isoformat(), msg)
     print(line, flush=True)
     try:
         # 轮转:日志里会出现用户相关信息,不能无限堆积。只留一代 .1,超限即滚存。
@@ -97,24 +116,77 @@ def log(msg: str):
 
 
 def load_db() -> dict:
+    """返回**进程内缓存的活对象**,调用方必须在 _lock 里用,且不得在锁外继续持有。
+
+    缓存的理由:每条推送都要按 sid 认订阅,而 MAX_SUBSCRIPTIONS 是 5000 —— 不缓存的话
+    每推一条就要把整个 subs.json 重新解析一遍。本进程是该文件的唯一写者(save_db 同步刷新缓存)。
+
+    但"缓存活对象"把原来的一个隐性保护弄丢了:改造前每次 load_db() 都重新 json.load 出一个
+    **私有快照**,所以锁外遍历、锁外长期持有 rec 都天然无竞争。换成共享对象后,
+    ThreadingHTTPServer 下就会出现:
+      · 锁外 for sid, rec in db.items() 撞上另一线程的 db[sid]=... / db.pop()
+        → RuntimeError: dictionary changed size during iteration,而 BaseHTTPRequestHandler
+          不接这个异常,客户端连响应都收不到;
+      · /wp/ 长期持有的 rec 撞上 disable_subscription 的 rec.pop("priv_pem")
+        → 已经回过 201 了才解密失败,通知直接丢且不会重试。
+    所以锁外要用的地方一律走下面两个 *_snapshot 函数拿副本,不要直接用本函数的返回值。
+    """
     with _lock:
+        if _db_cache["loaded"]:
+            return _db_cache["data"]
+        data = {}
         if os.path.exists(DB):
             try:
-                return json.load(open(DB))
+                with open(DB) as f:
+                    data = json.load(f)
             except Exception:
-                return {}
-        return {}
+                data = {}
+        _db_cache["data"] = data
+        _db_cache["loaded"] = True
+        return data
+
+
+def get_subscription_snapshot(sid: str):
+    """按 sid 取一条订阅的**私有副本**(锁内拷贝)。给 /wp/ 投递用。
+
+    只拷一条记录,比改造前"整库重新解析"便宜得多,同时把快照语义还回来:
+    拿到之后 disable_subscription 再怎么改缓存里的那条,也动不到手上这份。
+    """
+    with _lock:
+        rec = load_db().get(sid)
+        return copy.deepcopy(rec) if rec is not None else None
+
+
+def find_subscription_snapshot(sub_id: str, endpoint: str):
+    """按 sub_id / endpoint 查一条订阅的**私有副本**(锁内查 + 锁内拷贝)。
+
+    find_subscription 的兜底分支要遍历整个 db,必须在锁内做 —— 这正是上面注释里说的
+    "锁外遍历会撞 RuntimeError"的那条路。
+    """
+    with _lock:
+        sid, rec = find_subscription(load_db(), sub_id, endpoint)
+        if not sid or rec is None:
+            return "", None
+        return sid, copy.deepcopy(rec)
 
 
 def save_db(d: dict):
     with _lock:
         tmp = DB + ".tmp"
-        json.dump(d, open(tmp, "w"))
+        # 落盘顺序:写完 → flush → fsync → 原子改名。少了 fsync 的话,os.replace 只保证
+        # "改名"这一步原子,不保证数据已经真的到盘上 —— 断电后可能留下一个长度为 0 的
+        # subs.json,也就是全部订阅一次性丢光,而这个文件就是本中继唯一的状态。
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, DB)
+        _db_cache["data"] = d
+        _db_cache["loaded"] = True
 
 
 def utc_now() -> str:
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return utcnow().isoformat() + "Z"
 
 
 def rate_limit_ok(client_ip: str) -> bool:
@@ -169,7 +241,7 @@ def prune_subscriptions(db: dict) -> int:
     """丢弃"已停用且长期无更新"的记录。返回清理条数。调用方需持 _lock。"""
     if STALE_DISABLED_DAYS <= 0:
         return 0
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=STALE_DISABLED_DAYS)
+    cutoff = utcnow() - datetime.timedelta(days=STALE_DISABLED_DAYS)
     dropped = []
     for sid, rec in list(db.items()):
         if rec.get("enabled", True):
@@ -271,7 +343,10 @@ def register(device_token, user_id=None, username="", existing_sub_id="", site_h
 
         # 新建前先清陈旧记录,再看容量。避免被无限创建撑爆磁盘/空耗密钥生成。
         if len(db) >= MAX_SUBSCRIPTIONS:
-            prune_subscriptions(db)
+            if prune_subscriptions(db):
+                # 清理结果要立刻落盘:下面这条 raise 会直接结束本次调用,不落的话这次清理
+                # 就白做了(重启后陈旧记录原样回来),而 db 是进程内缓存、内存与磁盘还会不一致。
+                save_db(db)
         if len(db) >= MAX_SUBSCRIPTIONS:
             log("register refused: subscription cap reached (%d)" % len(db))
             raise RuntimeError("subscription cap reached")
@@ -590,8 +665,23 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, code, obj=None):
+    def _send(self, code, obj=None, close=False):
+        """回一个响应。close=True 时同时终结这条连接。
+
+        close 是给"请求体没被读干净"的早返回用的(413/400)。protocol_version 是 HTTP/1.1,
+        连接默认复用:此时 socket 里还躺着调用方声明却没被读走的那些字节,
+        handle_one_request 会把它们当成下一个请求行去解析 —— 而 Caddy 的 reverse_proxy
+        复用到上游的连接,于是下一个真实请求(比如 Discourse 投递的 POST /wp/<sid>)
+        收到的是 400 Bad request syntax。Discourse 记一次投递失败,连续失败满一天就删订阅。
+
+        这里刻意**不**去"把 body 读完再返回":那样一个声明 2 GB 的请求还是要真读 2 GB,
+        MAX_BODY_BYTES 就白设了。直接关连接,残留字节随连接一起丢弃。
+        """
+        if close:
+            self.close_connection = True
         self.send_response(code)
+        if close:
+            self.send_header("Connection", "close")
         if obj is not None:
             data = json.dumps(obj).encode()
             self.send_header("Content-Type", "application/json")
@@ -625,22 +715,64 @@ class H(BaseHTTPRequestHandler):
             self._send(404)
 
     def do_HEAD(self):
+        # 只对真实存在的路径回 200。原先无条件回 200 等于告诉扫描器"这里什么都有",
+        # 白送一个可探测表面;/wp/probe 那条是 Discourse onebox 抓取要用的,必须保留。
         xff = self.headers.get("X-Forwarded-For", "?")
         log("HEAD %s xff=%s" % (self.path, xff))
+        p = self.path.split("?")[0]
+        if p not in ("/wp/probe", "/wp/health"):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def client_ip(self) -> str:
-        # 经 Caddy 反代,真实来源在 X-Forwarded-For 首段。
+        """限流用的来源标识:X-Forwarded-For 里**从右往左数第 TRUSTED_PROXY_HOPS 段**。
+
+        XFF 是"客户端 → 代理1 → 代理2"的追加式链条,每一跳把它看到的来源追加到右边。
+        于是:
+          · 最左边那段完全由客户端自己填,伪造一个就能换一个全新的限流桶 —— 取首段等于没限流;
+          · 最右边那段是紧邻本进程的那一跳。本进程只监听 127.0.0.1,前面一定有反代,
+            所以最右段是"反代看到的来源"。
+
+        到底该取右起第几段,只取决于**你前面真的架了几层**,这件事只有部署者知道:
+          RELAY_TRUSTED_HOPS=1(默认)  Caddy 直接对外 —— 右起第 1 段就是真实客户端
+          RELAY_TRUSTED_HOPS=2          Caddy 前面还套了 Cloudflare/CDN/WAF —— 右起第 1 段是
+                                        CDN 边缘 IP,全世界用户会挤进那少数几个地址共用一个
+                                        限流桶(每 key 每 60 秒 20 次),推送注册与注销会全站
+                                        性地吃 429。此时必须配 2 才能拿到真实客户端。
+
+        段数不够(链条比配置的短)时退回最左段:那是这条链上我们能拿到的最接近源头的值,
+        且此时说明配置与实际拓扑不符,宁可偏严也不要越界取到不存在的位置。
+        """
         xff = self.headers.get("X-Forwarded-For", "")
         if xff:
-            return xff.split(",")[0].strip()
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            if parts:
+                index = len(parts) - TRUSTED_PROXY_HOPS
+                return parts[index] if index >= 0 else parts[0]
         return self.client_address[0] if self.client_address else "?"
 
     def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
+        # 请求体必须先限长再读。/wp/* 按设计不能挂鉴权与限流(理由见上),所以任何人都能往这里
+        # POST;不设上限的话,一个声明 Content-Length: 2000000000 的请求就能让进程去分配 2 GB。
+        # Web Push 载荷实际只有几 KB,MAX_BODY_BYTES 给得已经很宽松了。
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            # 畸形头:不 catch 的话会在 do_POST 里抛出去,连接被直接掐断且日志里只有一段栈。
+            # close=True —— 长度都没解析出来,不知道该跳过多少字节,只能终结连接(见 _send)。
+            self._send(400, {"error": "bad content-length"}, close=True)
+            return
+        if n < 0 or n > MAX_BODY_BYTES:
+            log("body too large len=%s path=%s" % (n, self.path.split("?")[0]))
+            # 同上:这些字节我们**故意**不读,所以这条连接不能再复用。
+            self._send(413, {"error": "payload too large"}, close=True)
+            return
         body = self.rfile.read(n) if n else b""
         path = self.path.split("?")[0]
 
@@ -702,8 +834,9 @@ class H(BaseHTTPRequestHandler):
             if not sub_id or not endpoint or not device_token:
                 self._send(400, {"success": False, "error": "missing subscription credentials"})
                 return
-            db = load_db()
-            sid, rec = find_subscription(db, sub_id, endpoint)
+            # 快照:find_subscription 的兜底分支要遍历整个 db,锁外遍历会撞上并发的
+            # register/disable 改字典而抛 RuntimeError(见 load_db 注释)。
+            sid, rec = find_subscription_snapshot(sub_id, endpoint)
             if not sid or rec is None:
                 self._send(404, {"success": False, "error": "subscription not found"})
                 return
@@ -765,7 +898,10 @@ class H(BaseHTTPRequestHandler):
             sid = path[len("/wp/"):]
             xff = self.headers.get("X-Forwarded-For", "?")
             log("POST /wp/%s from xff=%s (%dB)" % (sid, xff, len(body)))
-            rec = load_db().get(sid)
+            # 快照而非活引用:本分支先回 201 再去解密+转发,中间用户若正好点了「关闭通知」,
+            # disable_subscription 会把 priv_pem 从记录里 pop 掉 —— 拿活引用的话解密会失败,
+            # 而 201 已经回给 Discourse 了,这条通知直接丢且不会重试。
+            rec = get_subscription_snapshot(sid)
             if not rec:
                 log("push UNKNOWN sid=%s (%dB)" % (sid, len(body)))
                 self._send(404)
