@@ -17,6 +17,7 @@ import { HarmonyPushTokenProvider } from './HarmonyPushTokenProvider';
 import { HttpPushRelayClient } from './PushRelayClient';
 import { isPushRelayConfigured, PushRelayConfig, resolvePushRelayConfig } from './PushRelayConfig';
 import { PushSubscriptionStore, StoredPushSubscription } from './PushSubscriptionStore';
+import { SiteScope } from '../site/SiteScope';
 
 const LOG_TAG: string = '[ArkDO][PushCoordinator]';
 
@@ -176,7 +177,10 @@ export class PushCoordinator {
       return;
     }
 
-    const accountKey: string = `${user.id}`;
+    // 账号键必须带站点:Discourse 的 userId 是站内自增,跨站必撞(与订阅记录分键同一个理由)。
+    // 只用 userId 的话,两个站上你的 id 恰好相同时,切站后会被当成「本账号本次启动已自愈过」
+    // 而跳过新站的自愈。
+    const accountKey: string = SiteScope.key(`${user.id}`);
     if (accountKey !== this.reconcileAccountKey) {
       // 换号(或本次启动首次落定):重置重试预算。
       this.reconcileAttempts = 0;
