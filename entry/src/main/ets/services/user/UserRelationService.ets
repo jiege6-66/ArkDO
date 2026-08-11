@@ -45,7 +45,7 @@ export class UserRelationService {
     const path: string = `/category-experts/endorsable-categories/${encodeURIComponent(username)}.json`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<EndorsableCategoriesResult>(response);
+      return forwardFailure<EndorsableCategoriesResult>(response);
     }
     if (response.data === undefined) {
       return this.unexpected<EndorsableCategoriesResult>(response, '站点认可分类响应为空。');
@@ -98,7 +98,7 @@ export class UserRelationService {
     const path: string = `/category-experts/endorse/${encodeURIComponent(username)}.json`;
     const response: NetworkResult<string> = await this.bridge.putForm(path, body);
     if (!response.success) {
-      return this.forwardFailure<boolean>(response);
+      return forwardFailure<boolean>(response);
     }
     return {
       success: true,
@@ -111,7 +111,7 @@ export class UserRelationService {
   // follow/unfollow 只判成败,响应体 {"success":"OK"} 不细解析。
   private asBoolResult(response: NetworkResult<string>): NetworkResult<boolean> {
     if (!response.success) {
-      return this.forwardFailure<boolean>(response);
+      return forwardFailure<boolean>(response);
     }
     return {
       success: true,
@@ -121,9 +121,6 @@ export class UserRelationService {
     };
   }
 
-  private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return forwardFailure<T>(response);
-  }
 
   private unexpected<T>(response: NetworkResult<string>, message: string): NetworkResult<T> {
     return unexpectedFrom<T>(response, message);

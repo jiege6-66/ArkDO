@@ -67,11 +67,11 @@ export class AuthService {
           data: undefined
         };
       }
-      return this.forwardFailure(response);
+      return forwardFailure<User | undefined>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前会话响应为空。');
+      return unexpectedResponse<User | undefined>(response.statusCode, response.challengeState, '站点当前会话响应为空。');
     }
 
     try {
@@ -87,7 +87,7 @@ export class AuthService {
       }
 
       if (typeof sourceUser.id !== 'number' || typeof sourceUser.username !== 'string') {
-        return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前用户响应字段无效。');
+        return unexpectedResponse<User | undefined>(response.statusCode, response.challengeState, '站点当前用户响应字段无效。');
       }
 
       return {
@@ -113,7 +113,7 @@ export class AuthService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点当前会话响应不是有效 JSON。');
+      return unexpectedResponse<User | undefined>(response.statusCode, response.challengeState, '站点当前会话响应不是有效 JSON。');
     }
   }
 
@@ -171,13 +171,5 @@ export class AuthService {
       return [];
     }
     return sourceIds.filter((id: number) => typeof id === 'number' && id > 0);
-  }
-
-  private forwardFailure(response: NetworkResult<string>): NetworkResult<User | undefined> {
-    return forwardFailure<User | undefined>(response);
-  }
-
-  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<User | undefined> {
-    return unexpectedResponse<User | undefined>(statusCode, challengeState, message);
   }
 }

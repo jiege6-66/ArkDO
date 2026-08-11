@@ -181,10 +181,10 @@ export class TopicService {
     const path: string = `/search.json?q=${encodeURIComponent(trimmed)}${suffix}`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<SearchResult>(response);
+      return forwardFailure<SearchResult>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, '站点搜索响应为空。');
+      return unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, '站点搜索响应为空。');
     }
     try {
       const payload: DiscourseSearchResponse = JSON.parse(response.data) as DiscourseSearchResponse;
@@ -195,24 +195,24 @@ export class TopicService {
         data: this.mapSearch(payload, page)
       };
     } catch (error) {
-      return this.unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, '站点搜索响应不是有效 JSON。');
+      return unexpectedResponse<SearchResult>(response.statusCode, response.challengeState, '站点搜索响应不是有效 JSON。');
     }
   }
 
   private async getTopicListPage(path: string, page: number): Promise<NetworkResult<TopicPage>> {
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<TopicPage>(response);
+      return forwardFailure<TopicPage>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应为空。');
+      return unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应为空。');
     }
 
     try {
       const payload: DiscourseLatestResponse = JSON.parse(response.data) as DiscourseLatestResponse;
       if (!payload.topic_list || !payload.topic_list.topics) {
-        return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应缺少 topic_list.topics。');
+        return unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应缺少 topic_list.topics。');
       }
 
       return {
@@ -226,7 +226,7 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应不是有效 JSON。');
+      return unexpectedResponse<TopicPage>(response.statusCode, response.challengeState, '站点帖子列表响应不是有效 JSON。');
     }
   }
 
@@ -234,18 +234,18 @@ export class TopicService {
   async getTopicDetail(topicId: number, slug?: string, postNumber?: number): Promise<NetworkResult<TopicDetail>> {
     const response: NetworkResult<string> = await this.bridge.getJson(this.getTopicDetailPath(topicId, slug, postNumber));
     if (!response.success) {
-      return this.forwardFailure<TopicDetail>(response);
+      return forwardFailure<TopicDetail>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应为空。');
+      return unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应为空。');
     }
 
     try {
       const payload: DiscourseTopicDetail = JSON.parse(response.data) as DiscourseTopicDetail;
       if (typeof payload.id !== 'number' || typeof payload.title !== 'string' ||
         !payload.post_stream || !payload.post_stream.posts) {
-        return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应缺少必要字段。');
+        return unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应缺少必要字段。');
       }
 
       return {
@@ -255,7 +255,7 @@ export class TopicService {
         data: this.mapTopicDetail(payload)
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应不是有效 JSON。');
+      return unexpectedResponse<TopicDetail>(response.statusCode, response.challengeState, '站点帖子详情响应不是有效 JSON。');
     }
   }
 
@@ -272,10 +272,10 @@ export class TopicService {
 
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<TopicPost[]>(response);
+      return forwardFailure<TopicPost[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点加载更多楼层响应为空。');
+      return unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点加载更多楼层响应为空。');
     }
 
     try {
@@ -287,7 +287,7 @@ export class TopicService {
         data: this.mapPosts(payload.post_stream?.posts, this.buildBadgeIconMap(payload.user_badges))
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点加载更多楼层响应不是有效 JSON。');
+      return unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点加载更多楼层响应不是有效 JSON。');
     }
   }
 
@@ -299,10 +299,10 @@ export class TopicService {
 
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<TopicPost[]>(response);
+      return forwardFailure<TopicPost[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点被回复列表响应为空。');
+      return unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点被回复列表响应为空。');
     }
 
     try {
@@ -314,7 +314,7 @@ export class TopicService {
         data: this.mapPosts(payload)
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点被回复列表响应不是有效 JSON。');
+      return unexpectedResponse<TopicPost[]>(response.statusCode, response.challengeState, '站点被回复列表响应不是有效 JSON。');
     }
   }
 
@@ -325,16 +325,16 @@ export class TopicService {
       `/discourse-reactions/posts/${postId}/reactions-users-list.json?page=${safePage}&limit=30`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<ReactionUsersPage>(response);
+      return forwardFailure<ReactionUsersPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应为空。');
+      return unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应为空。');
     }
 
     try {
       const payload: DiscourseReactionUsersPage = JSON.parse(response.data) as DiscourseReactionUsersPage;
       if (!Array.isArray(payload.users) || typeof payload.total_rows !== 'number' || payload.total_rows < 0) {
-        return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应缺少必要字段。');
+        return unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应缺少必要字段。');
       }
       return {
         success: true,
@@ -346,7 +346,7 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应不是有效 JSON。');
+      return unexpectedResponse<ReactionUsersPage>(response.statusCode, response.challengeState, '站点表情用户列表响应不是有效 JSON。');
     }
   }
 
@@ -357,10 +357,10 @@ export class TopicService {
 
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<string>(response);
+      return forwardFailure<string>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, '站点楼层详情响应为空。');
+      return unexpectedResponse<string>(response.statusCode, response.challengeState, '站点楼层详情响应为空。');
     }
 
     try {
@@ -372,7 +372,7 @@ export class TopicService {
         data: payload.cooked ? payload.cooked : ''
       };
     } catch (error) {
-      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, '站点楼层详情响应不是有效 JSON。');
+      return unexpectedResponse<string>(response.statusCode, response.challengeState, '站点楼层详情响应不是有效 JSON。');
     }
   }
 
@@ -435,15 +435,15 @@ export class TopicService {
 
   private parsePollVoteResponse(response: NetworkResult<string>): NetworkResult<PollVoteResult> {
     if (!response.success) {
-      return this.forwardFailure<PollVoteResult>(response);
+      return forwardFailure<PollVoteResult>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应为空。');
+      return unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应为空。');
     }
     try {
       const wrapper: DiscoursePollVoteResponse = JSON.parse(response.data) as DiscoursePollVoteResponse;
       if (!wrapper.poll) {
-        return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应缺少 poll 字段。');
+        return unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应缺少 poll 字段。');
       }
       const chosen: string[] = Array.isArray(wrapper.vote) ? wrapper.vote.slice() : [];
       return {
@@ -457,7 +457,7 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应不是有效 JSON。');
+      return unexpectedResponse<PollVoteResult>(response.statusCode, response.challengeState, '站点投票响应不是有效 JSON。');
     }
   }
 
@@ -470,10 +470,10 @@ export class TopicService {
     const response: NetworkResult<string> =
       await this.bridge.postForm(SHARED_ISSUE_TOGGLE_PATH, `topic_id=${topicId}`, { notifyChallenge: true, referrer: referrer });
     if (!response.success) {
-      return this.forwardFailure<SharedIssueResult>(response);
+      return forwardFailure<SharedIssueResult>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, '站点"俺也一样"响应为空。');
+      return unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, '站点"俺也一样"响应为空。');
     }
     try {
       const wrapper: DiscourseSharedIssueResponse = JSON.parse(response.data) as DiscourseSharedIssueResponse;
@@ -487,7 +487,7 @@ export class TopicService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, '站点"俺也一样"响应不是有效 JSON。');
+      return unexpectedResponse<SharedIssueResult>(response.statusCode, response.challengeState, '站点"俺也一样"响应不是有效 JSON。');
     }
   }
 
@@ -537,7 +537,7 @@ export class TopicService {
       return this.postFailure<CreateReplyOutcome>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应为空。');
+      return unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应为空。');
     }
 
     try {
@@ -563,9 +563,9 @@ export class TopicService {
           data: { pending: true, pendingPost: this.mapSinglePendingPost(wrapper.pending_post) }
         };
       }
-      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应缺少楼层数据。');
+      return unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应缺少楼层数据。');
     } catch (error) {
-      return this.unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应不是有效 JSON。');
+      return unexpectedResponse<CreateReplyOutcome>(response.statusCode, response.challengeState, '站点发表评论响应不是有效 JSON。');
     }
   }
 
@@ -611,7 +611,7 @@ export class TopicService {
       return this.postFailure<CreateTopicOutcome>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应为空。');
+      return unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应为空。');
     }
 
     try {
@@ -633,9 +633,9 @@ export class TopicService {
           data: { pending: true }
         };
       }
-      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应缺少主题数据。');
+      return unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应缺少主题数据。');
     } catch (error) {
-      return this.unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应不是有效 JSON。');
+      return unexpectedResponse<CreateTopicOutcome>(response.statusCode, response.challengeState, '站点发帖响应不是有效 JSON。');
     }
   }
 
@@ -669,10 +669,10 @@ export class TopicService {
 
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<TagSuggestion[]>(response);
+      return forwardFailure<TagSuggestion[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, '站点标签联想响应为空。');
+      return unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, '站点标签联想响应为空。');
     }
     try {
       const payload: DiscourseTagFilterResponse = JSON.parse(response.data) as DiscourseTagFilterResponse;
@@ -698,7 +698,7 @@ export class TopicService {
         data: tags
       };
     } catch (error) {
-      return this.unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, '站点标签联想响应不是有效 JSON。');
+      return unexpectedResponse<TagSuggestion[]>(response.statusCode, response.challengeState, '站点标签联想响应不是有效 JSON。');
     }
   }
 
@@ -714,10 +714,10 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<PostBoost>(response);
+      return forwardFailure<PostBoost>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应为空。');
+      return unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应为空。');
     }
 
     try {
@@ -731,9 +731,9 @@ export class TopicService {
           data: boosts[0]
         };
       }
-      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应缺少 boost 数据。');
+      return unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应缺少 boost 数据。');
     } catch (error) {
-      return this.unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应不是有效 JSON。');
+      return unexpectedResponse<PostBoost>(response.statusCode, response.challengeState, '站点发送 boost 响应不是有效 JSON。');
     }
   }
 
@@ -747,7 +747,7 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<boolean>(response);
+      return forwardFailure<boolean>(response);
     }
     return {
       success: true,
@@ -766,15 +766,15 @@ export class TopicService {
   async getPostRaw(postId: number): Promise<NetworkResult<string>> {
     const response: NetworkResult<string> = await this.bridge.getJson(`/posts/${postId}.json`);
     if (!response.success) {
-      return this.forwardFailure<string>(response);
+      return forwardFailure<string>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应为空。');
+      return unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应为空。');
     }
     try {
       const post: DiscoursePost = JSON.parse(response.data) as DiscoursePost;
       if (typeof post.raw !== 'string') {
-        return this.unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应缺少 raw。');
+        return unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应缺少 raw。');
       }
       return {
         success: true,
@@ -783,7 +783,7 @@ export class TopicService {
         data: post.raw
       };
     } catch (error) {
-      return this.unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应不是有效 JSON。');
+      return unexpectedResponse<string>(response.statusCode, response.challengeState, '站点读取楼层原文响应不是有效 JSON。');
     }
   }
 
@@ -816,17 +816,17 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<TopicPost>(response);
+      return forwardFailure<TopicPost>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应为空。');
+      return unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应为空。');
     }
     try {
       const wrapper: DiscoursePostUpdateResponse = JSON.parse(response.data) as DiscoursePostUpdateResponse;
       const updated: DiscoursePost | undefined = wrapper.post;
       const posts: TopicPost[] = updated ? this.mapPosts([updated]) : [];
       if (posts.length === 0) {
-        return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应缺少楼层数据。');
+        return unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应缺少楼层数据。');
       }
       return {
         success: true,
@@ -835,7 +835,7 @@ export class TopicService {
         data: posts[0]
       };
     } catch (error) {
-      return this.unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应不是有效 JSON。');
+      return unexpectedResponse<TopicPost>(response.statusCode, response.challengeState, '站点保存编辑响应不是有效 JSON。');
     }
   }
 
@@ -850,15 +850,15 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<number>(response);
+      return forwardFailure<number>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应为空。');
+      return unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应为空。');
     }
     try {
       const wrapper: DiscourseBookmarkResponse = JSON.parse(response.data) as DiscourseBookmarkResponse;
       if (typeof wrapper.id !== 'number') {
-        return this.unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应缺少 id。');
+        return unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应缺少 id。');
       }
       return {
         success: true,
@@ -867,7 +867,7 @@ export class TopicService {
         data: wrapper.id
       };
     } catch (error) {
-      return this.unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应不是有效 JSON。');
+      return unexpectedResponse<number>(response.statusCode, response.challengeState, '站点添加书签响应不是有效 JSON。');
     }
   }
 
@@ -880,7 +880,7 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<boolean>(response);
+      return forwardFailure<boolean>(response);
     }
     // 删除本身已成功;尽力解析 topic_bookmarked,拿不到就返回 undefined 交由上层降级(不猜)。
     if (response.data === undefined) {
@@ -1160,7 +1160,7 @@ export class TopicService {
       referrer: referrer
     });
     if (!response.success) {
-      return this.forwardFailure<boolean>(response);
+      return forwardFailure<boolean>(response);
     }
     return {
       success: true,
@@ -1463,13 +1463,7 @@ export class TopicService {
     return isNaN(numberValue) ? 0 : numberValue;
   }
 
-  private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return forwardFailure<T>(response);
-  }
 
-  private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return unexpectedResponse<T>(statusCode, challengeState, message);
-  }
 
   /**
    * POST /posts 失败时的错误构造:优先把 Discourse 自己给的原因带上来。

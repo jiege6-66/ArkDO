@@ -301,10 +301,10 @@ export class DraftService {
   private async fetchPage(path: string): Promise<NetworkResult<DraftPage>> {
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure(response);
+      return forwardFailure<DraftPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点草稿响应为空。');
+      return unexpectedResponse<DraftPage>(response.statusCode, response.challengeState, '站点草稿响应为空。');
     }
 
     try {
@@ -329,7 +329,7 @@ export class DraftService {
         data: page
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点草稿响应不是有效 JSON。');
+      return unexpectedResponse<DraftPage>(response.statusCode, response.challengeState, '站点草稿响应不是有效 JSON。');
     }
   }
 
@@ -434,13 +434,5 @@ export class DraftService {
     // 折叠多余空行/空白
     text = text.replace(/\s+/g, ' ').trim();
     return text;
-  }
-
-  private forwardFailure(response: NetworkResult<string>): NetworkResult<DraftPage> {
-    return forwardFailure<DraftPage>(response);
-  }
-
-  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<DraftPage> {
-    return unexpectedResponse<DraftPage>(statusCode, challengeState, message);
   }
 }

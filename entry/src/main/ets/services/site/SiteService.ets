@@ -47,17 +47,17 @@ export class SiteService {
   async getSiteMetadata(): Promise<NetworkResult<SiteMetadata>> {
     const response: NetworkResult<string> = await this.bridge.getJson('/site.json');
     if (!response.success) {
-      return this.forwardFailure<SiteMetadata>(response);
+      return forwardFailure<SiteMetadata>(response);
     }
 
     if (response.data === undefined) {
-      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应为空。');
+      return unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应为空。');
     }
 
     try {
       const payload: DiscourseSiteResponse = JSON.parse(response.data) as DiscourseSiteResponse;
       if (!payload.categories) {
-        return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应缺少 categories。');
+        return unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应缺少 categories。');
       }
 
       return {
@@ -70,7 +70,7 @@ export class SiteService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应不是有效 JSON。');
+      return unexpectedResponse<SiteMetadata>(response.statusCode, response.challengeState, '站点信息响应不是有效 JSON。');
     }
   }
 
@@ -151,13 +151,5 @@ export class SiteService {
     }
     const normalized: string = value.replace('#', '').trim();
     return normalized.length > 0 ? normalized : fallback;
-  }
-
-  private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return forwardFailure<T>(response);
-  }
-
-  private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return unexpectedResponse<T>(statusCode, challengeState, message);
   }
 }

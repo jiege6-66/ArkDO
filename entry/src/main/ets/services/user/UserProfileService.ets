@@ -245,10 +245,10 @@ export class UserProfileService {
     const path: string = `/u/search/users?term=${encodeURIComponent(term)}&limit=${limit}`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<User[]>(response);
+      return forwardFailure<User[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应为空。');
+      return unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应为空。');
     }
     try {
       const payload: DiscourseUserSearchResponse = JSON.parse(response.data) as DiscourseUserSearchResponse;
@@ -279,24 +279,24 @@ export class UserProfileService {
         data: users
       };
     } catch (error) {
-      return this.unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应不是有效 JSON。');
+      return unexpectedResponse<User[]>(response.statusCode, response.challengeState, '站点用户搜索响应不是有效 JSON。');
     }
   }
 
   async getProfileDetail(username: string): Promise<NetworkResult<UserProfileDetail>> {
     const response: NetworkResult<string> = await this.bridge.getJson(`/u/${encodeURIComponent(username)}.json`);
     if (!response.success) {
-      return this.forwardFailure<UserProfileDetail>(response);
+      return forwardFailure<UserProfileDetail>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应为空。');
+      return unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应为空。');
     }
 
     try {
       const payload: DiscourseUserResponse = JSON.parse(response.data) as DiscourseUserResponse;
       const sourceUser: DiscourseUserDetail | undefined = payload.user;
       if (!sourceUser || typeof sourceUser.id !== 'number' || typeof sourceUser.username !== 'string') {
-        return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应字段无效。');
+        return unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应字段无效。');
       }
 
       const detail: UserProfileDetail = {
@@ -396,24 +396,24 @@ export class UserProfileService {
         data: detail
       };
     } catch (error) {
-      return this.unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应不是有效 JSON。');
+      return unexpectedResponse<UserProfileDetail>(response.statusCode, response.challengeState, '站点用户资料响应不是有效 JSON。');
     }
   }
 
   async getSummary(username: string): Promise<NetworkResult<UserSummary>> {
     const response: NetworkResult<string> = await this.bridge.getJson(`/u/${encodeURIComponent(username)}/summary.json`);
     if (!response.success) {
-      return this.forwardFailure<UserSummary>(response);
+      return forwardFailure<UserSummary>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应为空。');
+      return unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应为空。');
     }
 
     try {
       const payload: DiscourseSummaryResponse = JSON.parse(response.data) as DiscourseSummaryResponse;
       const sourceSummary: DiscourseUserSummary | undefined = payload.user_summary;
       if (!sourceSummary) {
-        return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应缺少 user_summary。');
+        return unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应缺少 user_summary。');
       }
 
       const stats: UserSummaryStats = {
@@ -444,7 +444,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应不是有效 JSON。');
+      return unexpectedResponse<UserSummary>(response.statusCode, response.challengeState, '站点用户摘要响应不是有效 JSON。');
     }
   }
 
@@ -607,10 +607,10 @@ export class UserProfileService {
       `/user_actions.json?offset=${offset}&username=${encodeURIComponent(username)}&filter=${filter}`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<UserActivityPage>(response);
+      return forwardFailure<UserActivityPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应为空。');
+      return unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应为空。');
     }
 
     try {
@@ -633,7 +633,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应不是有效 JSON。');
+      return unexpectedResponse<UserActivityPage>(response.statusCode, response.challengeState, '站点用户活动响应不是有效 JSON。');
     }
   }
 
@@ -643,10 +643,10 @@ export class UserProfileService {
     const path: string = `/user-badges/${encodeURIComponent(username)}.json?grouped=true`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<UserBadgeGroup[]>(response);
+      return forwardFailure<UserBadgeGroup[]>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应为空。');
+      return unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应为空。');
     }
 
     try {
@@ -658,7 +658,7 @@ export class UserProfileService {
         data: this.mapUserBadges(payload.badges, payload.badge_types, payload.user_badges)
       };
     } catch (error) {
-      return this.unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应不是有效 JSON。');
+      return unexpectedResponse<UserBadgeGroup[]>(response.statusCode, response.challengeState, '站点徽章响应不是有效 JSON。');
     }
   }
 
@@ -669,10 +669,10 @@ export class UserProfileService {
       `/solution/by_user.json?username=${encodeURIComponent(username)}&offset=${offset}&limit=${SOLVED_PAGE_SIZE}`;
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure<SolvedPostPage>(response);
+      return forwardFailure<SolvedPostPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应为空。');
+      return unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应为空。');
     }
 
     try {
@@ -695,7 +695,7 @@ export class UserProfileService {
         }
       };
     } catch (error) {
-      return this.unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应不是有效 JSON。');
+      return unexpectedResponse<SolvedPostPage>(response.statusCode, response.challengeState, '站点解决方案响应不是有效 JSON。');
     }
   }
 
@@ -908,13 +908,5 @@ export class UserProfileService {
 
   private asCount(value?: number): number {
     return typeof value === 'number' && value >= 0 ? value : 0;
-  }
-
-  private forwardFailure<T>(response: NetworkResult<string>): NetworkResult<T> {
-    return forwardFailure<T>(response);
-  }
-
-  private unexpectedResponse<T>(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<T> {
-    return unexpectedResponse<T>(statusCode, challengeState, message);
   }
 }

@@ -95,17 +95,17 @@ export class BookmarkService {
   private async fetchPage(path: string): Promise<NetworkResult<BookmarkPage>> {
     const response: NetworkResult<string> = await this.bridge.getJson(path);
     if (!response.success) {
-      return this.forwardFailure(response);
+      return forwardFailure<BookmarkPage>(response);
     }
     if (response.data === undefined) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应为空。');
+      return unexpectedResponse<BookmarkPage>(response.statusCode, response.challengeState, '站点书签响应为空。');
     }
 
     try {
       const payload: DiscourseBookmarkListResponse = JSON.parse(response.data) as DiscourseBookmarkListResponse;
       const list: DiscourseBookmarkList | undefined = payload.user_bookmark_list;
       if (!list) {
-        return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应缺少 user_bookmark_list。');
+        return unexpectedResponse<BookmarkPage>(response.statusCode, response.challengeState, '站点书签响应缺少 user_bookmark_list。');
       }
 
       const sourceBookmarks: DiscourseBookmark[] = list.bookmarks ? list.bookmarks : [];
@@ -128,7 +128,7 @@ export class BookmarkService {
         data: page
       };
     } catch (error) {
-      return this.unexpectedResponse(response.statusCode, response.challengeState, '站点书签响应不是有效 JSON。');
+      return unexpectedResponse<BookmarkPage>(response.statusCode, response.challengeState, '站点书签响应不是有效 JSON。');
     }
   }
 
@@ -218,13 +218,5 @@ export class BookmarkService {
 
   static decodeEntities(input: string): string {
     return HtmlText.decodeEntities(input);
-  }
-
-  private forwardFailure(response: NetworkResult<string>): NetworkResult<BookmarkPage> {
-    return forwardFailure<BookmarkPage>(response);
-  }
-
-  private unexpectedResponse(statusCode: number, challengeState: ChallengeState, message: string): NetworkResult<BookmarkPage> {
-    return unexpectedResponse<BookmarkPage>(statusCode, challengeState, message);
   }
 }
