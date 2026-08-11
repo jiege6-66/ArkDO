@@ -29,6 +29,10 @@ const REPORT_BATCH_INTERVAL_MS: number = 5000;
 // 这个上限只是兜底 —— 万一过盾信号没来(盾自己好了、用户从别处过的盾、协调器压根没被触发),
 // 也不至于把积压的批次一直扣着。取值短于 NEXT_FLUSH_MS,让它先于 60s 常规兜底生效。
 const CHALLENGE_HOLD_MAX_MS: number = 45 * 1000;
+// 不可重试失败(非 ALLOWED_AJAX_FAILURES,如 404/422)之后的静默期。见 handleFailure ——
+// 抹账解开夹缝态的同时必须压住重发节奏,否则会退化成每 5 秒打一次注定失败的请求。
+// 取 60s 与 NEXT_FLUSH_MS 同量级:恰好是抹账之前那套行为的实际重试节奏。
+const NON_RETRYABLE_HOLD_MS: number = 60 * 1000;
 
 export type ReportTimingsFn =
   (topicId: number, timings: Map<number, number>, topicTime: number) => Promise<NetworkResult<string>>;
@@ -70,6 +74,9 @@ export class ReadingTracker {
   // 上报成功后该楼进 readPosts,由 readPosts 过滤接管(不再起闪)。
   private seenBlinking: Set<number> = new Set();
   private intervalId: number = -1;
+  // 在飞的「呼吸最短可见时长」定时器(afterMinReporting)。只影响视觉收尾,但回调会写
+  // 楼层组件状态,故须在 reset 时清掉,见 afterMinReporting。
+  private pendingVisualTimers: Set<number> = new Set();
   // running:start 到 stop 之间为 true(即使后台暂停也保持 true);
   // paused:前台恢复/后台暂停的开关,决定 tick 循环是否在跑。
   private running: boolean = false;
@@ -243,13 +250,25 @@ export class ReadingTracker {
     this.lastReportAt = now;
     this.seenBlinking.clear();
     this.deferSends = false;
+    // 还没到点的「呼吸最短可见时长」定时器:它们的回调会去改楼层组件状态,而 reset 意味着
+    // 这一轮已经结束(换帖或离页),再让它们跑就是往一个不存在的页面上写。
+    this.pendingVisualTimers.forEach((timerId: number) => {
+      clearTimeout(timerId);
+    });
+    this.pendingVisualTimers.clear();
   }
 
   private tick(): void {
     const now: number = Date.now();
 
     // 长时间没滚动就停止计时(防挂机误读)。
+    // 停的只是「继续累加时长」,不是「把已经攒好的批次也压着不发」—— 队列里可能正躺着一批
+    // 因退避/撞盾挂起而没发出去的账,挂机 3 分钟后就再也没有别的时机去推它了(tick 是唯一的
+    // 驱动源),蓝点会一直留着。故先给一次发送机会再返回。
     if (now - this.lastScrolled > PAUSE_UNLESS_SCROLLED_MS) {
+      if (!this.inProgress) {
+        this.sendNextConsolidatedTiming();
+      }
       return;
     }
 
@@ -427,9 +446,15 @@ export class ReadingTracker {
     const wait: number = MIN_REPORTING_VISIBLE_MS - (Date.now() - startedAt);
     if (wait <= 0) {
       action();
-    } else {
-      setTimeout(action, wait);
+      return;
     }
+    // 句柄要留着:action 会经 onReporting/onRead 回调去改楼层组件的状态,而页面可能在这
+    // 1.4 秒内就被销毁了(用户上报刚发出就返回)。reset() 会把这些还没到点的定时器清掉。
+    const timerId: number = setTimeout(() => {
+      this.pendingVisualTimers.delete(timerId);
+      action();
+    }, wait);
+    this.pendingVisualTimers.add(timerId);
   }
 
   // stop 时把队列里剩余的批次全部发出去(忽略 inProgress/退避门闩),确保离开页面前的已读不丢。
@@ -462,6 +487,27 @@ export class ReadingTracker {
   //
   // 为什么不能就地重试:盾没过之前每次都白发,还会继续喂 CF 的速率盾。所以退回队列后压住不发,
   // 由过盾成功的信号来解闸。
+  /**
+   * 丢批时把这批楼的记账一并回滚。
+   *
+   * flush() 是**先把这段时长记进 totalTimings 再发请求**的,所以丢批之后这些楼会卡在
+   * 「记过账但从没上报成功」的夹缝态:rush 的判定条件 `alreadyTotalled === 0` 永远不再成立,
+   * 它们无论在屏多久都触发不了「看到新楼即发」,只能等 60s 兜底、或等用户滚出一个全新的楼
+   * 顺带把它们捎上(flush 是全量打包的)。表现就是蓝点迟迟不消。
+   *
+   * handleChallenge 那条路是靠「退回队列」避开这个坑的(见它的注释);而不可重试的这条路
+   * 本来就不打算重发,只能把账抹掉,让这些楼回到「没被计过时」的状态重新参与 rush。
+   * 抹的只是 totalTimings —— readPosts 不动,已确认已读的楼不该因此重新上报。
+   */
+  private forgetTotals(timings: Map<number, number>): void {
+    timings.forEach((_ms: number, postNumber: number) => {
+      this.totalTimings.delete(postNumber);
+    });
+    // 刻意**不**动 seenBlinking:它记的是「这楼的蓝点已经起过闪」,与「要不要重发」是两件事。
+    // 一起删的话,下个 tick 会把同一批楼重新点亮呼吸态,1.4 秒后又被 afterMinReporting 关掉,
+    // 每一轮重试都闪一次。
+  }
+
   private handleChallenge(item: ConsolidatedTiming): void {
     this.consolidate(item.timings, item.topicTime);
     this.challengeHoldUntil = Date.now() + CHALLENGE_HOLD_MAX_MS;
@@ -472,6 +518,18 @@ export class ReadingTracker {
     // 仅对允许的状态码退避重试并重新入队;其它(如 403 challenge)直接丢弃这批。
     if (!ALLOWED_AJAX_FAILURES.includes(statusCode)) {
       Log.i(`${LOG_TAG} report dropped (non-retryable) topicId=${item.topicId} status=${statusCode} posts=${item.timings.size}`);
+      // 抹账 + 压闸,两件事必须一起做。
+      //
+      // 抹账是为了解开夹缝态(见 forgetTotals):不抹的话这些楼「记过账但从没上报成功」,
+      // rush 的 alreadyTotalled === 0 永远不成立,蓝点只能干等。
+      //
+      // 但 totalTimings 里那条非零记录**同时还兼着节流闸** —— 只抹不压的话,下一个 tick
+      // rush 立刻重新成立,配合 REPORT_BATCH_INTERVAL_MS(5s)就变成每 5 秒对着一个注定失败的
+      // 端点打一次,而且只要用户还停在这一页就不会停。频次比原先的 60s 兜底高 12 倍,
+      // 打的还是注释里反复强调不能猛打的 /topics/timings(会喂 CF 的速率盾)。
+      // 故显式压一个与原先兜底同量级的静默期,把「解开死区」和「别打穿速率盾」两头都占住。
+      this.forgetTotals(item.timings);
+      this.blockSendingTill = Date.now() + NON_RETRYABLE_HOLD_MS;
       return;
     }
     const delay: number | undefined = AJAX_FAILURE_DELAYS[this.ajaxFailures];
