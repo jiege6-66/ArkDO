@@ -8,6 +8,9 @@ const MAX_CONCURRENCY: number = 5;
 const MAX_CACHE_ENTRIES: number = 160;
 // 头像本身只有几十到几百 px,不需要降采样,原尺寸解码。
 const MAX_PIXEL_SIDE: number = 0;
+// 字节预算。头像天生小(120px 见方约 58 KB),160 条正常也就几 MB;这个上限是给
+// 「站点把头像配成了大图」这种意外兜底,正常情况下永远碰不到,先触发的是条数上限。
+const MAX_CACHE_BYTES: number = 48 * 1024 * 1024;
 
 /**
  * 头像 PixelMap 缓存。原生 Image 走系统 netstack 会被 SNI 封锁(TLS 握手 RST),
@@ -19,7 +22,7 @@ export class AvatarImageCache extends BridgeImageLoader {
   private static instance: AvatarImageCache = new AvatarImageCache();
 
   constructor() {
-    super(LOG_TAG, MAX_CONCURRENCY, MAX_CACHE_ENTRIES, MAX_PIXEL_SIDE);
+    super(LOG_TAG, MAX_CONCURRENCY, MAX_CACHE_ENTRIES, MAX_PIXEL_SIDE, MAX_CACHE_BYTES);
   }
 
   static getInstance(): AvatarImageCache {

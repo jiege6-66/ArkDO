@@ -8,6 +8,10 @@ const MAX_CONCURRENCY: number = 3;
 const MAX_CACHE_ENTRIES: number = 24;
 // 解码长边上限(px):够手机/平板全屏放大看,又不至于把 4000px 原图整幅解进内存。
 const MAX_PIXEL_SIDE: number = 2048;
+// 字节预算。这里才是真正起作用的那道闸:24 条 × 2048² × 4B 理论上能到 400 MB,
+// 而这条路只在受限网络下变成主路径 —— 也就是它最可能被用满的时候。
+// 96 MB 够放下十来张常见尺寸的正文图,又不至于让缓存本身成为 OOM 的来源。
+const MAX_CACHE_BYTES: number = 96 * 1024 * 1024;
 
 /**
  * 正文图片的 PixelMap 缓存(仅在原生 Image 直载失败、或该域名已被判定为"原生走不通"时才用)。
@@ -18,7 +22,7 @@ export class ContentImageCache extends BridgeImageLoader {
   private static instance: ContentImageCache = new ContentImageCache();
 
   constructor() {
-    super(LOG_TAG, MAX_CONCURRENCY, MAX_CACHE_ENTRIES, MAX_PIXEL_SIDE);
+    super(LOG_TAG, MAX_CONCURRENCY, MAX_CACHE_ENTRIES, MAX_PIXEL_SIDE, MAX_CACHE_BYTES);
   }
 
   static getInstance(): ContentImageCache {

@@ -19,20 +19,28 @@ export class BridgeImageLoader {
   private readonly maxCacheEntries: number;
   // 解码后长边上限(px),0 = 原尺寸解码。正文大图动辄 4000px 宽,整幅解进内存是几十 MB。
   private readonly maxPixelSide: number;
+  // 已解码缓存的字节预算。见 put() —— 只按条数限容会让内存占用完全取决于图有多大。
+  private readonly maxCacheBytes: number;
   private readonly cacheLogStep: number = 20;
 
   private bridge?: ArkWebNetworkBridge;
   private cache: Map<string, image.PixelMap> = new Map();
+  // 与 cache 同键同生命周期:记每张图解码后占多少字节,用于维护 cacheBytes(PixelMap 被淘汰后
+  // 就问不到尺寸了,必须在入缓存时记下来)。
+  private cacheBytes: Map<string, number> = new Map();
+  private totalCacheBytes: number = 0;
   private inflight: Map<string, Promise<image.PixelMap | undefined>> = new Map();
   private active: number = 0;
   private queue: Array<() => void> = [];
   private lastLoggedCacheBucket: number = -1;
 
-  constructor(logTag: string, maxConcurrency: number, maxCacheEntries: number, maxPixelSide: number) {
+  constructor(logTag: string, maxConcurrency: number, maxCacheEntries: number, maxPixelSide: number,
+    maxCacheBytes: number) {
     this.logTag = logTag;
     this.maxConcurrency = maxConcurrency;
     this.maxCacheEntries = maxCacheEntries;
     this.maxPixelSide = maxPixelSide;
+    this.maxCacheBytes = maxCacheBytes;
   }
 
   /** 注入 host webview 的 bridge(唯一联通 host 文档的实例)。在 host 就绪处调用一次。 */
@@ -67,7 +75,10 @@ export class BridgeImageLoader {
   }
 
   debugSnapshot(): string {
-    return `cache=${this.cache.size}/${this.maxCacheEntries} inflight=${this.inflight.size} active=${this.active} queue=${this.queue.length}`;
+    const usedMb: string = (this.totalCacheBytes / (1024 * 1024)).toFixed(1);
+    const capMb: string = (this.maxCacheBytes / (1024 * 1024)).toFixed(0);
+    return `cache=${this.cache.size}/${this.maxCacheEntries} bytes=${usedMb}/${capMb}MB ` +
+      `inflight=${this.inflight.size} active=${this.active} queue=${this.queue.length}`;
   }
 
   /** 取图 PixelMap:命中缓存直接返回;否则经 host webview 取字节并解码。失败返回 undefined。 */
@@ -153,18 +164,50 @@ export class BridgeImageLoader {
     return await source.createPixelMap({ desiredSize: desired });
   }
 
+  /**
+   * 入缓存并按「条数」与「字节数」双重限容。
+   *
+   * 只按条数限容是不够的:正文图缓存 24 条 × 解码长边 2048px,最坏情况
+   * 24 × 2048 × 2048 × 4B ≈ 400 MB。而这条路恰恰只在受限网络下才是主路径(原生 Image 直载
+   * 失败时的兜底),也就是它最可能被用满的时候。条数上限仍然保留 —— 它挡的是「很多张小图」,
+   * 字节上限挡的是「几张巨图」,两者挡的不是同一种失控。
+   *
+   * 淘汰仍是插入序(FIFO)而非 LRU:load() 命中缓存时不重新插入。列表是单向滚动的,
+   * 插入序与访问序基本一致,为此多维护一套访问序不划算。
+   */
   private put(url: string, pixelMap: image.PixelMap): void {
-    let evicted: boolean = false;
-    if (this.cache.size >= this.maxCacheEntries) {
-      const oldest: string | undefined = this.cache.keys().next().value;
-      if (oldest !== undefined) {
-        // 只移除引用不 release：被淘汰的图可能仍绑定在某个 Image 上,release 会崩溃,交给 GC。
-        this.cache.delete(oldest);
-        evicted = true;
-      }
-    }
+    const bytes: number = BridgeImageLoader.pixelBytesOf(pixelMap);
     this.cache.set(url, pixelMap);
-    this.logCacheStatsIfNeeded(evicted);
+    this.cacheBytes.set(url, bytes);
+    this.totalCacheBytes += bytes;
+
+    let evicted: number = 0;
+    // 至少留一条:哪怕单张就超预算,也不能把刚存进来的这张立刻淘汰掉(否则等于不缓存)。
+    while (this.cache.size > 1 &&
+      (this.cache.size > this.maxCacheEntries || this.totalCacheBytes > this.maxCacheBytes)) {
+      const oldest: string | undefined = this.cache.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      // 只移除引用不 release：被淘汰的图可能仍绑定在某个 Image 上,release 会崩溃,交给 GC。
+      this.cache.delete(oldest);
+      this.totalCacheBytes -= this.cacheBytes.get(oldest) ?? 0;
+      this.cacheBytes.delete(oldest);
+      evicted++;
+    }
+    if (this.totalCacheBytes < 0) {
+      this.totalCacheBytes = 0;
+    }
+    this.logCacheStatsIfNeeded(evicted > 0);
+  }
+
+  // 解码后占用的字节数。取不到尺寸时按 0 计(宁可少算也不要因为异常把缓存整个停掉)。
+  private static pixelBytesOf(pixelMap: image.PixelMap): number {
+    try {
+      return pixelMap.getPixelBytesNumber();
+    } catch (error) {
+      return 0;
+    }
   }
 
   private logCacheStatsIfNeeded(evicted: boolean): void {
