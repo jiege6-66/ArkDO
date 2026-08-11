@@ -55,10 +55,35 @@ export class PostDataSource implements IDataSource {
       return 0;
     }
     fresh.sort((a: TopicPost, b: TopicPost) => a.postNumber - b.postNumber);
+
+    // 快路径:整批落在同一个插入点(fresh 是 stream 上一段连续区间时恒成立,也就是几乎总是)。
+    // 一次连续 ADD,与改造前逐字节等价,不影响 maintainVisibleContentPosition。
     const insertAt: number = this.insertIndexForPostNumber(fresh[fresh.length - 1].postNumber);
-    this.posts = this.posts.slice(0, insertAt).concat(fresh).concat(this.posts.slice(insertAt));
-    this.notifyAdd(insertAt, fresh.length);
-    return fresh.length;
+    if (this.insertIndexForPostNumber(fresh[0].postNumber) === insertAt) {
+      this.posts = this.posts.slice(0, insertAt).concat(fresh).concat(this.posts.slice(insertAt));
+      this.notifyAdd(insertAt, fresh.length);
+      return fresh.length;
+    }
+
+    // 慢路径:这一批跨过了已加载的楼(例如实时新楼的去抖窗口里同时来了一条补拉的旧楼和一条
+    // 新楼)。按最大楼号一次性整块插会让数组失序,而下游的 scrubber 定位、已读上报、
+    // findIndexAtOrAfterPostNumber 全都假定按楼号递增。故拆成若干段,每段各自落到自己的
+    // 插入点 —— 每次通知仍是一段连续 ADD,位置补偿不受影响。
+    let added: number = 0;
+    let runStart: number = 0;
+    while (runStart < fresh.length) {
+      const target: number = this.insertIndexForPostNumber(fresh[runStart].postNumber);
+      let runEnd: number = runStart + 1;
+      while (runEnd < fresh.length && this.insertIndexForPostNumber(fresh[runEnd].postNumber) === target) {
+        runEnd++;
+      }
+      const run: TopicPost[] = fresh.slice(runStart, runEnd);
+      this.posts = this.posts.slice(0, target).concat(run).concat(this.posts.slice(target));
+      this.notifyAdd(target, run.length);
+      added += run.length;
+      runStart = runEnd;
+    }
+    return added;
   }
 
   // 有序数组中首个楼号 > 目标的下标(该连续块的落点);全部 <= 目标时插到末尾。

@@ -29,7 +29,7 @@ export class SiteUrl {
     return host.length > 0 && host.indexOf('.') > 0;
   }
 
-  /** 取 host(不含协议/路径/端口);解析不出时返回空串。 */
+  /** 取 host(不含协议/用户信息/路径/端口);解析不出时返回空串。 */
   static hostOf(url: string): string {
     const trimmed: string = url.trim();
     const schemeEnd: number = trimmed.indexOf('://');
@@ -37,15 +37,35 @@ export class SiteUrl {
       return '';
     }
     let rest: string = trimmed.substring(schemeEnd + 3);
-    const slash: number = rest.indexOf('/');
-    if (slash >= 0) {
-      rest = rest.substring(0, slash);
+    // 先切掉 path/query/fragment,再处理 userinfo —— 顺序不能反:`?`、`#` 之后出现的 `@`
+    // (如 https://example.com/x?a=b@c)不是 userinfo 分隔符,先剥 userinfo 会把 host 切没。
+    const authorityEnd: number = SiteUrl.firstIndexOfAny(rest, ['/', '?', '#']);
+    if (authorityEnd >= 0) {
+      rest = rest.substring(0, authorityEnd);
+    }
+    // userinfo@host:去掉 `@` 及其之前的部分。不去的话 `https://linux.do@evil.com` 的 host
+    // 会被算成 `linux.do@evil.com` —— 它照样含点、能过 isValid,于是被当成一个合法站点存下来。
+    const at: number = rest.lastIndexOf('@');
+    if (at >= 0) {
+      rest = rest.substring(at + 1);
     }
     const colon: number = rest.indexOf(':');
     if (colon >= 0) {
       rest = rest.substring(0, colon);
     }
     return rest;
+  }
+
+  // 返回若干候选字符里最靠前的那个的下标;都没有则 -1。
+  private static firstIndexOfAny(text: string, candidates: string[]): number {
+    let best: number = -1;
+    for (let index: number = 0; index < candidates.length; index++) {
+      const found: number = text.indexOf(candidates[index]);
+      if (found >= 0 && (best < 0 || found < best)) {
+        best = found;
+      }
+    }
+    return best;
   }
 
   /**
