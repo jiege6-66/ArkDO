@@ -159,15 +159,6 @@ jobs:
           print(f"Published HAP: ArkDO-unsigned.hap ({Path('ArkDO-unsigned.hap').stat().st_size} bytes)")
           PY
 
-      - name: Upload Actions artifact
-        if: steps.source.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ArkDO-unsigned-${{ steps.source.outputs.short_sha }}
-          path: ArkDO-unsigned.hap
-          if-no-files-found: error
-          retention-days: 30
-
       - name: Publish GitHub pre-release
         if: steps.source.outputs.skip != 'true'
         shell: bash
