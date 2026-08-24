@@ -1,0 +1,185 @@
+name: Build and publish unsigned ArkDO HAP
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build upstream ArkDO and publish HAP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_REPO: EnjoySR/ArkDO
+
+    steps:
+      - name: Checkout upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: EnjoySR/ArkDO
+          ref: main
+          fetch-depth: 1
+
+      - name: Detect upstream commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_sha="$(git rev-parse HEAD)"
+          short_sha="${upstream_sha:0:12}"
+          release_tag="upstream-${short_sha}"
+
+          echo "sha=$upstream_sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Already published: $release_tag"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "New upstream commit: $upstream_sha"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.source.outputs.skip != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Linux build dependency
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev
+
+      - name: Set up HarmonyOS CLI tools
+        if: steps.source.outputs.skip != 'true'
+        uses: ErBWs/setup-ohos@v2
+        with:
+          version: 6.1.1.280
+          cache: true
+
+      - name: Configure HarmonyOS SDK paths
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "DEVECO_SDK_HOME=$HOME/ohos-sdk/command-line-tools/sdk" >> "$GITHUB_ENV"
+          echo "OHOS_SDK_HOME=$HOME/ohos-sdk/command-line-tools/sdk/default/openharmony" >> "$GITHUB_ENV"
+          echo "NODE_HOME=$HOME/ohos-sdk/command-line-tools/tool/node" >> "$GITHUB_ENV"
+
+      - name: Check HarmonyOS toolchain
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          node --version
+          hvigorw --version || hvigorw -v
+          ohpm --version || ohpm -v
+
+      - name: Install project dependencies
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ohpm config set registry https://ohpm.openharmony.cn/ohpm/
+          ohpm install --all
+          (
+            cd entry
+            ohpm install --all
+          )
+
+      - name: Remove signing only for this CI build
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp build-profile.json5 "$RUNNER_TEMP/build-profile.json5.original"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("build-profile.json5")
+          text = path.read_text(encoding="utf-8")
+
+          signing_start = text.find('    "signingConfigs": [')
+          if signing_start >= 0:
+              products_start = text.find('    "products": [', signing_start)
+              if products_start < 0:
+                  raise SystemExit("signingConfigs found but products block is missing")
+              text = text[:signing_start] + text[products_start:]
+
+          text = re.sub(
+              r'^\s*"signingConfig"\s*:\s*"[^"]+"\s*,\s*\n',
+              '',
+              text,
+              flags=re.MULTILINE,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Build unsigned HAP
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          hvigorw clean --no-daemon
+          hvigorw assembleHap \
+            --mode module \
+            -p product=default \
+            -p buildMode=debug \
+            --no-daemon
+
+      - name: Verify and normalize HAP
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          outputs = sorted(Path("entry/build").rglob("*.hap"))
+          if not outputs:
+              raise SystemExit("No HAP file was generated")
+
+          unsigned = [p for p in outputs if "unsigned" in p.name.lower()]
+          source = unsigned[0] if unsigned else outputs[0]
+          shutil.copy2(source, "ArkDO-unsigned.hap")
+          print(f"Source HAP: {source}")
+          print(f"Published HAP: ArkDO-unsigned.hap ({Path('ArkDO-unsigned.hap').stat().st_size} bytes)")
+          PY
+
+      - name: Upload Actions artifact
+        if: steps.source.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArkDO-unsigned-${{ steps.source.outputs.short_sha }}
+          path: ArkDO-unsigned.hap
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub pre-release
+        if: steps.source.outputs.skip != 'true'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SHORT_SHA: ${{ steps.source.outputs.short_sha }}
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" ArkDO-unsigned.hap \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "ArkDO unsigned $SHORT_SHA" \
+            --prerelease \
+            --notes "自动构建的未签名 HAP。\n\n上游源码：https://github.com/$UPSTREAM_REPO/commit/$SOURCE_SHA\n上游 commit：$SOURCE_SHA\n\n此文件不能直接安装到真机，请先使用你自己的 HarmonyOS 签名资料签名。"
